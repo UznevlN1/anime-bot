@@ -1562,9 +1562,23 @@ async def daily_report_task():
             pass
 
 # ===================== ISHGA TUSHIRISH =====================
+from aiohttp import web
+
+async def health_check(request):
+    return web.Response(text="Bot ishlayapti!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+
 async def main():
     db.init_db()
     logger.info("Bot ishga tushmoqda...")
+    await start_web_server()
     asyncio.create_task(daily_report_task())
     await dp.start_polling(bot)
 
