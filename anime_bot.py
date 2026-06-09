@@ -11,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramForbiddenError
+from aiohttp import web
 
 import database as db
 
@@ -37,6 +38,7 @@ class AddAnime(StatesGroup):
     country = State()
     genre = State()
     description = State()
+    language = State()
     media_type = State()
     videos = State()
 
@@ -52,18 +54,15 @@ class EditAnime(StatesGroup):
     new_value = State()
 
 class DeleteAnime(StatesGroup):
-    choose_method = State()
     search_query = State()
     confirm = State()
 
 class EditEpisode(StatesGroup):
-    choose_method = State()
     search_query = State()
     choose_episode = State()
     new_video = State()
 
 class DeleteEpisode(StatesGroup):
-    choose_method = State()
     search_query = State()
     choose_episode = State()
 
@@ -75,9 +74,6 @@ class BroadcastState(StatesGroup):
     confirm = State()
 
 class AddChannelState(StatesGroup):
-    channel = State()
-
-class DelChannelState(StatesGroup):
     channel = State()
 
 class SearchState(StatesGroup):
@@ -167,7 +163,7 @@ def admin_keyboard():
             InlineKeyboardButton(text="📅 Hisobot", callback_data="admin_report"),
         ],
         [
-            InlineKeyboardButton(text="🔔 Yangilanish", callback_data="admin_version"),
+            InlineKeyboardButton(text="👑 Admin qo'shish", callback_data="admin_add_admin"),
             InlineKeyboardButton(text="📖 Qo'llanma", callback_data="admin_help"),
         ],
     ])
@@ -230,6 +226,7 @@ def anime_card_text(anime):
         f"<b>{anime['title']}</b>\n\n"
         f"📅 Yil: {anime['year']}\n"
         f"🌍 Davlat: {anime['country']}\n"
+        f"🗣 Til: {anime.get('language', 'Nomalum')}\n"
         f"🎭 Janr: {anime['genre']}\n\n"
         f"📝 {anime['description']}"
     )
@@ -302,39 +299,49 @@ async def start_handler(message: Message, state: FSMContext):
         await message.answer("🚫 Siz bloklandingiz.")
         return
 
-    subscribed = await check_subscription(user.id)
-    if not subscribed:
-        await message.answer(
-            "📢 Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
-            reply_markup=sub_keyboard()
-        )
-        return
-
     if not u:
-        # Yangi foydalanuvchi - telefon so'rash
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
+        # Yangi foydalanuvchi - ogohlantirish chiqarish
         await message.answer(
-            "🌸 AniFilm Bot ga xush kelibsiz!\n\n"
-            "⚠️ <b>Diqqat:</b> Botni bloklasangiz — avtomatik bloklanasiz!\n\n"
-            "📱 Botdan foydalanish uchun telefon raqamingizni yuboring:",
-            reply_markup=kb,
+            "🌸 <b>AniFilm Bot</b> ga xush kelibsiz!\n\n"
+            "⚠️ <b>Diqqat:</b> Botni bloklasangiz yoki chiqib ketsangiz — "
+            "avtomatik bloklanasiz va botdan foydalana olmaysiz!\n\n"
+            "📌 Iltimos, quyidagi qoidalarni o'qib chiqing va qabul qiling.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Qabul qilaman", callback_data="accept_rules")]
+            ]),
             parse_mode="HTML"
         )
-        await state.set_state(RegState.phone)
     else:
-        # Mavjud foydalanuvchi
+        # Mavjud foydalanuvchi - obuna tekshirish
+        subscribed = await check_subscription(user.id)
+        if not subscribed:
+            await message.answer(
+                "📢 Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
+                reply_markup=sub_keyboard()
+            )
+            return
         await message.answer(
             f"👋 Salom, {user.full_name}!\n"
-            f"🏌 AniFilm Bot ga xush kelibsiz\n\n"
+            f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
             f"👇 Nimani qidiryapsiz?",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=main_keyboard()
         )
-        await message.answer("📋 Bosh menu:", reply_markup=main_keyboard())
 
+# Qabul qilaman bosilganda
+@dp.callback_query(F.data == "accept_rules")
+async def accept_rules(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text(
+        "📱 Botdan foydalanish uchun telefon raqamingizni yuboring:"
+    )
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await call.message.answer("👇 Tugmani bosing:", reply_markup=kb)
+    await state.set_state(RegState.phone)
+
+# Raqam yuborilganda
 @dp.message(RegState.phone, F.contact)
 async def reg_phone(message: Message, state: FSMContext):
     await state.clear()
@@ -363,6 +370,18 @@ async def reg_phone(message: Message, state: FSMContext):
         except Exception:
             pass
 
+    # Klaviaturani yopish
+    await message.answer("✅ Ro'yxatdan o'tdingiz!", reply_markup=ReplyKeyboardRemove())
+
+    # Obuna tekshirish
+    subscribed = await check_subscription(user.id)
+    if not subscribed:
+        await message.answer(
+            "📢 Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
+            reply_markup=sub_keyboard()
+        )
+        return
+
     await message.answer(
         f"👋 Salom, {user.full_name}!\n"
         f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
@@ -374,28 +393,12 @@ async def reg_phone(message: Message, state: FSMContext):
 async def check_sub_handler(call: CallbackQuery, state: FSMContext):
     subscribed = await check_subscription(call.from_user.id)
     if subscribed:
-        u = db.get_user(call.from_user.id)
-        if not u:
-            kb = ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
-                resize_keyboard=True,
-                one_time_keyboard=True
-            )
-            await call.message.edit_text(
-                "🌸 AniFilm Bot ga xush kelibsiz!\n\n"
-                "⚠️ <b>Diqqat:</b> Botni bloklasangiz — avtomatik bloklanasiz!\n\n"
-                "📱 Botdan foydalanish uchun telefon raqamingizni yuboring:",
-                parse_mode="HTML"
-            )
-            await call.message.answer("📱 Telefon raqamingizni yuboring:", reply_markup=kb)
-            await state.set_state(RegState.phone)
-        else:
-            await call.message.edit_text(
-                f"👋 Salom, {call.from_user.full_name}!\n"
-                f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
-                f"👇 Nimani qidiryapsiz?",
-                reply_markup=main_keyboard()
-            )
+        await call.message.edit_text(
+            f"👋 Salom, {call.from_user.full_name}!\n"
+            f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
+            f"👇 Nimani qidiryapsiz?",
+            reply_markup=main_keyboard()
+        )
     else:
         await call.answer("❌ Hali obuna bolmadingiz!", show_alert=True)
 
@@ -419,12 +422,6 @@ async def user_blocked_bot(event: ChatMemberUpdated):
         )
     except Exception:
         pass
-
-# ===================== /VERSION =====================
-@dp.message(Command("version"))
-async def version_handler(message: Message):
-    version = db.get_setting("bot_version") or "1.0.0"
-    await message.answer(f"🤖 Bot versiyasi: {version}")
 
 # ===================== BOSH MENU =====================
 @dp.callback_query(F.data == "main_menu")
@@ -518,7 +515,7 @@ async def anime_detail(call: CallbackQuery):
         return
     try:
         anime_id = int(parts[1])
-    except:
+    except Exception:
         return
     anime = db.get_anime(anime_id)
     if not anime:
@@ -574,7 +571,6 @@ async def episode_handler(call: CallbackQuery):
         await call.answer("❌ Topilmadi", show_alert=True)
         return
     protect = db.get_setting("content_protect") == "1"
-    anime = db.get_anime(ep["anime_id"])
     await bot.copy_message(
         call.message.chat.id,
         STORAGE_CHANNEL,
@@ -592,7 +588,7 @@ async def random_handler(call: CallbackQuery):
     db.increment_views(anime["id"])
     try:
         await call.message.delete()
-    except:
+    except Exception:
         pass
     await send_anime_card(call.message.chat.id, anime)
 
@@ -617,10 +613,7 @@ async def admin_add(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
         return
     await state.set_state(AddAnime.photo)
-    await call.message.edit_text(
-        "🖼 Anime rasmini yuboring:",
-        reply_markup=admin_back()
-    )
+    await call.message.edit_text("🖼 Anime rasmini yuboring:", reply_markup=admin_back())
 
 @dp.message(AddAnime.photo, F.photo)
 async def add_photo(message: Message, state: FSMContext):
@@ -632,7 +625,7 @@ async def add_photo(message: Message, state: FSMContext):
 async def add_title(message: Message, state: FSMContext):
     await state.update_data(title=message.text)
     await state.set_state(AddAnime.year)
-    await message.answer("📅 Yilini yozing (masalan: 2002):")
+    await message.answer("📅 Yilini yozing:")
 
 @dp.message(AddAnime.year)
 async def add_year(message: Message, state: FSMContext):
@@ -655,6 +648,12 @@ async def add_genre(message: Message, state: FSMContext):
 @dp.message(AddAnime.description)
 async def add_desc(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
+    await state.set_state(AddAnime.language)
+    await message.answer("🗣 Tilini yozing (masalan: O'zbek, Rus, Yapon):")
+
+@dp.message(AddAnime.language)
+async def add_language(message: Message, state: FSMContext):
+    await state.update_data(language=message.text)
     await state.set_state(AddAnime.media_type)
     await message.answer(
         "🎬 Turi qanday?",
@@ -677,7 +676,6 @@ async def set_type(call: CallbackQuery, state: FSMContext):
 async def add_video(message: Message, state: FSMContext):
     data = await state.get_data()
     video_ids = data.get("video_ids", [])
-    # Kanalga yuborish
     sent = await bot.forward_message(STORAGE_CHANNEL, message.chat.id, message.message_id)
     video_ids.append(sent.message_id)
     await state.update_data(video_ids=video_ids)
@@ -691,7 +689,7 @@ async def add_done(message: Message, state: FSMContext):
         return
     anime_id = db.add_anime(
         data["title"], data["year"], data["country"],
-        data["genre"], data["description"], data["photo_id"], data["media_type"]
+        data["genre"], data["description"], data.get("language", "Nomalum"), data["photo_id"], data["media_type"]
     )
     for i, msg_id in enumerate(data["video_ids"], 1):
         db.add_episode(anime_id, i, msg_id)
@@ -722,7 +720,6 @@ async def add_done(message: Message, state: FSMContext):
 async def admin_add_episode(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
         return
-    await state.update_data(episode_add_page=0)
     await call.message.edit_text(
         "➕ Davom qo'shish — serial tanlash usuli:",
         reply_markup=search_method_keyboard("addepi")
@@ -730,9 +727,7 @@ async def admin_add_episode(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "addepi_list")
 async def addepi_list(call: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    page = data.get("episode_add_page", 0)
-    animes = db.get_animes("serial", page)
+    animes = db.get_animes("serial", 0)
     total = db.get_anime_count("serial")
     if not animes:
         await call.answer("📺 Hozircha serial yoq!", show_alert=True)
@@ -740,7 +735,7 @@ async def addepi_list(call: CallbackQuery, state: FSMContext):
     await state.set_state(AddEpisode.choose_anime)
     await call.message.edit_text(
         "📺 Serialni tanlang:",
-        reply_markup=admin_anime_list_keyboard(animes, page, total, "addepi_sel")
+        reply_markup=admin_anime_list_keyboard(animes, 0, total, "addepi_sel")
     )
 
 @dp.callback_query(F.data == "addepi_search")
@@ -1006,7 +1001,7 @@ async def ep_edit(call: CallbackQuery, state: FSMContext):
 async def epact_list(call: CallbackQuery, state: FSMContext):
     animes = db.get_animes("serial", 0)
     total = db.get_anime_count("serial")
-    await state.set_state(EditEpisode.choose_anime)
+    await state.set_state(EditEpisode.choose_episode)
     await call.message.edit_text(
         "Serial tanlang:",
         reply_markup=admin_anime_list_keyboard(animes, 0, total, "epact_sel")
@@ -1117,7 +1112,7 @@ async def admin_broadcast(call: CallbackQuery, state: FSMContext):
 async def bc_simple(call: CallbackQuery, state: FSMContext):
     await state.update_data(bc_type="simple")
     await state.set_state(BroadcastState.message)
-    await call.message.edit_text("📝 Xabarni yozing (matn, rasm yoki video):")
+    await call.message.edit_text("📝 Xabarni yozing:")
 
 @dp.callback_query(F.data == "bc_inline")
 async def bc_inline(call: CallbackQuery, state: FSMContext):
@@ -1237,7 +1232,7 @@ async def ch_add_done(message: Message, state: FSMContext):
     await message.answer("✅ Kanal qoshildi!", reply_markup=admin_keyboard())
 
 @dp.callback_query(F.data == "ch_del")
-async def ch_del(call: CallbackQuery, state: FSMContext):
+async def ch_del(call: CallbackQuery):
     channels = db.get_channels()
     if not channels:
         await call.answer("Kanal yoq!", show_alert=True)
@@ -1288,7 +1283,7 @@ async def block_action(message: Message, state: FSMContext):
     else:
         try:
             u = db.get_user(int(query))
-        except:
+        except Exception:
             u = None
     if not u:
         await message.answer("❌ Topilmadi!", reply_markup=admin_keyboard())
@@ -1314,7 +1309,7 @@ async def unblock_action(message: Message, state: FSMContext):
     else:
         try:
             u = db.get_user(int(query))
-        except:
+        except Exception:
             u = None
     if not u:
         await message.answer("❌ Topilmadi!", reply_markup=admin_keyboard())
@@ -1396,7 +1391,7 @@ async def find_user_result(message: Message, state: FSMContext):
     else:
         try:
             u = db.get_user(int(query))
-        except:
+        except Exception:
             u = None
     if not u:
         await message.answer("❌ Topilmadi!", reply_markup=admin_keyboard())
@@ -1436,77 +1431,6 @@ async def admin_report(call: CallbackQuery):
         parse_mode="HTML"
     )
 
-# ---- YANGILANISH ----
-@dp.callback_query(F.data == "admin_version")
-async def admin_version(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return
-    current = db.get_setting("bot_version") or "1.0.0"
-    await call.message.edit_text(
-        f"🔔 <b>Yangilanish</b>\nJoriy versiya: {current}\n\nYangi versiyani yozing:",
-        parse_mode="HTML"
-    )
-    await state.set_state(VersionState.version)
-
-@dp.message(VersionState.version)
-async def version_new(message: Message, state: FSMContext):
-    await state.update_data(new_version=message.text.strip())
-    await state.set_state(VersionState.changes)
-    await message.answer("✨ Yangiliklar/o'zgarishlarni yozing:")
-
-@dp.message(VersionState.changes)
-async def version_changes(message: Message, state: FSMContext):
-    data = await state.get_data()
-    new_version = data["new_version"]
-    changes = message.text
-    old_version = db.get_setting("bot_version") or "1.0.0"
-    db.set_setting("bot_version", new_version)
-    await state.clear()
-
-    from datetime import datetime
-    today = datetime.now().strftime("%d.%m.%Y")
-
-    users = db.get_all_active_users()
-    sent = 0
-    for user_id in users:
-        try:
-            await bot.send_message(
-                user_id,
-                f"🔔 <b>Yangilanish mavjud!</b>\n\n"
-                f"📦 Yangi versiya: {new_version}\n"
-                f"📱 Sizda: {old_version}\n\n"
-                f"✨ Yangiliklar:\n{changes}\n\n"
-                f"🗓 Chiqarilgan: {today}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="🔄 Yangilash", callback_data=f"update_{new_version}"),
-                        InlineKeyboardButton(text="⏰ Keyinroq", callback_data="update_later"),
-                    ]
-                ]),
-                parse_mode="HTML"
-            )
-            sent += 1
-        except Exception:
-            pass
-
-    await message.answer(
-        f"✅ Yangilanish xabari {sent} ta foydalanuvchiga yuborildi!",
-        reply_markup=admin_keyboard()
-    )
-
-@dp.callback_query(F.data.startswith("update_"))
-async def update_handler(call: CallbackQuery):
-    if call.data == "update_later":
-        await call.answer("⏰ Keyinroq yangilanadi", show_alert=True)
-        return
-    new_version = call.data.replace("update_", "")
-    db.update_user_version(call.from_user.id, new_version)
-    await call.answer(f"✅ {new_version} versiyasiga yangilandi!", show_alert=True)
-    await call.message.edit_text(
-        f"✅ Bot {new_version} versiyasiga yangilandi!",
-        reply_markup=main_keyboard()
-    )
-
 # ---- ADMIN QO'LLANMA ----
 @dp.callback_query(F.data == "admin_help")
 async def admin_help(call: CallbackQuery):
@@ -1516,36 +1440,45 @@ async def admin_help(call: CallbackQuery):
         "📖 <b>Admin Qollanma</b>\n\n"
         "➕ <b>Anime qoshish:</b>\n"
         "Rasm → Nom → Yil → Davlat → Janr → Malumot → "
-        "Tur (film/serial) → Videolarni birin-ketin yuboring → "
-        "/done yozing → Anime qoshiladi va kanalga saqlanadi\n\n"
+        "Tur (film/serial) → Videolarni yuboring → "
+        "/done yozing → Kanalga saqlanadi\n\n"
         "➕ <b>Davom qoshish:</b>\n"
-        "Royxatdan yoki nom orqali serialni tanlang → "
-        "Yangi qismlarni yuboring → /done yozing\n\n"
+        "Royxat yoki nom → Serial tanlang → "
+        "Videolar yuboring → /done\n\n"
         "✏️ <b>Tahrirlash:</b>\n"
-        "Royxatdan yoki nom orqali animeni tanlang → "
-        "Maydoni tanlang → Yangi qiymat yozing\n\n"
+        "Royxat yoki nom → Maydon tanlang → Yangi qiymat\n\n"
         "🗑 <b>Ochirish:</b>\n"
-        "Royxatdan yoki nom orqali animeni tanlang → Tasdiqlang\n\n"
-        "📨 <b>Xabar yuborish:</b>\n"
+        "Royxat yoki nom → Tasdiqlang\n\n"
+        "📨 <b>Xabar:</b>\n"
         "Oddiy — matn/rasm/video\n"
-        "Inline — xabar + tugma nomi + link\n\n"
-        "📢 <b>Kanal qoshish formati:</b>\n"
+        "Inline — xabar + tugma + link\n\n"
+        "📢 <b>Kanal formati:</b>\n"
         "@kanalnom | Kanal nomi\n\n"
         "🔧 <b>Texnik ishlar:</b>\n"
         "Yoqilsa foydalanuvchilar kira olmaydi\n\n"
         "🔒 <b>Kontent himoyasi:</b>\n"
-        "Yoqilsa video forward/save bloklanadi\n\n"
-        "🔔 <b>Yangilanish:</b>\n"
-        "Yangi versiya raqami → Yangiliklar matni → "
-        "Barcha foydalanuvchilarga yuboriladi",
+        "Yoqilsa video forward/save bloklanadi",
         reply_markup=admin_back(),
         parse_mode="HTML"
     )
 
+
+# ---- ADMIN QO'SHISH ----
+@dp.callback_query(F.data == "admin_add_admin")
+async def admin_add_admin(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.message.edit_text(
+        "👑 Yangi admin ID sini yozing:",
+        reply_markup=admin_back()
+    )
+    await state.set_state(FindUserState.query)
+    await state.update_data(action="add_admin")
+
 # ===================== KUNLIK HISOBOT TIMER =====================
 async def daily_report_task():
     while True:
-        await asyncio.sleep(86400)  # 24 soat
+        await asyncio.sleep(86400)
         from datetime import datetime
         s = db.get_daily_stats()
         today = datetime.now().strftime("%d.%m.%Y")
@@ -1562,11 +1495,9 @@ async def daily_report_task():
         except Exception:
             pass
 
-# ===================== ISHGA TUSHIRISH =====================
-from aiohttp import web
-
+# ===================== WEB SERVER =====================
 async def health_check(request):
-    return web.Response(text="Bot ishlayapti!")
+    return web.Response(text="AniFilm Bot ishlayapti!")
 
 async def start_web_server():
     app = web.Application()
@@ -1576,12 +1507,16 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", 8080)
     await site.start()
 
+# ===================== ISHGA TUSHIRISH =====================
 async def main():
     db.init_db()
     logger.info("Bot ishga tushmoqda...")
     await start_web_server()
     asyncio.create_task(daily_report_task())
-    await dp.start_polling(bot, allowed_updates=["message", "callback_query", "my_chat_member", "chat_member"])
+    await dp.start_polling(
+        bot,
+        allowed_updates=["message", "callback_query", "my_chat_member"]
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

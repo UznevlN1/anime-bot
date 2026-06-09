@@ -36,6 +36,7 @@ def init_db():
         country TEXT,
         genre TEXT,
         description TEXT,
+        language TEXT DEFAULT 'Nomalum',
         photo_id TEXT,
         media_type TEXT,
         views INTEGER DEFAULT 0,
@@ -204,12 +205,12 @@ def get_daily_stats():
     }
 
 # ===== ANIMLAR =====
-def add_anime(title, year, country, genre, description, photo_id, media_type):
+def add_anime(title, year, country, genre, description, language, photo_id, media_type):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("""INSERT INTO animes (title, year, country, genre, description, photo_id, media_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (title, year, country, genre, description, photo_id, media_type))
+    c.execute("""INSERT INTO animes (title, year, country, genre, description, language, photo_id, media_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (title, year, country, genre, description, language, photo_id, media_type))
     anime_id = c.lastrowid
     conn.commit()
     conn.close()
