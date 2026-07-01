@@ -30,12 +30,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .chip{flex:0 0 auto;padding:7px 14px;border-radius:999px;font-size:12.5px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-dim);}
 .chip.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .back-btn{background:none;border:none;color:var(--text);font-size:14px;margin-bottom:14px;}
-.detail-poster{width:100%;height:230px;border-radius:16px;background:var(--bg-card);border:1px solid var(--border);}
+.detail-poster{width:100%;height:230px;border-radius:16px;background:var(--bg-card);border:1px solid var(--border);background-size:cover;background-position:center;}
 .detail-title{font-size:20px;font-weight:800;margin-top:14px;}.detail-meta{color:var(--text-dim);font-size:12.5px;margin:6px 0 12px;}
 .detail-desc{font-size:13.5px;line-height:1.5;color:#cfcdda;margin-bottom:18px;}
 .ep-head{font-size:15px;font-weight:700;margin-bottom:10px;}
 .ep-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
-.ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:10px 0;border-radius:10px;font-size:13px;font-weight:600;}
+.ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:10px 0;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;}
+.ep-btn.film-btn{grid-column:1/-1;padding:14px;font-size:15px;background:var(--accent);border-color:var(--accent);color:#fff;}
 .tabbar{position:fixed;bottom:0;left:0;right:0;background:rgba(11,11,16,.95);backdrop-filter:blur(10px);border-top:1px solid var(--border);display:flex;padding:8px 0 calc(8px + env(safe-area-inset-bottom));}
 .tab{flex:1;background:none;border:none;color:var(--text-dim);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px;}
 .tab span{font-size:18px;}.tab.active{color:var(--accent-2);}
@@ -88,16 +89,34 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>show
 document.getElementById('searchToggle').addEventListener('click',()=>showView('search'));
 document.getElementById('detailBack').addEventListener('click',()=>showView('home'));
 function renderCard(a){const d=document.createElement('div');d.className='card';d.innerHTML=`<img class="card-img" src="${posterUrl(a)}" alt="${a.title}"><div class="card-title">${a.title}</div><div class="card-sub">${a.episode_count||0}-epizod</div>`;d.addEventListener('click',()=>openDetail(a.id));return d;}
-function renderHome(list){const f=list[0];if(f){document.getElementById('heroTitle').textContent=f.title;document.getElementById('heroSub').textContent=`${f.episode_count||0}-epizod • ${f.genre||''}`;document.getElementById('heroCard').style.cssText+=`;background-image:linear-gradient(160deg,rgba(13,12,20,.4),#0d0c14 85%),url(${posterUrl(f)});background-size:cover;background-position:center`;document.getElementById('heroPlay').onclick=()=>openDetail(f.id);}
+function renderHome(list){const f=list[0];if(f){document.getElementById('heroTitle').textContent=f.title;document.getElementById('heroSub').textContent=`${f.episode_count||0}-epizod • ${f.genre||''}`;const hc=document.getElementById('heroCard');hc.style.backgroundImage=`linear-gradient(160deg,rgba(13,12,20,.4),#0d0c14 85%),url(${posterUrl(f)})`;hc.style.backgroundSize='cover';hc.style.backgroundPosition='center';document.getElementById('heroPlay').onclick=()=>openDetail(f.id);}
 const cr=document.getElementById('continueRow');cr.innerHTML='';list.slice(0,6).forEach(a=>cr.appendChild(renderCard(a)));
 const ag=document.getElementById('allGrid');ag.innerHTML='';if(!list.length){ag.innerHTML='<div class="empty-msg">Hozircha anime qoshilmagan</div>';}else{list.forEach(a=>ag.appendChild(renderCard(a)));}}
 function renderSearch(list){const g=document.getElementById('searchGrid');g.innerHTML='';if(!list.length){g.innerHTML='<div class="empty-msg">Hech narsa topilmadi</div>';return;}list.forEach(a=>g.appendChild(renderCard(a)));}
 document.getElementById('searchInput').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();renderSearch(q?ALL_ANIME.filter(a=>a.title.toLowerCase().includes(q)):ALL_ANIME);});
 function renderGenreChips(list){const genres=['Barchasi',...new Set(list.map(a=>a.genre).filter(Boolean))];const wrap=document.getElementById('genreChips');wrap.innerHTML='';genres.forEach((g,i)=>{const c=document.createElement('button');c.className='chip'+(i===0?' active':'');c.textContent=g;c.addEventListener('click',()=>{document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');renderSearch(g==='Barchasi'?ALL_ANIME:ALL_ANIME.filter(a=>a.genre===g));});wrap.appendChild(c);});}
-async function openDetail(id){showView('detail');document.getElementById('detailTitle').textContent='Yuklanmoqda...';document.getElementById('epGrid').innerHTML='';try{const d=await fetchJSON(`${API}/animes/${id}`);document.getElementById('detailPoster').style.cssText+=`;background-image:url(${posterUrl(d)});background-size:cover;background-position:center`;document.getElementById('detailTitle').textContent=d.title;document.getElementById('detailMeta').textContent=`${d.genre||''} • ${d.year||''} • ${d.episodes?.length||0} epizod`;document.getElementById('detailDesc').textContent=d.description||'';const eg=document.getElementById('epGrid');eg.innerHTML='';(d.episodes||[]).forEach(ep=>{const b=document.createElement('button');b.className='ep-btn';b.textContent=ep.episode_number+'-qism';b.addEventListener('click',()=>send(id,ep.id,d.title,ep.episode_number));eg.appendChild(b);});}catch(e){document.getElementById('detailTitle').textContent='Xatolik yuz berdi';}}
-function send(aid,eid,title,num){const p=JSON.stringify({action:'open_episode',anime_id:aid,episode_id:eid});if(tg&&tg.sendData){tg.sendData(p);tg.close();}else{alert(`${title} - ${num}-epizod`);}}
+async function openDetail(id){showView('detail');document.getElementById('detailTitle').textContent='Yuklanmoqda...';document.getElementById('epGrid').innerHTML='';
+try{
+  const d=await fetchJSON(`${API}/animes/${id}`);
+  document.getElementById('detailPoster').style.backgroundImage=`url(${posterUrl(d)})`;
+  document.getElementById('detailTitle').textContent=d.title;
+  document.getElementById('detailMeta').textContent=`${d.genre||''} • ${d.year||''} • ${d.episodes?.length||0} epizod`;
+  document.getElementById('detailDesc').textContent=d.description||'';
+  const eg=document.getElementById('epGrid');eg.innerHTML='';
+  if(d.media_type==='film'){
+    const ep=d.episodes?.[0];
+    if(ep){const b=document.createElement('button');b.className='ep-btn film-btn';b.textContent='▶ Tomosha qilish';b.addEventListener('click',()=>send(d.id,ep.id,d.title,1));eg.appendChild(b);}
+  }else{
+    (d.episodes||[]).forEach(ep=>{const b=document.createElement('button');b.className='ep-btn';b.textContent=ep.episode_number+'-qism';b.addEventListener('click',()=>send(d.id,ep.id,d.title,ep.episode_number));eg.appendChild(b);});
+  }
+}catch(e){document.getElementById('detailTitle').textContent='Xatolik yuz berdi';}}
+function send(aid,eid,title,num){
+  const p=JSON.stringify({action:'open_episode',anime_id:aid,episode_id:eid});
+  if(tg&&tg.sendData){tg.sendData(p);tg.close();}
+  else{alert(title+' - '+num+'-epizod');}
+}
 async function init(){try{ALL_ANIME=await fetchJSON(`${API}/animes`);renderHome(ALL_ANIME);renderSearch(ALL_ANIME);renderGenreChips(ALL_ANIME);}catch(e){document.getElementById('heroTitle').textContent='Malumot yuklanmadi';}}
 init();
 </script>
 </body>
-  </html>
+</html>
