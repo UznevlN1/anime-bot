@@ -103,8 +103,10 @@ button{font-family:inherit;cursor:pointer;}
 .detail-desc{font-size:13px;line-height:1.6;color:#c9c9d6;margin-bottom:18px;}
 .ep-head{font-size:15px;font-weight:800;margin-bottom:12px;padding:0 18px;}
 .ep-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 18px 24px;}
-.ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:12px 0;border-radius:11px;font-size:13px;font-weight:700;text-align:center;}
+.ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:12px 0;border-radius:11px;font-size:13px;font-weight:700;text-align:center;position:relative;}
 .ep-btn:active{background:var(--purple);border-color:var(--purple);}
+.ep-btn.watched{background:rgba(124,92,255,.14);border-color:var(--purple2);color:var(--purple2);}
+.ep-btn.watched::after{content:'✓';position:absolute;top:3px;right:6px;font-size:10px;color:var(--purple2);}
 
 /* Block screens (maintenance / subscribe) */
 .block-screen{padding-top:100px;text-align:center;}
@@ -260,6 +262,8 @@ function isFav(id){return favIds().includes(id);}
 function toggleFav(id){let f=favIds();f=f.includes(id)?f.filter(x=>x!==id):[...f,id];setFavIds(f);return f.includes(id);}
 function historyIds(){try{return JSON.parse(localStorage.getItem('anifilm_history')||'[]');}catch(e){return [];}}
 function pushHistory(id){let h=historyIds().filter(x=>x!==id);h.unshift(id);localStorage.setItem('anifilm_history',JSON.stringify(h.slice(0,15)));}
+function watchedEpIds(){try{return JSON.parse(localStorage.getItem('anifilm_watched_eps')||'[]');}catch(e){return [];}}
+function markEpWatched(epId){let w=watchedEpIds();if(!w.includes(epId)){w.push(epId);localStorage.setItem('anifilm_watched_eps',JSON.stringify(w));}}
 
 function formatViews(n){n=n||0;if(n>=1000000)return(n/1000000).toFixed(1)+'M';if(n>=1000)return(n/1000).toFixed(1)+'K';return String(n);}
 function placeholderImg(t){return`https://placehold.co/300x420/15151d/7c5cff?text=${encodeURIComponent(t||'Anime')}`;}
@@ -408,9 +412,12 @@ async function openDetail(id){
     favBtn2.textContent=isFav(d.id)?'♥':'♡';
     favBtn2.onclick=()=>{const active=toggleFav(d.id);favBtn2.classList.toggle('active',active);favBtn2.textContent=active?'♥':'♡';};
     const grid=document.getElementById('epGrid');grid.innerHTML='';
+    const watched=watchedEpIds();
     (d.episodes||[]).forEach(ep=>{
-      const b=document.createElement('button');b.className='ep-btn';b.textContent=`${ep.episode_number}-qism`;
-      b.addEventListener('click',()=>sendEp(ep.id,d.id));
+      const b=document.createElement('button');
+      b.className='ep-btn'+(watched.includes(ep.id)?' watched':'');
+      b.textContent=`${ep.episode_number}-qism`;
+      b.addEventListener('click',()=>{markEpWatched(ep.id);b.classList.add('watched');sendEp(ep.id,d.id);});
       grid.appendChild(b);
     });
     if(!d.episodes||!d.episodes.length){grid.innerHTML='<div class="empty-msg">Epizodlar hali qoʻshilmagan</div>';}
@@ -475,6 +482,7 @@ document.getElementById('bellBtn').addEventListener('click',()=>{tg?.showAlert?t
 document.getElementById('profilBotLink').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
 document.getElementById('profilClearHistory').addEventListener('click',()=>{
   localStorage.removeItem('anifilm_history');
+  localStorage.removeItem('anifilm_watched_eps');
   if(document.getElementById('view-profil').classList.contains('active'))renderProfil();
   document.getElementById('continueSection').style.display='none';
 });
