@@ -129,6 +129,38 @@ button{font-family:inherit;cursor:pointer;}
 .profil-stat span{font-size:11px;color:var(--text-dim);}
 .profil-link{display:flex;align-items:center;gap:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:14px 16px;font-size:13.5px;font-weight:700;margin-bottom:10px;}
 
+/* Category chips */
+.chip-row{display:flex;gap:8px;overflow-x:auto;padding:0 18px 4px;scrollbar-width:none;}
+.chip-row::-webkit-scrollbar{display:none;}
+.chip{flex:none;padding:9px 15px;border-radius:20px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);font-size:12.5px;font-weight:700;}
+.chip.active{background:var(--purple);border-color:var(--purple);color:#fff;}
+
+/* Skeleton loading */
+@keyframes shimmer{0%{background-position:-200px 0;}100%{background-position:200px 0;}}
+.skel{background:linear-gradient(90deg,var(--bg-card) 25%,var(--bg-card2) 37%,var(--bg-card) 63%);background-size:400px 100%;animation:shimmer 1.4s infinite linear;border-radius:14px;}
+.skel-card{width:128px;flex:none;}
+.skel-card .skel-img{width:128px;height:176px;border-radius:14px;}
+.skel-card .skel-line{height:10px;border-radius:5px;margin-top:8px;width:80%;}
+.skel-hero{height:230px;border-radius:20px;margin:0 18px;}
+
+/* Retry */
+.retry-wrap{text-align:center;padding:30px 20px;}
+.retry-btn{margin-top:12px;background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:10px 20px;border-radius:11px;font-size:13px;font-weight:700;}
+
+/* Pull to refresh */
+.pull-indicator{display:flex;align-items:center;justify-content:center;height:0;overflow:hidden;color:var(--text-dim);font-size:12px;transition:height .15s;}
+.pull-indicator.show{height:40px;}
+
+/* Comments */
+.comments-wrap{padding:0 18px 24px;}
+.comment-input-row{display:flex;gap:8px;margin-bottom:16px;}
+.comment-input{flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:13px;outline:none;}
+.comment-send{background:var(--purple);color:#fff;border:none;border-radius:12px;padding:0 16px;font-size:13px;font-weight:700;}
+.comment-item{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin-bottom:10px;}
+.comment-user{font-size:12.5px;font-weight:800;color:var(--purple2);margin-bottom:3px;}
+.comment-text{font-size:13px;line-height:1.5;color:#dcdce4;}
+.watch-stat{display:inline-flex;align-items:center;gap:4px;color:var(--purple2);font-weight:700;}
+
 /* Tabbar */
 .tabbar{position:fixed;bottom:0;left:0;right:0;background:rgba(12,12,18,.92);backdrop-filter:blur(14px);border-top:1px solid var(--border);display:flex;padding:10px 0 max(10px,env(safe-area-inset-bottom));z-index:10;}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;color:var(--text-dim);font-size:10.5px;font-weight:700;}
@@ -139,6 +171,7 @@ button{font-family:inherit;cursor:pointer;}
 <body>
 
 <main id="view-home" class="view active">
+  <div class="pull-indicator" id="pullIndicator">🔄 Yangilash uchun qoʻyib yuboring</div>
   <div class="topbar">
     <div class="brand"><div class="brand-icon">A</div><div class="brand-name">ANIFILM BOT</div></div>
     <button class="bell" id="bellBtn">🔔<span class="dot"></span></button>
@@ -152,6 +185,7 @@ button{font-family:inherit;cursor:pointer;}
     <button class="seg-btn" data-type="film">🎬 Film</button>
     <button class="seg-btn" data-type="serial">📺 Serial</button>
   </div>
+  <div class="chip-row" id="categoryRow" style="display:none;"></div>
 
   <div id="heroSection" class="hero-wrap">
     <div class="hero" id="heroCard">
@@ -179,6 +213,11 @@ button{font-family:inherit;cursor:pointer;}
   <div class="section" id="popularSection">
     <div class="section-head"><div class="section-title">Mashhur</div></div>
     <div class="row-scroll" id="popularRow"></div>
+  </div>
+
+  <div class="section" id="recommendSection" style="display:none;">
+    <div class="section-head"><div class="section-title">Sizga tavsiya</div></div>
+    <div class="row-scroll" id="recommendRow"></div>
   </div>
 
   <div class="section" id="allSection">
@@ -221,6 +260,15 @@ button{font-family:inherit;cursor:pointer;}
   </div>
   <h3 class="ep-head">Epizodlar</h3>
   <div class="ep-grid" id="epGrid"></div>
+
+  <h3 class="ep-head">💬 Izohlar</h3>
+  <div class="comments-wrap">
+    <div class="comment-input-row">
+      <input class="comment-input" id="commentInput" placeholder="Izoh yozing..." maxlength="300">
+      <button class="comment-send" id="commentSend">➤</button>
+    </div>
+    <div id="commentsList"></div>
+  </div>
 </main>
 
 <main id="view-maintenance" class="view">
@@ -253,7 +301,35 @@ tg?.ready(); tg?.expand();
 const API='/api';
 let ALL_ANIME=[];
 let ACTIVE_TYPE='all';
+let ACTIVE_CATEGORY='';
+let CATEGORIES=[];
+let BANNERS=[];
 let heroList=[]; let heroIdx=0; let heroTimer=null;
+
+/* ---------- skeleton loading placeholders ---------- */
+function skeletonRow(elId,count){
+  const el=document.getElementById(elId);if(!el)return;el.innerHTML='';
+  for(let i=0;i<count;i++){
+    const d=document.createElement('div');d.className='skel-card';
+    d.innerHTML=`<div class="skel skel-img"></div><div class="skel skel-line"></div>`;
+    el.appendChild(d);
+  }
+}
+function skeletonHero(){
+  document.getElementById('heroSection').style.display='';
+  const hc=document.getElementById('heroCard');
+  hc.classList.add('skel');
+  hc.style.backgroundImage='none';
+  document.getElementById('heroTitle').textContent='';
+  document.getElementById('heroSub').textContent='';
+  document.getElementById('heroDots').innerHTML='';
+  document.querySelector('.hero-actions').style.display='none';
+}
+function skeletonHome(){
+  skeletonHero();
+  skeletonRow('newRow',5);
+  skeletonRow('popularRow',5);
+}
 
 /* ---------- storage helpers (client-side, this device only) ---------- */
 function favIds(){try{return JSON.parse(localStorage.getItem('anifilm_favs')||'[]');}catch(e){return [];}}
@@ -311,8 +387,16 @@ function renderCard(a,variant){
 
 /* ---------- hero carousel ---------- */
 function renderHero(list){
-  heroList=[...list].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,5);
+  if(BANNERS.length){
+    heroList=BANNERS.map(b=>({
+      kind:'banner', id:b.id, anime_id:b.anime_id, title:b.title,
+      subtitle:b.subtitle, photo_id:b.photo_id
+    }));
+  }else{
+    heroList=[...list].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,5).map(a=>({kind:'anime',...a}));
+  }
   heroIdx=0;
+  document.getElementById('heroCard').classList.remove('skel');
   if(!heroList.length){document.getElementById('heroSection').style.display='none';return;}
   document.getElementById('heroSection').style.display='';
   const dots=document.getElementById('heroDots');dots.innerHTML='';
@@ -324,13 +408,24 @@ function renderHero(list){
 function paintHero(){
   const f=heroList[heroIdx];if(!f)return;
   document.getElementById('heroTitle').textContent=f.title;
-  const typeLabel=f.media_type==='film'?'Film':`${f.episode_count||0}-epizod`;
-  document.getElementById('heroSub').textContent=`${typeLabel} • ${f.year||''} • ${f.genre||''}`;
   const hc=document.getElementById('heroCard');
+  const heroActions=document.querySelector('.hero-actions');
+  const badge=document.getElementById('heroBadge');
+  const targetId=f.kind==='banner'?f.anime_id:f.id;
+  if(f.kind==='banner'){
+    badge.textContent='E\'LON';
+    document.getElementById('heroSub').textContent=f.subtitle||'';
+    heroActions.style.display=targetId?'flex':'none';
+  }else{
+    badge.textContent='TRENDING';
+    const typeLabel=f.media_type==='film'?'Film':`${f.episode_count||0}-epizod`;
+    document.getElementById('heroSub').textContent=`${typeLabel} • ${f.year||''} • ${f.genre||''}`;
+    heroActions.style.display='flex';
+  }
   hc.style.backgroundImage=`linear-gradient(160deg,rgba(10,10,15,.15),#0a0a0f 92%),url(${posterUrl(f)})`;
   hc.style.backgroundSize='cover';hc.style.backgroundPosition='center';
-  document.getElementById('heroPlay').onclick=()=>openDetail(f.id);
-  document.getElementById('heroInfo').onclick=()=>openDetail(f.id);
+  document.getElementById('heroPlay').onclick=()=>{if(targetId)openDetail(targetId);};
+  document.getElementById('heroInfo').onclick=()=>{if(targetId)openDetail(targetId);};
   document.querySelectorAll('.hero-dot').forEach((d,i)=>d.classList.toggle('active',i===heroIdx));
 }
 
@@ -359,18 +454,54 @@ function renderAllGrid(){
   const q=document.getElementById('searchInput').value.trim().toLowerCase();
   let items=ALL_ANIME;
   if(ACTIVE_TYPE!=='all')items=items.filter(a=>a.media_type===ACTIVE_TYPE);
+  if(ACTIVE_CATEGORY)items=items.filter(a=>a.category===ACTIVE_CATEGORY);
   if(q)items=items.filter(a=>a.title.toLowerCase().includes(q));
-  document.getElementById('allSectionTitle').textContent=q?`"${q}" bo'yicha natijalar`:'Barchasi';
-  const isFiltering=q||ACTIVE_TYPE!=='all';
+  document.getElementById('allSectionTitle').textContent=q?`"${q}" bo'yicha natijalar`:(ACTIVE_CATEGORY||'Barchasi');
+  const isFiltering=q||ACTIVE_TYPE!=='all'||ACTIVE_CATEGORY;
   document.getElementById('heroSection').style.display=isFiltering?'none':(heroList.length?'':'none');
   document.getElementById('continueSection').style.display=isFiltering?'none':(historyIds().length?'':'none');
   document.getElementById('newSection').style.display=isFiltering?'none':'';
   document.getElementById('popularSection').style.display=isFiltering?'none':'';
+  document.getElementById('recommendSection').style.display=isFiltering?'none':document.getElementById('recommendSection').dataset.has==='1'?'':'none';
   const g=document.getElementById('allGrid');g.innerHTML='';
   if(!items.length){g.innerHTML='<div class="empty-msg">Hech narsa topilmadi</div>';return;}
   items.forEach(a=>g.appendChild(renderCard(a)));
 }
-function renderHome(list){renderHero(list);renderNewArrivals();renderPopular();renderContinue();renderAllGrid();}
+function renderCategoryChips(){
+  const row=document.getElementById('categoryRow');
+  if(!CATEGORIES.length){row.style.display='none';return;}
+  row.style.display='flex';row.innerHTML='';
+  const allChip=document.createElement('button');allChip.className='chip'+(ACTIVE_CATEGORY?'':' active');allChip.textContent='Barcha kategoriya';
+  allChip.addEventListener('click',()=>{ACTIVE_CATEGORY='';renderCategoryChips();renderAllGrid();});
+  row.appendChild(allChip);
+  CATEGORIES.forEach(cat=>{
+    const c=document.createElement('button');c.className='chip'+(ACTIVE_CATEGORY===cat?' active':'');c.textContent=cat;
+    c.addEventListener('click',()=>{ACTIVE_CATEGORY=cat;renderCategoryChips();renderAllGrid();});
+    row.appendChild(c);
+  });
+}
+function renderRecommendations(){
+  const sourceIds=[...new Set([...historyIds(),...favIds()])];
+  const sec=document.getElementById('recommendSection');
+  if(!sourceIds.length){sec.style.display='none';sec.dataset.has='0';return;}
+  const genreCount={};
+  sourceIds.forEach(id=>{
+    const a=ALL_ANIME.find(x=>x.id===id);if(!a||!a.genre)return;
+    a.genre.split(',').map(g=>g.trim()).filter(Boolean).forEach(g=>{genreCount[g]=(genreCount[g]||0)+1;});
+  });
+  const topGenres=Object.keys(genreCount).sort((a,b)=>genreCount[b]-genreCount[a]).slice(0,3);
+  if(!topGenres.length){sec.style.display='none';sec.dataset.has='0';return;}
+  const scored=ALL_ANIME.filter(a=>!sourceIds.includes(a.id)).map(a=>{
+    const g=(a.genre||'').split(',').map(x=>x.trim());
+    const score=g.filter(x=>topGenres.includes(x)).length;
+    return {a,score};
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,8).map(x=>x.a);
+  if(!scored.length){sec.style.display='none';sec.dataset.has='0';return;}
+  sec.dataset.has='1';
+  sec.style.display='';
+  renderRow('recommendRow',scored);
+}
+function renderHome(list){renderHero(list);renderNewArrivals();renderPopular();renderContinue();renderCategoryChips();renderRecommendations();renderAllGrid();}
 
 /* ---------- favorites tab ---------- */
 function renderFavorites(){
@@ -394,18 +525,23 @@ function renderProfil(){
 }
 
 /* ---------- detail ---------- */
+let CURRENT_DETAIL_ID=null;
 async function openDetail(id){
   showView('detail');
+  CURRENT_DETAIL_ID=id;
   document.getElementById('detailTitle').textContent='Yuklanmoqda...';
   document.getElementById('detailDesc').textContent='';
   document.getElementById('detailMeta').textContent='';
   document.getElementById('epGrid').innerHTML='';
+  document.getElementById('commentsList').innerHTML='';
   try{
     const d=await fetchJSON(`${API}/animes/${id}?user_id=${getUid()}`);
     document.getElementById('detailImg').src=posterUrl(d);
     document.getElementById('detailTitle').textContent=d.title;
     const typeLabel=d.media_type==='film'?'Film':'Serial';
-    document.getElementById('detailMeta').textContent=`${typeLabel} • ${d.year||''} • ${d.genre||''} • 👁 ${formatViews(d.views)}`;
+    let metaHtml=`${typeLabel} • ${d.year||''} • ${d.genre||''} • 👁 ${formatViews(d.views)}`;
+    if(d.watched_today>0)metaHtml+=` • <span class="watch-stat">🔥 bugun ${d.watched_today} marta koʻrildi</span>`;
+    document.getElementById('detailMeta').innerHTML=metaHtml;
     document.getElementById('detailDesc').textContent=d.description||'';
     const favBtn2=document.getElementById('detailFav');
     favBtn2.classList.toggle('active',isFav(d.id));
@@ -421,9 +557,46 @@ async function openDetail(id){
       grid.appendChild(b);
     });
     if(!d.episodes||!d.episodes.length){grid.innerHTML='<div class="empty-msg">Epizodlar hali qoʻshilmagan</div>';}
+    loadComments(id);
   }catch(e){document.getElementById('detailTitle').textContent='Xatolik yuz berdi';}
 }
 document.getElementById('detailBack').addEventListener('click',()=>{showView('home');renderAllGrid();});
+
+async function loadComments(animeId){
+  const list=document.getElementById('commentsList');
+  list.innerHTML='<div class="empty-msg">Yuklanmoqda...</div>';
+  try{
+    const comments=await fetchJSON(`${API}/comments/${animeId}`);
+    if(!comments.length){list.innerHTML='<div class="empty-msg">Hali izohlar yoʻq. Birinchi boʻlib yozing!</div>';return;}
+    list.innerHTML='';
+    comments.forEach(c=>{
+      const el=document.createElement('div');el.className='comment-item';
+      const uname=c.username?('@'+c.username):('Foydalanuvchi '+String(c.user_id).slice(-4));
+      el.innerHTML=`<div class="comment-user">${uname}</div><div class="comment-text"></div>`;
+      el.querySelector('.comment-text').textContent=c.text;
+      list.appendChild(el);
+    });
+  }catch(e){list.innerHTML='<div class="empty-msg">Izohlarni yuklab boʻlmadi</div>';}
+}
+document.getElementById('commentSend').addEventListener('click',async()=>{
+  const input=document.getElementById('commentInput');
+  const text=input.value.trim();
+  if(!text||!CURRENT_DETAIL_ID)return;
+  const u=tg?.initDataUnsafe?.user;
+  try{
+    const r=await fetch(`${API}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      user_id:getUid(),anime_id:CURRENT_DETAIL_ID,text,username:u?.username||''
+    })});
+    const res=await r.json();
+    if(res.error){
+      const msg=res.error==='juda tez, biroz kuting'?'Iltimos, biroz kuting va qayta urinib koʻring':'Xatolik: '+res.error;
+      tg?.showAlert?tg.showAlert(msg):alert(msg);
+      return;
+    }
+    input.value='';
+    loadComments(CURRENT_DETAIL_ID);
+  }catch(e){tg?.showAlert?tg.showAlert('Tarmoq xatoligi'):alert('Tarmoq xatoligi');}
+});
 
 function sendEp(eid,animeId){
   const uid=getUid();
@@ -488,17 +661,56 @@ document.getElementById('profilClearHistory').addEventListener('click',()=>{
 });
 
 /* ---------- init ---------- */
+function showHomeError(){
+  document.getElementById('heroSection').style.display='none';
+  document.getElementById('continueSection').style.display='none';
+  document.getElementById('newSection').style.display='none';
+  document.getElementById('popularSection').style.display='none';
+  document.getElementById('recommendSection').style.display='none';
+  document.getElementById('allSectionTitle').textContent='Xatolik';
+  document.getElementById('allGrid').innerHTML=`<div class="retry-wrap" style="grid-column:1/-1;">
+    <div>😕 Maʼlumotlarni yuklab boʻlmadi</div>
+    <button class="retry-btn" id="retryBtn">🔄 Qayta urinish</button>
+  </div>`;
+  document.getElementById('retryBtn').addEventListener('click',init);
+}
 async function init(){
   const ok=await checkAccess();
   if(!ok)return;
   const uid=getUid();
+  skeletonHome();
   try{
-    ALL_ANIME=await fetchJSON(`${API}/animes?user_id=${uid}`);
+    const [animes,banners,categories]=await Promise.all([
+      fetchJSON(`${API}/animes?user_id=${uid}`),
+      fetchJSON(`${API}/banners?user_id=${uid}`).catch(()=>[]),
+      fetchJSON(`${API}/categories?user_id=${uid}`).catch(()=>[])
+    ]);
+    ALL_ANIME=animes;BANNERS=banners||[];CATEGORIES=categories||[];
     renderHome(ALL_ANIME);
   }catch(e){
-    document.getElementById('heroTitle').textContent='Malumot yuklanmadi';
+    showHomeError();
   }
 }
+
+/* ---------- pull to refresh ---------- */
+(function(){
+  let startY=null;let pulling=false;
+  const home=document.getElementById('view-home');
+  const indicator=document.getElementById('pullIndicator');
+  home.addEventListener('touchstart',(e)=>{
+    if(window.scrollY===0){startY=e.touches[0].clientY;pulling=true;}
+  },{passive:true});
+  home.addEventListener('touchmove',(e)=>{
+    if(!pulling||startY===null)return;
+    const diff=e.touches[0].clientY-startY;
+    if(diff>60)indicator.classList.add('show');else indicator.classList.remove('show');
+  },{passive:true});
+  home.addEventListener('touchend',(e)=>{
+    if(pulling&&indicator.classList.contains('show')){init();}
+    indicator.classList.remove('show');startY=null;pulling=false;
+  });
+})();
+
 init();
 </script>
 </body>
