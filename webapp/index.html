@@ -515,6 +515,20 @@ function renderCard(a,variant){
 }
 
 /* ---------- hero carousel ---------- */
+function pickAutoFeatured(list, count=5, periodDays=3){
+  // Baner uchun anime toʻplami sanaga qarab avtomatik almashadi (admin aralashuvisiz).
+  // Barcha foydalanuvchilarda bir xil kunlarda bir xil toʻplam koʻrinadi.
+  if(!list.length)return [];
+  const sorted=[...list].sort((a,b)=>a.id-b.id); // barqaror tartib
+  const epochDays=Math.floor(Date.now()/86400000);
+  const cycle=Math.floor(epochDays/periodDays);
+  const start=(cycle*count)%sorted.length;
+  const picked=[];
+  for(let i=0;i<Math.min(count,sorted.length);i++){
+    picked.push(sorted[(start+i)%sorted.length]);
+  }
+  return picked;
+}
 function renderHero(list){
   if(BANNERS.length){
     heroList=BANNERS.map(b=>({
@@ -522,7 +536,7 @@ function renderHero(list){
       subtitle:b.subtitle, photo_id:b.photo_id
     }));
   }else{
-    heroList=[...list].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,5).map(a=>({kind:'anime',...a}));
+    heroList=pickAutoFeatured(list,5,3).map(a=>({kind:'anime',...a}));
   }
   heroIdx=0;
   document.getElementById('heroCard').classList.remove('skel');
