@@ -122,16 +122,48 @@ button{font-family:inherit;cursor:pointer;}
 .sub-check-btn{margin:0 20px;width:calc(100% - 40px);justify-content:center;}
 
 /* Profil */
-.profil-wrap{padding:32px 18px;text-align:center;}
-.profil-avatar{width:88px;height:88px;border-radius:50%;background:var(--bg-card2);margin:0 auto 14px;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:var(--purple2);overflow:hidden;border:2px solid var(--purple);box-shadow:0 0 18px var(--glow);}
-.profil-avatar img{width:100%;height:100%;object-fit:cover;}
-.profil-name{font-size:17px;font-weight:800;margin-bottom:2px;}
-.profil-username{font-size:13px;color:var(--text-dim);margin-bottom:24px;}
-.profil-stats{display:flex;gap:10px;margin-bottom:24px;}
-.profil-stat{flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:16px 8px;}
-.profil-stat b{display:block;font-size:18px;font-weight:800;}
-.profil-stat span{font-size:11px;color:var(--text-dim);}
-.profil-link{display:flex;align-items:center;gap:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:14px 16px;font-size:13.5px;font-weight:700;margin-bottom:10px;}
+.pf-wrap{padding:0 18px 24px;}
+.pf-card{background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:18px;display:flex;gap:16px;align-items:flex-start;margin:14px 0;}
+.pf-avatar{position:relative;width:76px;height:76px;flex:none;}
+.pf-avatar-img{width:76px;height:76px;border-radius:50%;object-fit:cover;background:var(--bg-card2);border:2px solid var(--purple2);box-shadow:0 0 16px var(--glow);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:var(--purple2);}
+.pf-avatar-img img{width:100%;height:100%;border-radius:50%;object-fit:cover;}
+.pf-online{position:absolute;bottom:2px;right:2px;width:14px;height:14px;border-radius:50%;background:var(--purple2);border:2px solid var(--bg-card);}
+.pf-name{font-size:18px;font-weight:800;margin-bottom:1px;}
+.pf-username{font-size:13px;color:var(--text-dim);margin-bottom:8px;}
+.pf-premium{display:inline-flex;align-items:center;gap:5px;background:rgba(236,72,153,.16);color:#ec4899;font-size:11.5px;font-weight:800;padding:5px 10px;border-radius:20px;margin-bottom:10px;}
+.pf-joined{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-dim);}
+.pf-edit-btn{margin-left:auto;flex:none;background:var(--bg-card2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;padding:9px 13px;border-radius:11px;display:flex;align-items:center;gap:6px;align-self:flex-start;}
+
+.pf-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
+.pf-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px 4px;text-align:center;}
+.pf-stat-icon{font-size:16px;margin-bottom:6px;}
+.pf-stat b{display:block;font-size:16px;font-weight:800;}
+.pf-stat span{font-size:10px;color:var(--text-dim);}
+
+.pf-section{background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:16px;margin-bottom:14px;}
+.pf-section-title{font-size:14px;font-weight:800;margin-bottom:12px;}
+.pf-row{display:flex;align-items:center;gap:11px;padding:11px 0;}
+.pf-row + .pf-row{border-top:1px solid var(--border);}
+.pf-icon-box{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;flex:none;}
+.pf-row-label{flex:1;font-size:13.5px;font-weight:600;}
+.pf-row-val{font-size:12px;color:var(--text-dim);font-weight:600;}
+.pf-row-arrow{color:var(--text-dim);font-size:13px;}
+.pf-row.danger .pf-row-label{color:var(--red2);}
+.pf-row-btn{background:none;border:none;display:flex;align-items:center;gap:11px;width:100%;text-align:left;color:var(--text);padding:0;}
+
+.pf-toggle{width:42px;height:24px;border-radius:20px;background:var(--border);position:relative;flex:none;transition:background .2s;}
+.pf-toggle.on{background:linear-gradient(135deg,var(--purple2),var(--purple));}
+.pf-toggle::after{content:'';position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .2s;}
+.pf-toggle.on::after{transform:translateX(18px);}
+
+.pf-recent-card{width:150px;flex:none;}
+.pf-recent-img{width:150px;height:88px;border-radius:12px;object-fit:cover;background:var(--bg-card2);}
+.pf-recent-title{font-size:12.5px;font-weight:700;margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pf-recent-sub{font-size:11px;color:var(--text-dim);margin-top:2px;}
+.pf-progress{height:4px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden;}
+.pf-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--purple2),var(--purple));}
+
+body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e2ea;--text:#14141c;--text-dim:#6b6b7c;}
 
 /* Category chips */
 .chip-row{display:flex;gap:8px;overflow-x:auto;padding:0 18px 4px;scrollbar-width:none;}
@@ -239,16 +271,66 @@ button{font-family:inherit;cursor:pointer;}
 </main>
 
 <main id="view-profil" class="view">
-  <div class="profil-wrap">
-    <div class="profil-avatar" id="profilAvatar">?</div>
-    <div class="profil-name" id="profilName">Foydalanuvchi</div>
-    <div class="profil-username" id="profilUsername"></div>
-    <div class="profil-stats">
-      <div class="profil-stat"><b id="statFav">0</b><span>Sevimli</span></div>
-      <div class="profil-stat"><b id="statWatched">0</b><span>Ko'rilgan</span></div>
+  <div class="topbar">
+    <div class="brand-name" style="font-size:18px;">Profil</div>
+    <div style="display:flex;gap:8px;">
+      <button class="bell" id="pfThemeBtn">🌙</button>
+      <button class="bell" id="pfBellBtn">🔔<span class="dot"></span></button>
     </div>
-    <button class="profil-link" id="profilBotLink">🤖 &nbsp; Botga o'tish</button>
-    <button class="profil-link" id="profilClearHistory">🗑️ &nbsp; Tarixni tozalash</button>
+  </div>
+
+  <div class="pf-wrap">
+    <div class="pf-card">
+      <div class="pf-avatar"><div class="pf-avatar-img" id="profilAvatar">?</div><div class="pf-online"></div></div>
+      <div style="flex:1;min-width:0;">
+        <div class="pf-name" id="profilName">Foydalanuvchi</div>
+        <div class="pf-username" id="profilUsername"></div>
+        <div class="pf-premium" id="profilPremium" style="display:none;">👑 Premium</div>
+        <div class="pf-joined">📅 &nbsp;<span id="profilJoined">Botga qo'shilgan sana: —</span></div>
+      </div>
+      <button class="pf-edit-btn" id="profilEditBtn">✏️ Tahrirlash</button>
+    </div>
+
+    <div class="pf-stats">
+      <div class="pf-stat"><div class="pf-stat-icon">💜</div><b id="statFav">0</b><span>Sevimlilar</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon">👁️</div><b id="statWatched">0</b><span>Ko'rilgan</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon">🕐</div><b id="statTime">0 soat</b><span>Tomosha vaqti</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon">🔥</div><b id="statStreak">0</b><span>Davom etishda</span></div>
+    </div>
+
+    <div class="section" style="padding:0 0 14px;" id="pfRecentSection">
+      <div class="section-head" style="margin-bottom:10px;">
+        <div class="section-title" style="font-size:14px;">Oxirgi ko'rilganlar</div>
+      </div>
+      <div class="row-scroll" id="pfRecentRow"></div>
+    </div>
+
+    <div class="pf-section">
+      <div class="pf-section-title">Sozlamalar</div>
+      <div class="pf-row"><div class="pf-icon-box" style="background:rgba(139,92,246,.18);color:#a78bfa;">☀️</div><div class="pf-row-label">Mavzu</div><button class="pf-row-btn" id="pfTheme" style="width:auto;"><span class="pf-row-val" id="pfThemeVal">Qorong'i</span> <span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">🌐</div><div class="pf-row-label">Til</div><button class="pf-row-btn" id="pfLang" style="width:auto;"><span class="pf-row-val">O'zbekcha</span> <span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><div class="pf-icon-box" style="background:rgba(34,197,94,.18);color:#4ade80;">HD</div><div class="pf-row-label">Video sifati</div><button class="pf-row-btn" id="pfQuality" style="width:auto;"><span class="pf-row-val" id="pfQualityVal">Auto (720p)</span> <span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><div class="pf-icon-box" style="background:rgba(245,197,66,.18);color:var(--gold);">🔔</div><div class="pf-row-label">Bildirishnomalar</div><div class="pf-toggle on" id="pfNotifToggle"></div></div>
+    </div>
+
+    <div class="pf-section">
+      <div class="pf-section-title"></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfClearHistory"><div class="pf-icon-box" style="background:rgba(34,197,94,.18);color:#4ade80;">🕐</div><div class="pf-row-label">Tarixni tozalash</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfClearCache"><div class="pf-icon-box" style="background:rgba(239,68,68,.18);color:var(--red2);">🗑</div><div class="pf-row-label">Keshni tozalash</div><span class="pf-row-val" id="pfCacheSize">0 KB</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfDownloads"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">⬇️</div><div class="pf-row-label">Yuklamalar</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfPrivacy"><div class="pf-icon-box" style="background:rgba(139,92,246,.18);color:#a78bfa;">🛡️</div><div class="pf-row-label">Maxfiylik</div><span class="pf-row-arrow">›</span></button></div>
+    </div>
+
+    <div class="pf-section">
+      <div class="pf-section-title">Boshqa</div>
+      <div class="pf-row"><button class="pf-row-btn" id="profilBotLink"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">📤</div><div class="pf-row-label">Botga o'tish</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfChannel"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">📣</div><div class="pf-row-label">Telegram kanal</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfSupport"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">❓</div><div class="pf-row-label">Qo'llab-quvvatlash</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfRate"><div class="pf-icon-box" style="background:rgba(245,197,66,.18);color:var(--gold);">⭐</div><div class="pf-row-label">Ilovani baholash</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfAbout"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">ℹ️</div><div class="pf-row-label">Ilova haqida</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfTerms"><div class="pf-icon-box" style="background:rgba(34,197,94,.18);color:#4ade80;">✅</div><div class="pf-row-label">Foydalanish qoidalari</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row danger"><button class="pf-row-btn" id="pfExit"><div class="pf-icon-box" style="background:rgba(239,68,68,.18);color:var(--red2);">🔒</div><div class="pf-row-label">Chiqish</div><span class="pf-row-arrow">›</span></button></div>
+    </div>
   </div>
 </main>
 
@@ -304,6 +386,9 @@ button{font-family:inherit;cursor:pointer;}
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 const API='/api';
+/* TODO: bu 2ta manzilni haqiqiy telegram kanal va admin support username'ga almashtiring */
+const CHANNEL_URL='https://t.me/anifilm_kanal';
+const SUPPORT_URL='https://t.me/anifilm_support';
 let ALL_ANIME=[];
 let ACTIVE_TYPE='all';
 let ACTIVE_CATEGORY='';
@@ -344,7 +429,46 @@ function toggleFav(id){let f=favIds();f=f.includes(id)?f.filter(x=>x!==id):[...f
 function historyIds(){try{return JSON.parse(localStorage.getItem('anifilm_history')||'[]');}catch(e){return [];}}
 function pushHistory(id){let h=historyIds().filter(x=>x!==id);h.unshift(id);localStorage.setItem('anifilm_history',JSON.stringify(h.slice(0,15)));}
 function watchedEpIds(){try{return JSON.parse(localStorage.getItem('anifilm_watched_eps')||'[]');}catch(e){return [];}}
-function markEpWatched(epId){let w=watchedEpIds();if(!w.includes(epId)){w.push(epId);localStorage.setItem('anifilm_watched_eps',JSON.stringify(w));}}
+function markEpWatched(epId){let w=watchedEpIds();if(!w.includes(epId)){w.push(epId);localStorage.setItem('anifilm_watched_eps',JSON.stringify(w));}recordWatchDay();}
+
+/* ---------- profil: streak & watch time (client-side estimate) ---------- */
+function todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function watchDays(){try{return JSON.parse(localStorage.getItem('anifilm_watch_days')||'[]');}catch(e){return [];}}
+function recordWatchDay(){const days=watchDays();const t=todayStr();if(!days.includes(t)){days.push(t);localStorage.setItem('anifilm_watch_days',JSON.stringify(days.slice(-90)));}}
+function calcStreak(){
+  const days=new Set(watchDays());
+  let streak=0;let cur=new Date();
+  // agar bugun ko'rilmagan bo'lsa ham, kechagi kundan hisoblashga ruxsat beramiz
+  if(!days.has(todayStr()))cur.setDate(cur.getDate()-1);
+  while(true){
+    const s=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
+    if(days.has(s)){streak++;cur.setDate(cur.getDate()-1);}else break;
+  }
+  return streak;
+}
+function calcWatchHours(){
+  const mins=watchedEpIds().length*24; // taxminan 24 daq/qism
+  return (mins/60).toFixed(mins>=60?0:1);
+}
+function cacheSizeKB(){
+  let bytes=0;
+  for(const k in localStorage){if(k.startsWith('anifilm_'))bytes+=(localStorage.getItem(k)||'').length;}
+  return bytes<1024?bytes+' B':(bytes/1024).toFixed(1)+' KB';
+}
+function formatJoinDate(iso){
+  if(!iso)return '—';
+  const d=new Date(iso.replace(' ','T'));
+  if(isNaN(d))return '—';
+  return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear();
+}
+function applyTheme(light){
+  document.body.classList.toggle('light-theme',light);
+  localStorage.setItem('anifilm_theme',light?'light':'dark');
+  const btn=document.getElementById('pfThemeBtn');if(btn)btn.textContent=light?'☀️':'🌙';
+  const val=document.getElementById('pfThemeVal');if(val)val.textContent=light?"Yorug'":"Qorong'i";
+}
+(function(){applyTheme(localStorage.getItem('anifilm_theme')==='light');})();
+
 
 function formatViews(n){n=n||0;if(n>=1000000)return(n/1000000).toFixed(1)+'M';if(n>=1000)return(n/1000).toFixed(1)+'K';return String(n);}
 function placeholderImg(t){return`https://placehold.co/300x420/15151d/7c5cff?text=${encodeURIComponent(t||'Anime')}`;}
@@ -518,16 +642,63 @@ function renderFavorites(){
 }
 
 /* ---------- profil tab ---------- */
-function renderProfil(){
+async function renderProfil(){
   const u=tg?.initDataUnsafe?.user;
   const av=document.getElementById('profilAvatar');
   if(u?.photo_url){av.innerHTML=`<img src="${u.photo_url}">`;}
   else{av.textContent=(u?.first_name||'?').charAt(0).toUpperCase();}
   document.getElementById('profilName').textContent=u?[u.first_name,u.last_name].filter(Boolean).join(' '):'Foydalanuvchi';
   document.getElementById('profilUsername').textContent=u?.username?'@'+u.username:'';
+
   document.getElementById('statFav').textContent=favIds().length;
   document.getElementById('statWatched').textContent=historyIds().length;
+  document.getElementById('statTime').textContent=calcWatchHours()+' soat';
+  document.getElementById('statStreak').textContent=calcStreak();
+  document.getElementById('pfCacheSize').textContent=cacheSizeKB();
+
+  const vq=localStorage.getItem('anifilm_quality')||'Auto (720p)';
+  document.getElementById('pfQualityVal').textContent=vq;
+  const notifOn=localStorage.getItem('anifilm_notif')!=='0';
+  document.getElementById('pfNotifToggle').classList.toggle('on',notifOn);
+
+  // qo'shilgan sana - backenddan
+  document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: ...";
+  fetchJSON(`${API}/profile?user_id=${getUid()}`).then(p=>{
+    document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: "+formatJoinDate(p.joined_at);
+    const badge=document.getElementById('profilPremium');
+    if(p.is_premium){badge.style.display='inline-flex';}else{badge.style.display='none';}
+  }).catch(()=>{document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: —";});
+
+  renderRecentProfil();
 }
+
+async function renderRecentProfil(){
+  const wrap=document.getElementById('pfRecentRow');
+  const section=document.getElementById('pfRecentSection');
+  const ids=historyIds().slice(0,8);
+  if(!ids.length){section.style.display='none';return;}
+  section.style.display='';
+  wrap.innerHTML='';
+  const items=ids.map(id=>ALL_ANIME.find(a=>a.id===id)).filter(Boolean);
+  const watched=new Set(watchedEpIds());
+  const details=await Promise.all(items.map(a=>fetchJSON(`${API}/animes/${a.id}`).catch(()=>null)));
+  items.forEach((a,i)=>{
+    const det=details[i];
+    const eps=det?.episodes||[];
+    const watchedCount=eps.filter(e=>watched.has(e.id)).length;
+    const total=eps.length||a.episode_count||0;
+    const pct=total?Math.round(watchedCount/total*100):0;
+    const c=document.createElement('div');
+    c.className='pf-recent-card';
+    c.innerHTML=`<img class="pf-recent-img" src="${posterUrl(a)}">
+      <div class="pf-recent-title">${a.title}</div>
+      <div class="pf-recent-sub">${total?watchedCount+'/'+total+'-qismgacha':'Malumot yoʻq'}</div>
+      <div class="pf-progress"><i style="width:${pct}%"></i></div>`;
+    c.addEventListener('click',()=>openDetail(a.id));
+    wrap.appendChild(c);
+  });
+}
+
 
 /* ---------- detail ---------- */
 let CURRENT_DETAIL_ID=null;
@@ -658,12 +829,53 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
 }));
 document.getElementById('bellBtn').addEventListener('click',()=>{tg?.showAlert?tg.showAlert('Hozircha yangi bildirishnomalar yoʻq'):alert('Hozircha yangi bildirishnomalar yoʻq');});
 document.getElementById('profilBotLink').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
-document.getElementById('profilClearHistory').addEventListener('click',()=>{
+
+function pfAlert(msg){tg?.showAlert?tg.showAlert(msg):alert(msg);}
+function pfOpenLink(url){tg?.openTelegramLink?tg.openTelegramLink(url):window.open(url,'_blank');}
+
+document.getElementById('pfBellBtn').addEventListener('click',()=>pfAlert('Hozircha yangi bildirishnomalar yoʻq'));
+document.getElementById('profilEditBtn').addEventListener('click',()=>pfAlert('Profil maʼlumotlari Telegram akkauntingizdan olinadi. Oʻzgartirish uchun Telegram sozlamalariga oʻting.'));
+
+document.getElementById('pfThemeBtn').addEventListener('click',()=>applyTheme(!document.body.classList.contains('light-theme')));
+document.getElementById('pfTheme').addEventListener('click',()=>applyTheme(!document.body.classList.contains('light-theme')));
+document.getElementById('pfLang').addEventListener('click',()=>pfAlert("Hozircha faqat oʻzbekcha til mavjud. Boshqa tillar tez orada qoʻshiladi."));
+document.getElementById('pfQuality').addEventListener('click',()=>{
+  const opts=['Auto (720p)','1080p','480p','360p'];
+  const cur=localStorage.getItem('anifilm_quality')||opts[0];
+  const next=opts[(opts.indexOf(cur)+1)%opts.length];
+  localStorage.setItem('anifilm_quality',next);
+  document.getElementById('pfQualityVal').textContent=next;
+});
+document.getElementById('pfNotifToggle').addEventListener('click',(e)=>{
+  const on=!e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on',on);
+  localStorage.setItem('anifilm_notif',on?'1':'0');
+});
+
+document.getElementById('pfClearHistory').addEventListener('click',()=>{
   localStorage.removeItem('anifilm_history');
   localStorage.removeItem('anifilm_watched_eps');
+  localStorage.removeItem('anifilm_watch_days');
   if(document.getElementById('view-profil').classList.contains('active'))renderProfil();
   document.getElementById('continueSection').style.display='none';
 });
+document.getElementById('pfClearCache').addEventListener('click',()=>{
+  const favs=favIds();
+  Object.keys(localStorage).filter(k=>k.startsWith('anifilm_')&&k!=='anifilm_favs'&&k!=='anifilm_theme').forEach(k=>localStorage.removeItem(k));
+  setFavIds(favs);
+  document.getElementById('pfCacheSize').textContent=cacheSizeKB();
+  pfAlert('✅ Kesh tozalandi');
+});
+document.getElementById('pfDownloads').addEventListener('click',()=>pfAlert('Yuklab olingan qismlar Telegram chatida botning oʻzida saqlanadi.'));
+document.getElementById('pfPrivacy').addEventListener('click',()=>pfAlert('Maxfiylik siyosati: foydalanuvchi maʼlumotlari faqat bot ichida xizmat sifatini yaxshilash uchun ishlatiladi va uchinchi shaxslarga berilmaydi.'));
+
+document.getElementById('pfChannel').addEventListener('click',()=>pfOpenLink(CHANNEL_URL));
+document.getElementById('pfSupport').addEventListener('click',()=>pfOpenLink(SUPPORT_URL));
+document.getElementById('pfRate').addEventListener('click',()=>pfAlert('⭐ Ilovani yoqtirsangiz, do\'stlaringizga ham tavsiya qiling!'));
+document.getElementById('pfAbout').addEventListener('click',()=>pfAlert('ANIFILM BOT — anime film va seriallarni bevosita Telegram ichida tomosha qiling.'));
+document.getElementById('pfTerms').addEventListener('click',()=>pfAlert('Botdan foydalanish orqali siz xizmat qoidalariga rozilik bildirasiz. Kontentni tarqatish taqiqlanadi.'));
+document.getElementById('pfExit').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
+
 
 /* ---------- init ---------- */
 function showHomeError(){
