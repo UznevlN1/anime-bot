@@ -386,9 +386,9 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 const API='/api';
-/* TODO: bu 2ta manzilni haqiqiy telegram kanal va admin support username'ga almashtiring */
-const CHANNEL_URL='https://t.me/anifilm_kanal';
-const SUPPORT_URL='https://t.me/anifilm_support';
+/* Kanal va support havolalari botdagi Admin panel > 🔗 Havolalar boʻlimidan sozlanadi */
+let CHANNEL_URL='';
+let SUPPORT_URL='';
 let ALL_ANIME=[];
 let ACTIVE_TYPE='all';
 let ACTIVE_CATEGORY='';
@@ -667,6 +667,8 @@ async function renderProfil(){
     document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: "+formatJoinDate(p.joined_at);
     const badge=document.getElementById('profilPremium');
     if(p.is_premium){badge.style.display='inline-flex';}else{badge.style.display='none';}
+    CHANNEL_URL=p.channel_url||'';
+    SUPPORT_URL=p.support_url||'';
   }).catch(()=>{document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: —";});
 
   renderRecentProfil();
@@ -869,8 +871,8 @@ document.getElementById('pfClearCache').addEventListener('click',()=>{
 document.getElementById('pfDownloads').addEventListener('click',()=>pfAlert('Yuklab olingan qismlar Telegram chatida botning oʻzida saqlanadi.'));
 document.getElementById('pfPrivacy').addEventListener('click',()=>pfAlert('Maxfiylik siyosati: foydalanuvchi maʼlumotlari faqat bot ichida xizmat sifatini yaxshilash uchun ishlatiladi va uchinchi shaxslarga berilmaydi.'));
 
-document.getElementById('pfChannel').addEventListener('click',()=>pfOpenLink(CHANNEL_URL));
-document.getElementById('pfSupport').addEventListener('click',()=>pfOpenLink(SUPPORT_URL));
+document.getElementById('pfChannel').addEventListener('click',()=>{CHANNEL_URL?pfOpenLink(CHANNEL_URL):pfAlert('Kanal havolasi hali sozlanmagan.');});
+document.getElementById('pfSupport').addEventListener('click',()=>{SUPPORT_URL?pfOpenLink(SUPPORT_URL):pfAlert('Support havolasi hali sozlanmagan.');});
 document.getElementById('pfRate').addEventListener('click',()=>pfAlert('⭐ Ilovani yoqtirsangiz, do\'stlaringizga ham tavsiya qiling!'));
 document.getElementById('pfAbout').addEventListener('click',()=>pfAlert('ANIFILM BOT — anime film va seriallarni bevosita Telegram ichida tomosha qiling.'));
 document.getElementById('pfTerms').addEventListener('click',()=>pfAlert('Botdan foydalanish orqali siz xizmat qoidalariga rozilik bildirasiz. Kontentni tarqatish taqiqlanadi.'));
