@@ -22,7 +22,7 @@
   --glow-red:rgba(239,68,68,.4);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:78px;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:96px;}
 img{-webkit-user-drag:none;}
 button{font-family:inherit;cursor:pointer;}
 
@@ -198,11 +198,11 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .watch-stat{display:inline-flex;align-items:center;gap:4px;color:var(--purple2);font-weight:700;}
 
 /* Tabbar */
-.tabbar{position:fixed;bottom:0;left:0;right:0;background:rgba(12,12,18,.92);backdrop-filter:blur(14px);border-top:1px solid var(--border);display:flex;padding:10px 0 max(10px,env(safe-area-inset-bottom));z-index:10;}
-.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;color:var(--text-dim);font-size:10.5px;font-weight:700;}
-.tab-icon{font-size:19px;width:38px;height:38px;border-radius:14px;display:flex;align-items:center;justify-content:center;transition:all .2s ease;}
-.tab.active{color:var(--purple2);}
-.tab.active .tab-icon{background:linear-gradient(135deg,var(--purple2),var(--purple));box-shadow:0 4px 16px var(--glow);transform:translateY(-2px);}
+.tabbar{position:fixed;left:14px;right:14px;bottom:calc(12px + env(safe-area-inset-bottom));background:rgba(255,255,255,.08);backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.16);border-radius:26px;display:flex;padding:7px;gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);z-index:10;}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none;border:none;color:rgba(255,255,255,.5);font-size:9.5px;font-weight:700;padding:8px 0;border-radius:19px;transition:all .2s ease;}
+.tab-icon{font-size:18px;width:34px;height:34px;border-radius:12px;display:flex;align-items:center;justify-content:center;transition:all .2s ease;}
+.tab.active{color:#fff;background:rgba(255,255,255,.06);}
+.tab.active .tab-icon{background:linear-gradient(135deg,var(--purple2),var(--purple));box-shadow:0 4px 14px var(--glow);transform:translateY(-1px);}
 </style>
 </head>
 <body>
