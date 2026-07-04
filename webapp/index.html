@@ -129,8 +129,9 @@ button{font-family:inherit;cursor:pointer;}
 .player-topbar button{background:rgba(255,255,255,.14);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);color:#fff;width:38px;height:38px;border-radius:12px;font-size:16px;flex:none;transition:background .15s;}
 .player-topbar button:active{background:rgba(255,255,255,.28);}
 .player-title{font-size:13.5px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5);}
-.player-video-wrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;background:#000;}
-.player-video-wrap video{width:100%;max-height:100%;}
+.player-video-wrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(180deg,#07160f 0%,#000 38%,#000 62%,#07160f 100%);overflow:hidden;}
+.player-video-wrap::before{content:'ANIFILM BOT';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;letter-spacing:6px;color:rgba(21,168,98,.4);text-shadow:0 0 24px rgba(21,168,98,.35);z-index:0;pointer-events:none;}
+.player-video-wrap video{width:100%;max-height:100%;pointer-events:none;position:relative;z-index:1;background:#000;}
 .player-tap-catcher{position:absolute;inset:0;z-index:1;}
 .player-loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#000;z-index:3;}
 .player-loading.active{display:flex;}
@@ -149,7 +150,6 @@ button{font-family:inherit;cursor:pointer;}
 .player-time{color:rgba(255,255,255,.85);font-size:11.5px;font-weight:600;flex:1;letter-spacing:.2px;}
 .player-fs-btn{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:14px;flex:none;}
 .player-skip-btn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;width:40px;height:32px;flex:none;display:flex;align-items:center;justify-content:center;gap:1px;}
-.player-video-wrap video{pointer-events:none;}
 
 /* "Kengaytirish" — video landshaft holatda toʻliq ekranni egallashi uchun aylantirish */
 .player-view.landscape .player-video-wrap{
