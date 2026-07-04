@@ -107,7 +107,8 @@ button{font-family:inherit;cursor:pointer;}
 .detail-desc{font-size:13px;line-height:1.6;color:#c9c9d6;margin-bottom:18px;}
 .ep-head{font-size:15px;font-weight:800;margin-bottom:12px;padding:0 18px;}
 .ep-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 18px 24px;}
-.ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:12px 0;border-radius:11px;font-size:13px;font-weight:700;text-align:center;position:relative;}
+.ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:12px 0;border-radius:11px;font-size:13px;font-weight:700;text-align:center;position:relative;white-space:nowrap;}
+.ep-btn.ep-btn-full{grid-column:1/-1;padding:15px 0;font-size:14.5px;}
 .ep-btn:active{background:var(--purple);border-color:var(--purple);}
 .ep-btn.watched{background:rgba(8,145,178,.16);border-color:var(--purple2);color:var(--purple2);}
 .ep-btn.watched::after{content:'✓';position:absolute;top:3px;right:6px;font-size:10px;color:var(--purple2);}
@@ -125,7 +126,8 @@ button{font-family:inherit;cursor:pointer;}
 /* Toʻliq ekran video pleer */
 .player-view{position:fixed;inset:0;background:#000;z-index:60;display:none;flex-direction:column;}
 .player-view.active{display:flex;}
-.player-topbar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:16px;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,.75) 0%,rgba(0,0,0,.35) 60%,transparent 100%);}
+.player-topbar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:16px;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,.75) 0%,rgba(0,0,0,.35) 60%,transparent 100%);transition:opacity .25s;}
+.player-topbar.hidden{opacity:0;pointer-events:none;}
 .player-topbar button{background:rgba(255,255,255,.14);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);color:#fff;width:38px;height:38px;border-radius:12px;font-size:16px;flex:none;transition:background .15s;}
 .player-topbar button:active{background:rgba(255,255,255,.28);}
 .player-title{font-size:13.5px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5);}
@@ -814,7 +816,7 @@ async function openDetail(id){
     const watched=watchedEpIds();
     (d.episodes||[]).forEach(ep=>{
       const b=document.createElement('button');
-      b.className='ep-btn'+(watched.includes(ep.id)?' watched':'');
+      b.className='ep-btn'+(watched.includes(ep.id)?' watched':'')+(d.media_type==='film'?' ep-btn-full':'');
       b.textContent=d.media_type==='film'?'▶ Tomosha qilish':`${ep.episode_number}-qism`;
       b.addEventListener('click',()=>openEpModal(ep,d.id,d.title,b,d.media_type));
       grid.appendChild(b);
@@ -907,6 +909,7 @@ const pvPlayBtn=document.getElementById('playerPlayBtn');
 const pvTime=document.getElementById('playerTime');
 const pvControls=document.getElementById('playerControls');
 const pvLoading=document.getElementById('playerLoading');
+const pvTopbar=document.querySelector('.player-topbar');
 let pvHideTimer=null;
 let pvSeeking=false;
 
@@ -919,8 +922,9 @@ function fmtTime(s){
 }
 function pvShowControls(autoHide=true){
   pvControls.classList.remove('hidden');
+  pvTopbar.classList.remove('hidden');
   clearTimeout(pvHideTimer);
-  if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>pvControls.classList.add('hidden'),3000);
+  if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>{pvControls.classList.add('hidden');pvTopbar.classList.add('hidden');},3000);
 }
 function pvGetPositions(){try{return JSON.parse(localStorage.getItem('anifilm_positions')||'{}');}catch(e){return {};}}
 function pvSavePosition(epId,seconds){
