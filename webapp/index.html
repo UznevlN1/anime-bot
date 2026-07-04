@@ -148,6 +148,7 @@ button{font-family:inherit;cursor:pointer;}
 .player-play-btn{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--purple2),var(--purple));border:none;color:#fff;font-size:14px;flex:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px var(--glow);}
 .player-time{color:rgba(255,255,255,.85);font-size:11.5px;font-weight:600;flex:1;letter-spacing:.2px;}
 .player-fs-btn{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:14px;flex:none;}
+.player-skip-btn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;width:40px;height:32px;flex:none;display:flex;align-items:center;justify-content:center;gap:1px;}
 .player-video-wrap video{pointer-events:none;}
 
 /* "Kengaytirish" — video landshaft holatda toʻliq ekranni egallashi uchun aylantirish */
@@ -446,7 +447,9 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <div class="player-controls" id="playerControls">
       <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" step="0.1">
       <div class="player-controls-row">
+        <button class="player-skip-btn" id="playerSkipBack">⏪15</button>
         <button class="player-play-btn" id="playerPlayBtn">▶</button>
+        <button class="player-skip-btn" id="playerSkipFwd">15⏩</button>
         <span class="player-time" id="playerTime">0:00 / 0:00</span>
         <button class="player-fs-btn" id="playerFsBtn">⛶</button>
       </div>
@@ -957,6 +960,14 @@ document.getElementById('playerTapCatcher').addEventListener('click',()=>{
 });
 pvPlayBtn.addEventListener('click',()=>{
   if(pv.paused){pv.play();}else{pv.pause();}
+  pvShowControls();
+});
+document.getElementById('playerSkipBack').addEventListener('click',()=>{
+  pv.currentTime=Math.max(0,pv.currentTime-15);
+  pvShowControls();
+});
+document.getElementById('playerSkipFwd').addEventListener('click',()=>{
+  pv.currentTime=Math.min(pv.duration||pv.currentTime+15,pv.currentTime+15);
   pvShowControls();
 });
 pv.addEventListener('play',()=>{pvPlayBtn.textContent='⏸';pvShowControls();});
