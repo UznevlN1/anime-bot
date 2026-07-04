@@ -219,7 +219,11 @@ button{font-family:inherit;cursor:pointer;}
 
 body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e2ea;--text:#14141c;--text-dim:#6b6b7c;}
 
-/* Category chips */
+/* Sponsor baner */
+.sponsor-banner{position:relative;margin:14px 18px;border-radius:16px;overflow:hidden;border:1px solid var(--border);background:var(--bg-card);}
+.sponsor-img{width:100%;display:block;aspect-ratio:16/6;object-fit:cover;}
+.sponsor-tag{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);color:rgba(255,255,255,.85);font-size:10px;font-weight:700;padding:4px 9px;border-radius:20px;letter-spacing:.3px;z-index:1;}
+.sponsor-title{padding:10px 14px;font-size:13px;font-weight:700;}
 .chip-row{display:flex;gap:8px;overflow-x:auto;padding:0 18px 4px;scrollbar-width:none;}
 .chip-row::-webkit-scrollbar{display:none;}
 .chip{flex:none;padding:9px 15px;border-radius:20px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);font-size:12.5px;font-weight:700;}
@@ -289,6 +293,12 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
       </div>
     </div>
     <div class="hero-dots" id="heroDots"></div>
+  </div>
+
+  <div class="sponsor-banner" id="sponsorBanner" style="display:none;">
+    <span class="sponsor-tag">Reklama</span>
+    <img id="sponsorImg" class="sponsor-img">
+    <div class="sponsor-title" id="sponsorTitle"></div>
   </div>
 
   <div class="section" id="newSection">
@@ -718,7 +728,22 @@ function renderRecommendations(){
   sec.style.display='';
   renderRow('recommendRow',scored);
 }
-function renderHome(list){renderHero(list);renderNewArrivals();renderPopular();renderCategoryChips();renderRecommendations();renderAllGrid();}
+function renderHome(list){renderHero(list);renderSponsorBanner();renderNewArrivals();renderPopular();renderCategoryChips();renderRecommendations();renderAllGrid();}
+
+let sponsorLoaded=false;
+function renderSponsorBanner(){
+  if(sponsorLoaded)return;
+  sponsorLoaded=true;
+  fetchJSON(`${API}/sponsor`).then(s=>{
+    if(!s.enabled)return;
+    const banner=document.getElementById('sponsorBanner');
+    document.getElementById('sponsorImg').src=s.photo_url;
+    document.getElementById('sponsorTitle').textContent=s.title||'';
+    document.getElementById('sponsorTitle').style.display=s.title?'':'none';
+    banner.style.display='block';
+    banner.onclick=()=>{if(s.url)(tg?.openLink?tg.openLink(s.url):window.open(s.url,'_blank'));};
+  }).catch(()=>{});
+}
 
 /* ---------- favorites tab ---------- */
 function renderFavorites(){
