@@ -286,11 +286,6 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <div class="hero-dots" id="heroDots"></div>
   </div>
 
-  <div class="section" id="continueSection" style="display:none;">
-    <div class="section-head"><div class="section-title">Davom etishda</div></div>
-    <div class="row-scroll" id="continueRow"></div>
-  </div>
-
   <div class="section" id="newSection">
     <div class="section-head"><div class="section-title">Yangi qo'shilganlar</div></div>
     <div class="row-scroll" id="newRow"></div>
@@ -587,7 +582,7 @@ function renderCard(a,variant){
   }else if(variant==='new'){
     sub=`<div class="card-sub">${typeLabel} • ${a.year||''}</div>`;
   }else{
-    sub=`<div class="card-sub">${a.episode_count||0}-epizod</div>`;
+    sub=`<div class="card-sub">${a.media_type==='film'?'Film':`${a.episode_count||0}-epizod`}</div>`;
   }
   d.innerHTML=inner+`<div class="card-title">${a.title}</div>`+sub;
   d.querySelector('.card-img-wrap').addEventListener('click',()=>openDetail(a.id));
@@ -660,14 +655,6 @@ function renderRow(elId,list,variantFn){
   const el=document.getElementById(elId);el.innerHTML='';
   list.forEach((a,i)=>el.appendChild(renderCard(a,variantFn?variantFn(a,i):null)));
 }
-function renderContinue(){
-  const hist=historyIds();
-  const items=hist.map(id=>ALL_ANIME.find(a=>a.id===id)).filter(Boolean).slice(0,8);
-  const sec=document.getElementById('continueSection');
-  if(!items.length){sec.style.display='none';return;}
-  sec.style.display='';
-  renderRow('continueRow',items,()=>'continue');
-}
 function renderNewArrivals(){
   const items=[...ALL_ANIME].sort((a,b)=>b.id-a.id).slice(0,8);
   renderRow('newRow',items,()=>'new');
@@ -685,7 +672,6 @@ function renderAllGrid(){
   document.getElementById('allSectionTitle').textContent=q?`"${q}" bo'yicha natijalar`:(ACTIVE_CATEGORY||'Barchasi');
   const isFiltering=q||ACTIVE_TYPE!=='all'||ACTIVE_CATEGORY;
   document.getElementById('heroSection').style.display=isFiltering?'none':(heroList.length?'':'none');
-  document.getElementById('continueSection').style.display=isFiltering?'none':(historyIds().length?'':'none');
   document.getElementById('newSection').style.display=isFiltering?'none':'';
   document.getElementById('popularSection').style.display=isFiltering?'none':'';
   document.getElementById('recommendSection').style.display=isFiltering?'none':document.getElementById('recommendSection').dataset.has==='1'?'':'none';
@@ -727,7 +713,7 @@ function renderRecommendations(){
   sec.style.display='';
   renderRow('recommendRow',scored);
 }
-function renderHome(list){renderHero(list);renderNewArrivals();renderPopular();renderContinue();renderCategoryChips();renderRecommendations();renderAllGrid();}
+function renderHome(list){renderHero(list);renderNewArrivals();renderPopular();renderCategoryChips();renderRecommendations();renderAllGrid();}
 
 /* ---------- favorites tab ---------- */
 function renderFavorites(){
@@ -787,11 +773,13 @@ async function renderRecentProfil(){
     const watchedCount=eps.filter(e=>watched.has(e.id)).length;
     const total=eps.length||a.episode_count||0;
     const pct=total?Math.round(watchedCount/total*100):0;
+    const isFilm=a.media_type==='film';
+    const subText=isFilm?(watchedCount?"Film • tomosha qilingan":'Film'):(total?watchedCount+'/'+total+'-qismgacha':'Malumot yoʻq');
     const c=document.createElement('div');
     c.className='pf-recent-card';
     c.innerHTML=`<img class="pf-recent-img" src="${posterUrl(a)}">
       <div class="pf-recent-title">${a.title}</div>
-      <div class="pf-recent-sub">${total?watchedCount+'/'+total+'-qismgacha':'Malumot yoʻq'}</div>
+      <div class="pf-recent-sub">${subText}</div>
       <div class="pf-progress"><i style="width:${pct}%"></i></div>`;
     c.addEventListener('click',()=>openDetail(a.id));
     wrap.appendChild(c);
@@ -933,7 +921,16 @@ function pvShowControls(autoHide=true){
   clearTimeout(pvHideTimer);
   if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>pvControls.classList.add('hidden'),3000);
 }
+function pvGetPositions(){try{return JSON.parse(localStorage.getItem('anifilm_positions')||'{}');}catch(e){return {};}}
+function pvSavePosition(epId,seconds){
+  const pos=pvGetPositions();
+  if(seconds<5){delete pos[epId];}else{pos[epId]=seconds;}
+  localStorage.setItem('anifilm_positions',JSON.stringify(pos));
+}
 function openPlayer(epId,title){
+  pvRetryCount=0;
+  pvLastEpId=epId;
+  pvLastTitle=title;
   pvLoading.classList.add('active');
   pv.src=`/stream/${epId}?user_id=${getUid()}`;
   document.getElementById('playerTitle').textContent=title;
@@ -941,10 +938,18 @@ function openPlayer(epId,title){
   pvSeek.value=0;
   pvTime.textContent='0:00 / 0:00';
   pvPlayBtn.textContent='⏸';
+  const savedPos=pvGetPositions()[epId];
+  if(savedPos){
+    pv.addEventListener('loadedmetadata',function onceRestore(){
+      if(savedPos<pv.duration-15)pv.currentTime=savedPos;
+      pv.removeEventListener('loadedmetadata',onceRestore);
+    });
+  }
   pv.play().catch(()=>{});
   pvShowControls();
 }
 function closePlayer(){
+  if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime);
   pv.pause();
   pv.removeAttribute('src');
   pv.load();
@@ -982,7 +987,9 @@ pv.addEventListener('timeupdate',()=>{
   if(pvSeeking)return;
   pvSeek.value=pv.currentTime;
   pvTime.textContent=`${fmtTime(pv.currentTime)} / ${fmtTime(pv.duration)}`;
+  if(pvLastEpId&&Math.floor(pv.currentTime)%5===0)pvSavePosition(pvLastEpId,pv.currentTime);
 });
+pv.addEventListener('ended',()=>{if(pvLastEpId)pvSavePosition(pvLastEpId,0);});
 pvSeek.addEventListener('input',()=>{
   pvSeeking=true;
   pvTime.textContent=`${fmtTime(pvSeek.value)} / ${fmtTime(pv.duration)}`;
@@ -1013,8 +1020,22 @@ pv.addEventListener('contextmenu',e=>e.preventDefault());
 pv.addEventListener('waiting',()=>pvLoading.classList.add('active'));
 pv.addEventListener('playing',()=>pvLoading.classList.remove('active'));
 pv.addEventListener('canplay',()=>pvLoading.classList.remove('active'));
+let pvRetryCount=0;
+let pvLastEpId=null,pvLastTitle=null;
 pv.addEventListener('error',()=>{
   if(!document.getElementById('playerView').classList.contains('active'))return;
+  if(pvRetryCount<2 && pvLastEpId){
+    pvRetryCount++;
+    const resumeAt=pv.currentTime||0;
+    pvLoading.classList.add('active');
+    pv.src=`/stream/${pvLastEpId}?user_id=${getUid()}`;
+    pv.addEventListener('loadedmetadata',function onceResume(){
+      pv.currentTime=resumeAt;
+      pv.play().catch(()=>{});
+      pv.removeEventListener('loadedmetadata',onceResume);
+    });
+    return;
+  }
   closePlayer();
   tg?.showAlert?tg.showAlert("❌ Videoni yuklab bo'lmadi. Birozdan so'ng qayta urinib ko'ring."):alert("❌ Videoni yuklab bo'lmadi.");
 });
@@ -1094,7 +1115,6 @@ document.getElementById('pfClearHistory').addEventListener('click',()=>{
   localStorage.removeItem('anifilm_watched_eps');
   localStorage.removeItem('anifilm_watch_days');
   if(document.getElementById('view-profil').classList.contains('active'))renderProfil();
-  document.getElementById('continueSection').style.display='none';
 });
 document.getElementById('pfClearCache').addEventListener('click',()=>{
   const favs=favIds();
@@ -1117,7 +1137,6 @@ document.getElementById('pfExit').addEventListener('click',()=>{tg?.close?tg.clo
 /* ---------- init ---------- */
 function showHomeError(){
   document.getElementById('heroSection').style.display='none';
-  document.getElementById('continueSection').style.display='none';
   document.getElementById('newSection').style.display='none';
   document.getElementById('popularSection').style.display='none';
   document.getElementById('recommendSection').style.display='none';
