@@ -131,23 +131,32 @@ button{font-family:inherit;cursor:pointer;}
 .player-title{font-size:13.5px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5);}
 .player-video-wrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;background:#000;}
 .player-video-wrap video{width:100%;max-height:100%;}
-.player-hint{position:absolute;bottom:0;left:0;right:0;color:rgba(255,255,255,.45);font-size:11px;text-align:center;padding:10px 20px max(14px,env(safe-area-inset-bottom));background:linear-gradient(0deg,rgba(0,0,0,.55),transparent);pointer-events:none;}
-.player-loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#000;z-index:1;}
+.player-tap-catcher{position:absolute;inset:0;z-index:1;}
+.player-loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#000;z-index:3;}
 .player-loading.active{display:flex;}
 .player-spinner{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.15);border-top-color:var(--purple2);animation:pfspin .8s linear infinite;}
 @keyframes pfspin{to{transform:rotate(360deg);}}
 .player-loading span{color:rgba(255,255,255,.55);font-size:12.5px;font-weight:600;}
 
+/* Oʻzimizning rangli video boshqaruv paneli (native controls oʻrniga) */
+.player-controls{position:absolute;left:0;right:0;bottom:0;padding:8px 14px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(0deg,rgba(0,0,0,.88) 0%,rgba(0,0,0,.5) 55%,transparent 100%);z-index:2;transition:opacity .25s;}
+.player-controls.hidden{opacity:0;pointer-events:none;}
+.player-seek{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:3px;background:rgba(255,255,255,.25);outline:none;margin:0 0 10px;accent-color:var(--purple2);}
+.player-seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--purple2);box-shadow:0 0 8px var(--glow);margin-top:-4.5px;}
+.player-seek::-webkit-slider-runnable-track{height:4px;border-radius:3px;background:rgba(255,255,255,.25);}
+.player-controls-row{display:flex;align-items:center;gap:12px;}
+.player-play-btn{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--purple2),var(--purple));border:none;color:#fff;font-size:14px;flex:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px var(--glow);}
+.player-time{color:rgba(255,255,255,.85);font-size:11.5px;font-weight:600;flex:1;letter-spacing:.2px;}
+.player-fs-btn{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:14px;flex:none;}
+.player-video-wrap video{pointer-events:none;}
+
 /* "Kengaytirish" — video landshaft holatda toʻliq ekranni egallashi uchun aylantirish */
-.player-view.landscape .player-video-wrap{overflow:hidden;}
-.player-view.landscape .player-video-wrap video{
+.player-view.landscape .player-video-wrap{
   position:absolute;top:50%;left:50%;
   width:100vh;height:100vw;
   transform:translate(-50%,-50%) rotate(90deg);
-  max-height:none;
 }
-.player-view.landscape .player-hint{display:none;}
-.player-fullscreen-btn{margin-left:auto;}
+.player-view.landscape .player-video-wrap video{width:100%;height:100%;max-height:none;}
 
 /* Block screens (maintenance / subscribe) */
 .block-screen{padding-top:100px;text-align:center;}
@@ -426,16 +435,23 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   <div class="player-topbar">
     <button id="playerClose">✕</button>
     <div class="player-title" id="playerTitle"></div>
-    <button class="player-fullscreen-btn" id="playerFullscreen">⛶</button>
   </div>
-  <div class="player-video-wrap">
+  <div class="player-video-wrap" id="playerVideoWrap">
     <div class="player-loading" id="playerLoading">
       <div class="player-spinner"></div>
       <span>Yuklanmoqda...</span>
     </div>
-    <video id="playerVideo" controls playsinline webkit-playsinline></video>
+    <video id="playerVideo" playsinline webkit-playsinline disablepictureinpicture controlslist="nodownload noremoteplayback nofullscreen"></video>
+    <div class="player-tap-catcher" id="playerTapCatcher"></div>
+    <div class="player-controls" id="playerControls">
+      <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" step="0.1">
+      <div class="player-controls-row">
+        <button class="player-play-btn" id="playerPlayBtn">▶</button>
+        <span class="player-time" id="playerTime">0:00 / 0:00</span>
+        <button class="player-fs-btn" id="playerFsBtn">⛶</button>
+      </div>
+    </div>
   </div>
-  <div class="player-hint">Video yuklanishi internet tezligiga bogʻliq</div>
 </div>
 
 <nav class="tabbar">
@@ -890,34 +906,86 @@ document.getElementById('epModalWatch').addEventListener('click',()=>{
   openPlayer(epId,`${animeTitle} — ${epNum}-qism`);
 });
 
-/* ---------- toʻliq ekran video pleer ---------- */
+/* ---------- toʻliq ekran video pleer (oʻzimizning boshqaruv paneli bilan) ---------- */
+const pv=document.getElementById('playerVideo');
+const pvSeek=document.getElementById('playerSeek');
+const pvPlayBtn=document.getElementById('playerPlayBtn');
+const pvTime=document.getElementById('playerTime');
+const pvControls=document.getElementById('playerControls');
+const pvLoading=document.getElementById('playerLoading');
+let pvHideTimer=null;
+let pvSeeking=false;
+
+function fmtTime(s){
+  if(!isFinite(s)||s<0)s=0;
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60);
+  const mm=h>0?String(m).padStart(2,'0'):m;
+  const ss=String(sec).padStart(2,'0');
+  return h>0?`${h}:${mm}:${ss}`:`${mm}:${ss}`;
+}
+function pvShowControls(autoHide=true){
+  pvControls.classList.remove('hidden');
+  clearTimeout(pvHideTimer);
+  if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>pvControls.classList.add('hidden'),3000);
+}
 function openPlayer(epId,title){
-  const video=document.getElementById('playerVideo');
-  const loading=document.getElementById('playerLoading');
-  loading.classList.add('active');
-  video.src=`/stream/${epId}?user_id=${getUid()}`;
+  pvLoading.classList.add('active');
+  pv.src=`/stream/${epId}?user_id=${getUid()}`;
   document.getElementById('playerTitle').textContent=title;
   document.getElementById('playerView').classList.add('active');
-  video.play().catch(()=>{});
+  pvSeek.value=0;
+  pvTime.textContent='0:00 / 0:00';
+  pvPlayBtn.textContent='⏸';
+  pv.play().catch(()=>{});
+  pvShowControls();
 }
 function closePlayer(){
-  const video=document.getElementById('playerVideo');
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
-  document.getElementById('playerLoading').classList.remove('active');
+  pv.pause();
+  pv.removeAttribute('src');
+  pv.load();
+  clearTimeout(pvHideTimer);
+  pvLoading.classList.remove('active');
   document.getElementById('playerView').classList.remove('active','landscape');
-  document.getElementById('playerFullscreen').textContent='⛶';
   try{screen.orientation?.unlock?.();}catch(e){}
   if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
 }
 document.getElementById('playerClose').addEventListener('click',closePlayer);
-document.getElementById('playerFullscreen').addEventListener('click',async()=>{
+
+document.getElementById('playerTapCatcher').addEventListener('click',()=>{
+  if(pvControls.classList.contains('hidden')){pvShowControls();return;}
+  if(pv.paused){pv.play();}else{pv.pause();}
+});
+pvPlayBtn.addEventListener('click',()=>{
+  if(pv.paused){pv.play();}else{pv.pause();}
+  pvShowControls();
+});
+pv.addEventListener('play',()=>{pvPlayBtn.textContent='⏸';pvShowControls();});
+pv.addEventListener('pause',()=>{pvPlayBtn.textContent='▶';pvShowControls(false);});
+pv.addEventListener('loadedmetadata',()=>{
+  pvSeek.max=Math.floor(pv.duration)||1000;
+  pvTime.textContent=`${fmtTime(0)} / ${fmtTime(pv.duration)}`;
+});
+pv.addEventListener('timeupdate',()=>{
+  if(pvSeeking)return;
+  pvSeek.value=pv.currentTime;
+  pvTime.textContent=`${fmtTime(pv.currentTime)} / ${fmtTime(pv.duration)}`;
+});
+pvSeek.addEventListener('input',()=>{
+  pvSeeking=true;
+  pvTime.textContent=`${fmtTime(pvSeek.value)} / ${fmtTime(pv.duration)}`;
+  pvShowControls();
+});
+pvSeek.addEventListener('change',()=>{
+  pv.currentTime=pvSeek.value;
+  pvSeeking=false;
+});
+document.getElementById('playerFsBtn').addEventListener('click',async()=>{
   const view=document.getElementById('playerView');
-  const btn=document.getElementById('playerFullscreen');
+  const btn=document.getElementById('playerFsBtn');
   const goingLandscape=!view.classList.contains('landscape');
   view.classList.toggle('landscape',goingLandscape);
   btn.textContent=goingLandscape?'⤢':'⛶';
+  pvShowControls();
   try{
     if(goingLandscape){
       if(view.requestFullscreen)await view.requestFullscreen().catch(()=>{});
@@ -928,14 +996,17 @@ document.getElementById('playerFullscreen').addEventListener('click',async()=>{
     }
   }catch(e){}
 });
-document.getElementById('playerVideo').addEventListener('waiting',()=>document.getElementById('playerLoading').classList.add('active'));
-document.getElementById('playerVideo').addEventListener('playing',()=>document.getElementById('playerLoading').classList.remove('active'));
-document.getElementById('playerVideo').addEventListener('canplay',()=>document.getElementById('playerLoading').classList.remove('active'));
-document.getElementById('playerVideo').addEventListener('error',()=>{
+pv.addEventListener('contextmenu',e=>e.preventDefault());
+pv.addEventListener('waiting',()=>pvLoading.classList.add('active'));
+pv.addEventListener('playing',()=>pvLoading.classList.remove('active'));
+pv.addEventListener('canplay',()=>pvLoading.classList.remove('active'));
+pv.addEventListener('error',()=>{
   if(!document.getElementById('playerView').classList.contains('active'))return;
   closePlayer();
   tg?.showAlert?tg.showAlert("❌ Videoni yuklab bo'lmadi. Birozdan so'ng qayta urinib ko'ring."):alert("❌ Videoni yuklab bo'lmadi.");
 });
+
+
 
 /* ---------- access control ---------- */
 function showBlockView(n){
