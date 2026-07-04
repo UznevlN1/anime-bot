@@ -253,6 +253,14 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .comment-item{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin-bottom:10px;}
 .comment-user{font-size:12.5px;font-weight:800;color:var(--purple2);margin-bottom:3px;}
 .comment-text{font-size:13px;line-height:1.5;color:#dcdce4;}
+.comment-actions{display:flex;gap:14px;margin-top:8px;}
+.comment-action-btn{background:none;border:none;color:var(--text-dim);font-size:12px;font-weight:700;display:flex;align-items:center;gap:4px;padding:0;}
+.comment-action-btn.liked{color:#ef4444;}
+.comment-replies{margin-top:10px;margin-left:16px;padding-left:12px;border-left:2px solid var(--border);}
+.comment-replies .comment-item{margin-bottom:8px;}
+.reply-banner{display:none;align-items:center;justify-content:space-between;background:var(--bg-card2);border:1px solid var(--border);border-radius:11px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--text-dim);}
+.reply-banner.active{display:flex;}
+.reply-banner button{background:none;border:none;color:var(--red2);font-weight:800;font-size:14px;}
 .watch-stat{display:inline-flex;align-items:center;gap:4px;color:var(--purple2);font-weight:700;}
 
 /* Tabbar */
@@ -409,6 +417,10 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 
   <h3 class="ep-head">💬 Izohlar</h3>
   <div class="comments-wrap">
+    <div class="reply-banner" id="replyBanner">
+      <span id="replyBannerText"></span>
+      <button id="replyBannerCancel">✕</button>
+    </div>
     <div class="comment-input-row">
       <input class="comment-input" id="commentInput" placeholder="Izoh yozing..." maxlength="300">
       <button class="comment-send" id="commentSend">➤</button>
@@ -855,6 +867,20 @@ async function openDetail(id){
 }
 document.getElementById('detailBack').addEventListener('click',()=>{closePlayer();showView('home');renderAllGrid();});
 
+let REPLY_TO=null;
+
+function renderCommentItem(c,isReply){
+  const el=document.createElement('div');el.className='comment-item';
+  const uname=c.username?('@'+c.username):('Foydalanuvchi '+String(c.user_id).slice(-4));
+  el.innerHTML=`<div class="comment-user">${uname}</div><div class="comment-text"></div>
+    <div class="comment-actions">
+      <button class="comment-action-btn${c.liked_by_me?' liked':''}" data-cid="${c.id}" data-action="like">${c.liked_by_me?'❤️':'🤍'} <span class="like-count">${c.likes||0}</span></button>
+      ${isReply?'':'<button class="comment-action-btn" data-cid="'+c.id+'" data-user="'+uname+'" data-action="reply">↩️ Javob</button>'}
+    </div>`;
+  el.querySelector('.comment-text').textContent=c.text;
+  return el;
+}
+
 async function loadComments(animeId){
   const list=document.getElementById('commentsList');
   list.innerHTML='<div class="empty-msg">Yuklanmoqda...</div>';
@@ -862,15 +888,52 @@ async function loadComments(animeId){
     const comments=await fetchJSON(`${API}/comments/${animeId}`);
     if(!comments.length){list.innerHTML='<div class="empty-msg">Hali izohlar yoʻq. Birinchi boʻlib yozing!</div>';return;}
     list.innerHTML='';
-    comments.forEach(c=>{
-      const el=document.createElement('div');el.className='comment-item';
-      const uname=c.username?('@'+c.username):('Foydalanuvchi '+String(c.user_id).slice(-4));
-      el.innerHTML=`<div class="comment-user">${uname}</div><div class="comment-text"></div>`;
-      el.querySelector('.comment-text').textContent=c.text;
+    const topLevel=comments.filter(c=>!c.parent_id);
+    const repliesByParent={};
+    comments.filter(c=>c.parent_id).forEach(c=>{
+      (repliesByParent[c.parent_id]=repliesByParent[c.parent_id]||[]).push(c);
+    });
+    topLevel.forEach(c=>{
+      const el=renderCommentItem(c,false);
+      const replies=(repliesByParent[c.id]||[]).sort((a,b)=>a.id-b.id);
+      if(replies.length){
+        const wrap=document.createElement('div');wrap.className='comment-replies';
+        replies.forEach(r=>wrap.appendChild(renderCommentItem(r,true)));
+        el.appendChild(wrap);
+      }
       list.appendChild(el);
     });
   }catch(e){list.innerHTML='<div class="empty-msg">Izohlarni yuklab boʻlmadi</div>';}
 }
+
+document.getElementById('commentsList').addEventListener('click',async(e)=>{
+  const btn=e.target.closest('.comment-action-btn');
+  if(!btn)return;
+  const cid=btn.dataset.cid;
+  if(btn.dataset.action==='like'){
+    btn.disabled=true;
+    try{
+      const r=await fetch(`${API}/comments/like`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:getUid(),comment_id:cid})});
+      const res=await r.json();
+      if(res.ok){
+        btn.classList.toggle('liked',res.liked);
+        btn.querySelector('.like-count').textContent=res.likes;
+        btn.innerHTML=`${res.liked?'❤️':'🤍'} <span class="like-count">${res.likes}</span>`;
+      }
+    }catch(e){}
+    btn.disabled=false;
+  }else if(btn.dataset.action==='reply'){
+    REPLY_TO={id:cid,username:btn.dataset.user};
+    document.getElementById('replyBannerText').textContent=`${btn.dataset.user} ga javob yozilyapti`;
+    document.getElementById('replyBanner').classList.add('active');
+    document.getElementById('commentInput').focus();
+  }
+});
+document.getElementById('replyBannerCancel').addEventListener('click',()=>{
+  REPLY_TO=null;
+  document.getElementById('replyBanner').classList.remove('active');
+});
+
 document.getElementById('commentSend').addEventListener('click',async()=>{
   const input=document.getElementById('commentInput');
   const text=input.value.trim();
@@ -878,7 +941,7 @@ document.getElementById('commentSend').addEventListener('click',async()=>{
   const u=tg?.initDataUnsafe?.user;
   try{
     const r=await fetch(`${API}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      user_id:getUid(),anime_id:CURRENT_DETAIL_ID,text,username:u?.username||''
+      user_id:getUid(),anime_id:CURRENT_DETAIL_ID,text,username:u?.username||'',parent_id:REPLY_TO?.id||null
     })});
     const res=await r.json();
     if(res.error){
@@ -887,6 +950,8 @@ document.getElementById('commentSend').addEventListener('click',async()=>{
       return;
     }
     input.value='';
+    REPLY_TO=null;
+    document.getElementById('replyBanner').classList.remove('active');
     loadComments(CURRENT_DETAIL_ID);
   }catch(e){tg?.showAlert?tg.showAlert('Tarmoq xatoligi'):alert('Tarmoq xatoligi');}
 });
