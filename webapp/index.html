@@ -815,8 +815,8 @@ async function openDetail(id){
     (d.episodes||[]).forEach(ep=>{
       const b=document.createElement('button');
       b.className='ep-btn'+(watched.includes(ep.id)?' watched':'');
-      b.textContent=`${ep.episode_number}-qism`;
-      b.addEventListener('click',()=>openEpModal(ep,d.id,d.title,b));
+      b.textContent=d.media_type==='film'?'▶ Tomosha qilish':`${ep.episode_number}-qism`;
+      b.addEventListener('click',()=>openEpModal(ep,d.id,d.title,b,d.media_type));
       grid.appendChild(b);
     });
     if(!d.episodes||!d.episodes.length){grid.innerHTML='<div class="empty-msg">Epizodlar hali qoʻshilmagan</div>';}
@@ -873,9 +873,10 @@ function sendEp(eid,animeId){
 
 /* ---------- epizod tanlash modali (Onlayn ko'rish / Botga yuborish) ---------- */
 let EP_MODAL_CTX=null;
-function openEpModal(ep,animeId,animeTitle,btnEl){
-  EP_MODAL_CTX={epId:ep.id,epNum:ep.episode_number,animeId,animeTitle,btnEl};
-  document.getElementById('epModalTitle').textContent=`${ep.episode_number}-qism`;
+function openEpModal(ep,animeId,animeTitle,btnEl,mediaType){
+  const isFilm=mediaType==='film';
+  EP_MODAL_CTX={epId:ep.id,epNum:ep.episode_number,animeId,animeTitle,btnEl,isFilm};
+  document.getElementById('epModalTitle').textContent=isFilm?animeTitle:`${ep.episode_number}-qism`;
   document.getElementById('epModalOverlay').classList.add('active');
 }
 function closeEpModal(){document.getElementById('epModalOverlay').classList.remove('active');}
@@ -891,12 +892,12 @@ document.getElementById('epModalSend').addEventListener('click',()=>{
 });
 document.getElementById('epModalWatch').addEventListener('click',()=>{
   if(!EP_MODAL_CTX)return;
-  const {epId,epNum,animeId,animeTitle,btnEl}=EP_MODAL_CTX;
+  const {epId,epNum,animeId,animeTitle,btnEl,isFilm}=EP_MODAL_CTX;
   closeEpModal();
   markEpWatched(epId);
   if(btnEl)btnEl.classList.add('watched');
   if(animeId)pushHistory(animeId);
-  openPlayer(epId,`${animeTitle} — ${epNum}-qism`);
+  openPlayer(epId,isFilm?animeTitle:`${animeTitle} — ${epNum}-qism`);
 });
 
 /* ---------- toʻliq ekran video pleer (oʻzimizning boshqaruv paneli bilan) ---------- */
