@@ -109,6 +109,7 @@ button{font-family:inherit;cursor:pointer;}
 .ep-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 18px 24px;}
 .ep-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:12px 0;border-radius:11px;font-size:13px;font-weight:700;text-align:center;position:relative;white-space:nowrap;}
 .ep-btn.ep-btn-full{grid-column:1/-1;padding:15px 0;font-size:14.5px;}
+.ep-btn.locked{opacity:.55;color:var(--text-dim);}
 .ep-btn:active{background:var(--purple);border-color:var(--purple);}
 .ep-btn.watched{background:rgba(8,145,178,.16);border-color:var(--purple2);color:var(--purple2);}
 .ep-btn.watched::after{content:'✓';position:absolute;top:3px;right:6px;font-size:10px;color:var(--purple2);}
@@ -185,6 +186,8 @@ button{font-family:inherit;cursor:pointer;}
 .pf-name{font-size:18px;font-weight:800;margin-bottom:1px;}
 .pf-username{font-size:13px;color:var(--text-dim);margin-bottom:8px;}
 .pf-premium{display:inline-flex;align-items:center;gap:5px;background:rgba(236,72,153,.16);color:#ec4899;font-size:11.5px;font-weight:800;padding:5px 10px;border-radius:20px;margin-bottom:10px;}
+.pf-card-premium{background:linear-gradient(135deg,rgba(245,197,66,.14),rgba(139,92,246,.14));border:1px solid rgba(245,197,66,.4);box-shadow:0 0 24px rgba(245,197,66,.15);}
+.pf-card-premium .pf-avatar-img{border-color:var(--gold);box-shadow:0 0 16px rgba(245,197,66,.5);}
 .pf-joined{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-dim);}
 .pf-edit-btn{margin-left:auto;flex:none;background:var(--bg-card2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;padding:9px 13px;border-radius:11px;display:flex;align-items:center;gap:6px;align-self:flex-start;}
 
@@ -251,6 +254,8 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .comment-input{flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;color:var(--text);font-size:13px;outline:none;}
 .comment-send{background:linear-gradient(135deg,var(--purple2),var(--purple));color:#fff;border:none;border-radius:12px;padding:0 16px;font-size:13px;font-weight:700;}
 .comment-item{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin-bottom:10px;}
+.comment-item.comment-premium{border-color:rgba(245,197,66,.4);background:linear-gradient(135deg,rgba(245,197,66,.06),var(--bg-card));}
+.comment-crown{font-size:11px;}
 .comment-user{font-size:12.5px;font-weight:800;color:var(--purple2);margin-bottom:3px;}
 .comment-text{font-size:13px;line-height:1.5;color:#dcdce4;}
 .comment-actions{display:flex;gap:14px;margin-top:8px;}
@@ -386,6 +391,11 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
       <div class="pf-row"><button class="pf-row-btn" id="pfClearCache"><div class="pf-icon-box" style="background:rgba(239,68,68,.18);color:var(--red2);">🗑</div><div class="pf-row-label">Keshni tozalash</div><span class="pf-row-val" id="pfCacheSize">0 KB</span></button></div>
       <div class="pf-row"><button class="pf-row-btn" id="pfDownloads"><div class="pf-icon-box" style="background:rgba(59,130,246,.18);color:#60a5fa;">⬇️</div><div class="pf-row-label">Yuklamalar</div><span class="pf-row-arrow">›</span></button></div>
       <div class="pf-row"><button class="pf-row-btn" id="pfPrivacy"><div class="pf-icon-box" style="background:rgba(139,92,246,.18);color:#a78bfa;">🛡️</div><div class="pf-row-label">Maxfiylik</div><span class="pf-row-arrow">›</span></button></div>
+    </div>
+
+    <div class="pf-section">
+      <div class="pf-section-title">Premium</div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfPremium"><div class="pf-icon-box" style="background:rgba(245,197,66,.18);color:var(--gold);">👑</div><div class="pf-row-label">Premium sotib olish / uzaytirish</div><span class="pf-row-arrow">›</span></button></div>
     </div>
 
     <div class="pf-section">
@@ -746,7 +756,7 @@ let sponsorLoaded=false;
 function renderSponsorBanner(){
   if(sponsorLoaded)return;
   sponsorLoaded=true;
-  fetchJSON(`${API}/sponsor`).then(s=>{
+  fetchJSON(`${API}/sponsor?user_id=${getUid()}`).then(s=>{
     if(!s.enabled)return;
     const banner=document.getElementById('sponsorBanner');
     document.getElementById('sponsorImg').src=s.photo_url;
@@ -791,7 +801,15 @@ async function renderProfil(){
   fetchJSON(`${API}/profile?user_id=${getUid()}`).then(p=>{
     document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: "+formatJoinDate(p.joined_at);
     const badge=document.getElementById('profilPremium');
-    if(p.is_premium){badge.style.display='inline-flex';}else{badge.style.display='none';}
+    const card=document.querySelector('.pf-card');
+    if(p.is_premium){
+      badge.style.display='inline-flex';
+      badge.textContent=`👑 Premium · ${p.premium_days_left} kun qoldi`;
+      card.classList.add('pf-card-premium');
+    }else{
+      badge.style.display='none';
+      card.classList.remove('pf-card-premium');
+    }
     CHANNEL_URL=p.channel_url||'';
     SUPPORT_URL=p.support_url||'';
   }).catch(()=>{document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: —";});
@@ -856,9 +874,16 @@ async function openDetail(id){
     const watched=watchedEpIds();
     (d.episodes||[]).forEach(ep=>{
       const b=document.createElement('button');
-      b.className='ep-btn'+(watched.includes(ep.id)?' watched':'')+(d.media_type==='film'?' ep-btn-full':'');
-      b.textContent=d.media_type==='film'?'▶ Tomosha qilish':`${ep.episode_number}-qism`;
-      b.addEventListener('click',()=>openEpModal(ep,d.id,d.title,b,d.media_type));
+      b.className='ep-btn'+(watched.includes(ep.id)?' watched':'')+(d.media_type==='film'?' ep-btn-full':'')+(ep.is_locked?' locked':'');
+      const label=d.media_type==='film'?'▶ Tomosha qilish':`${ep.episode_number}-qism`;
+      b.innerHTML=ep.is_locked?`🔒 ${label}`:label;
+      if(ep.is_locked){
+        b.addEventListener('click',()=>{
+          tg?.showAlert?tg.showAlert("👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq."):alert("👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq.");
+        });
+      }else{
+        b.addEventListener('click',()=>openEpModal(ep,d.id,d.title,b,d.media_type));
+      }
       grid.appendChild(b);
     });
     if(!d.episodes||!d.episodes.length){grid.innerHTML='<div class="empty-msg">Epizodlar hali qoʻshilmagan</div>';}
@@ -870,9 +895,10 @@ document.getElementById('detailBack').addEventListener('click',()=>{closePlayer(
 let REPLY_TO=null;
 
 function renderCommentItem(c,isReply){
-  const el=document.createElement('div');el.className='comment-item';
+  const el=document.createElement('div');el.className='comment-item'+(c.is_premium?' comment-premium':'');
   const uname=c.username?('@'+c.username):('Foydalanuvchi '+String(c.user_id).slice(-4));
-  el.innerHTML=`<div class="comment-user">${uname}</div><div class="comment-text"></div>
+  const unameHtml=uname+(c.is_premium?' <span class="comment-crown">👑</span>':'');
+  el.innerHTML=`<div class="comment-user">${unameHtml}</div><div class="comment-text"></div>
     <div class="comment-actions">
       <button class="comment-action-btn${c.liked_by_me?' liked':''}" data-cid="${c.id}" data-action="like">${c.liked_by_me?'❤️':'🤍'} <span class="like-count">${c.likes||0}</span></button>
       ${isReply?'':'<button class="comment-action-btn" data-cid="'+c.id+'" data-user="'+uname+'" data-action="reply">↩️ Javob</button>'}
@@ -960,7 +986,11 @@ function sendEp(eid,animeId){
   const uid=getUid();
   fetch(`${API}/send_episode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid,episode_id:eid})})
     .then(r=>r.json()).then(res=>{
-      if(res.error){tg?.showAlert?tg.showAlert('Xatolik: '+res.error):alert('Xatolik: '+res.error);return;}
+      if(res.error){
+        const msg=res.error==='premium_only'?"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq.":'Xatolik: '+res.error;
+        tg?.showAlert?tg.showAlert(msg):alert(msg);
+        return;
+      }
       if(animeId)pushHistory(animeId);
       tg?.showAlert?tg.showAlert('✅ Epizod botga yuborildi'):alert('✅ Epizod botga yuborildi');
     }).catch(()=>{tg?.showAlert?tg.showAlert('Tarmoq xatoligi'):alert('Tarmoq xatoligi');});
@@ -1185,6 +1215,11 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
 }));
 document.getElementById('bellBtn').addEventListener('click',()=>{tg?.showAlert?tg.showAlert('Hozircha yangi bildirishnomalar yoʻq'):alert('Hozircha yangi bildirishnomalar yoʻq');});
 document.getElementById('profilBotLink').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
+document.getElementById('pfPremium').addEventListener('click',()=>{
+  const msg="💎 Premium sotib olish uchun botga o'ting va \"💎 Premium\" tugmasini bosing.";
+  tg?.showAlert?tg.showAlert(msg):alert(msg);
+  setTimeout(()=>{if(tg?.close)tg.close();},1500);
+});
 
 function pfAlert(msg){tg?.showAlert?tg.showAlert(msg):alert(msg);}
 function pfOpenLink(url){tg?.openTelegramLink?tg.openTelegramLink(url):window.open(url,'_blank');}
