@@ -142,17 +142,21 @@ button{font-family:inherit;cursor:pointer;}
 .player-loading span{color:rgba(255,255,255,.55);font-size:12.5px;font-weight:600;}
 
 /* Video ustidagi/ostidagi boʻsh joy (letterbox) uchun brend dizayni */
-.player-brand{position:absolute;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:9px;z-index:0;pointer-events:none;}
-.player-brand-top{top:38px;}
-.player-brand-bottom{bottom:34px;flex-direction:row;gap:9px;}
-.player-brand-badge{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#b8842f);display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 4px 16px rgba(245,197,66,.35);animation:pfAvatarGlow 2.6s ease-in-out infinite;}
-.player-brand-text{display:flex;align-items:baseline;gap:6px;}
-.pb-main{font-size:15px;font-weight:900;letter-spacing:3px;background:linear-gradient(90deg,var(--gold),#ffe9a8,var(--gold));background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:pfBadgeShift 3.5s linear infinite;}
-.pb-sub{font-size:10px;font-weight:700;letter-spacing:4px;color:rgba(255,255,255,.32);}
-.player-brand-line{width:44px;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,rgba(245,197,66,.55),transparent);}
-.pb-tag{font-size:9.5px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,.28);text-transform:uppercase;}
-.pb-dot{color:rgba(245,197,66,.5);font-size:9px;}
-@media (prefers-reduced-motion:reduce){.player-brand-badge,.pb-main{animation:none;}}
+.player-brand{position:absolute;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:0;pointer-events:none;}
+.player-brand-top{top:72px;}
+.player-brand-bottom{bottom:34px;}
+.player-brand-badge{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--gold),#b8842f);display:flex;align-items:center;justify-content:center;font-size:17px;box-shadow:0 0 0 5px rgba(245,197,66,.08),0 6px 20px rgba(245,197,66,.4);animation:pfAvatarGlow 2.6s ease-in-out infinite;}
+.player-brand-text{display:flex;align-items:baseline;gap:7px;}
+.pb-main{font-size:17px;font-weight:900;letter-spacing:4px;background:linear-gradient(90deg,var(--gold),#ffe9a8,var(--gold));background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:pfBadgeShift 3.5s linear infinite;filter:drop-shadow(0 2px 10px rgba(245,197,66,.25));}
+.pb-sub{font-size:10.5px;font-weight:700;letter-spacing:5px;color:rgba(255,255,255,.3);}
+.player-brand-line{width:0;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,rgba(245,197,66,.6),transparent);position:relative;margin-top:1px;}
+.player-brand-line::before,.player-brand-line::after{content:'';position:absolute;top:-1.5px;width:3px;height:5px;border-radius:1px;background:rgba(245,197,66,.55);}
+.player-brand-line{width:56px;}
+.player-brand-line::before{left:-8px;}
+.player-brand-line::after{right:-8px;}
+.pb-special{display:inline-flex;align-items:center;gap:7px;font-size:10.5px;font-weight:800;letter-spacing:3px;text-transform:uppercase;background:linear-gradient(90deg,var(--gold),#ffe9a8,var(--gold));background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:pfBadgeShift 4s linear infinite;opacity:.9;}
+.pb-special .pb-spark{color:rgba(245,197,66,.7);-webkit-text-fill-color:rgba(245,197,66,.7);animation:none;font-size:9px;}
+@media (prefers-reduced-motion:reduce){.player-brand-badge,.pb-main,.pb-special{animation:none;}}
 
 /* Oʻzimizning rangli video boshqaruv paneli (native controls oʻrniga) */
 .player-controls{position:absolute;left:0;right:0;bottom:0;padding:8px 14px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(0deg,rgba(0,0,0,.88) 0%,rgba(0,0,0,.5) 55%,transparent 100%);z-index:2;transition:opacity .25s;}
@@ -561,7 +565,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <video id="playerVideo" playsinline webkit-playsinline disablepictureinpicture controlslist="nodownload noremoteplayback nofullscreen"></video>
     <div class="player-tap-catcher" id="playerTapCatcher"></div>
     <div class="player-brand player-brand-bottom" aria-hidden="true">
-      <span class="pb-tag">Onlayn tomosha</span><span class="pb-dot">•</span><span class="pb-tag">HD sifat</span>
+      <span class="pb-special"><span class="pb-spark">✦</span>Animax uchun maxsus<span class="pb-spark">✦</span></span>
     </div>
     <div class="player-controls" id="playerControls">
       <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" step="0.1">
@@ -1250,13 +1254,33 @@ pv.addEventListener('loadedmetadata',()=>{
   pvSeek.max=Math.floor(pv.duration)||1000;
   pvTime.textContent=`${fmtTime(0)} / ${fmtTime(pv.duration)}`;
 });
+let pvLastSavedSec=-1;
 pv.addEventListener('timeupdate',()=>{
   if(pvSeeking)return;
   pvSeek.value=pv.currentTime;
   pvTime.textContent=`${fmtTime(pv.currentTime)} / ${fmtTime(pv.duration)}`;
-  if(pvLastEpId&&Math.floor(pv.currentTime)%5===0)pvSavePosition(pvLastEpId,pv.currentTime);
+  const sec=Math.floor(pv.currentTime);
+  if(pvLastEpId&&sec!==pvLastSavedSec){pvLastSavedSec=sec;pvSavePosition(pvLastEpId,pv.currentTime);}
 });
 pv.addEventListener('ended',()=>{if(pvLastEpId)pvSavePosition(pvLastEpId,0);});
+
+// Foydalanuvchi ilovadan qanday sababda chiqib ketishidan qatʼiy nazar
+// (Telegram mini-ilovaning oʻzini yopish tugmasi, ilova fonga oʻtishi,
+// tarmoq uzilishi va h.k.) joriy pozitsiyani darhol saqlab qolamiz —
+// faqat pleerning ✕ tugmasi bosilishiga yoki 5 soniyalik davriy
+// saqlashga tayanib qolmaslik uchun.
+function pvSaveCurrentPositionNow(){
+  if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime);
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)pvSaveCurrentPositionNow();
+});
+window.addEventListener('pagehide',pvSaveCurrentPositionNow);
+window.addEventListener('beforeunload',pvSaveCurrentPositionNow);
+try{
+  window.Telegram?.WebApp?.onEvent?.('viewportChanged',pvSaveCurrentPositionNow);
+}catch(e){}
+
 pvSeek.addEventListener('input',()=>{
   pvSeeking=true;
   pvTime.textContent=`${fmtTime(pvSeek.value)} / ${fmtTime(pv.duration)}`;
