@@ -1195,12 +1195,30 @@ function pvShowControls(autoHide=true){
   if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>{pvControls.classList.add('hidden');pvTopbar.classList.add('hidden');},3000);
 }
 function pvGetPositions(){try{return JSON.parse(localStorage.getItem('anifilm_positions')||'{}');}catch(e){return {};}}
-function pvSavePosition(epId,seconds){
+function pvSavePositionLocal(epId,seconds){
   const pos=pvGetPositions();
   if(seconds<5){delete pos[epId];}else{pos[epId]=seconds;}
   localStorage.setItem('anifilm_positions',JSON.stringify(pos));
 }
-function openPlayer(epId,title){
+let pvLastServerSaveSec=-99;
+function pvSavePosition(epId,seconds,force){
+  pvSavePositionLocal(epId,seconds);
+  // Telegram mini-ilova ba'zi qurilmalarda localStorage'ni saqlab qolmasligi
+  // mumkin, shuning uchun pozitsiyani serverga (bazaga) ham yozamiz — bu
+  // "davomidan ko'rish" ni ishonchli qiladi. Tarmoqni ortiqcha band qilmaslik
+  // uchun har ~4 soniyada bir marta yuboramiz (majburiy chiqishlarda darhol).
+  if(!force && Math.abs(seconds-pvLastServerSaveSec)<4)return;
+  pvLastServerSaveSec=seconds;
+  try{
+    fetch('/api/position',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({user_id:getUid(),episode_id:epId,position:Math.floor(seconds)}),
+      keepalive:true
+    }).catch(()=>{});
+  }catch(e){}
+}
+async function openPlayer(epId,title){
   pvRetryCount=0;
   pvLastEpId=epId;
   pvLastTitle=title;
@@ -1212,8 +1230,18 @@ function openPlayer(epId,title){
   pvSeek.value=0;
   pvTime.textContent='0:00 / 0:00';
   pvPlayBtn.textContent='⏸';
-  const savedPos=pvGetPositions()[epId];
-  if(savedPos){
+  let savedPos=pvGetPositions()[epId]||0;
+  try{
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),2500);
+    const res=await fetch(`/api/position/${epId}?user_id=${getUid()}`,{signal:ctrl.signal});
+    clearTimeout(timer);
+    if(res.ok){
+      const data=await res.json();
+      if(data.position>savedPos)savedPos=data.position;
+    }
+  }catch(e){/* server javob bermasa, localStorage'dagi qiymat bilan davom etamiz */}
+  if(savedPos>5){
     pv.addEventListener('loadedmetadata',function onceRestore(){
       if(savedPos<pv.duration-15)pv.currentTime=savedPos;
       pv.removeEventListener('loadedmetadata',onceRestore);
@@ -1223,7 +1251,7 @@ function openPlayer(epId,title){
   pvShowControls();
 }
 function closePlayer(){
-  if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime);
+  if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime,true);
   pv.pause();
   pv.removeAttribute('src');
   pv.load();
@@ -1265,7 +1293,7 @@ pv.addEventListener('timeupdate',()=>{
   const sec=Math.floor(pv.currentTime);
   if(pvLastEpId&&sec!==pvLastSavedSec){pvLastSavedSec=sec;pvSavePosition(pvLastEpId,pv.currentTime);}
 });
-pv.addEventListener('ended',()=>{if(pvLastEpId)pvSavePosition(pvLastEpId,0);});
+pv.addEventListener('ended',()=>{if(pvLastEpId)pvSavePosition(pvLastEpId,0,true);});
 
 // Foydalanuvchi ilovadan qanday sababda chiqib ketishidan qatʼiy nazar
 // (Telegram mini-ilovaning oʻzini yopish tugmasi, ilova fonga oʻtishi,
@@ -1273,7 +1301,7 @@ pv.addEventListener('ended',()=>{if(pvLastEpId)pvSavePosition(pvLastEpId,0);});
 // faqat pleerning ✕ tugmasi bosilishiga yoki 5 soniyalik davriy
 // saqlashga tayanib qolmaslik uchun.
 function pvSaveCurrentPositionNow(){
-  if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime);
+  if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime,true);
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)pvSaveCurrentPositionNow();
