@@ -185,9 +185,14 @@ button{font-family:inherit;cursor:pointer;}
 .pf-online{position:absolute;bottom:2px;right:2px;width:14px;height:14px;border-radius:50%;background:var(--purple2);border:2px solid var(--bg-card);}
 .pf-name{font-size:18px;font-weight:800;margin-bottom:1px;}
 .pf-username{font-size:13px;color:var(--text-dim);margin-bottom:8px;}
-.pf-premium{display:inline-flex;align-items:center;gap:5px;background:rgba(236,72,153,.16);color:#ec4899;font-size:11.5px;font-weight:800;padding:5px 10px;border-radius:20px;margin-bottom:10px;}
-.pf-card-premium{background:linear-gradient(135deg,rgba(245,197,66,.14),rgba(139,92,246,.14));border:1px solid rgba(245,197,66,.4);box-shadow:0 0 24px rgba(245,197,66,.15);}
-.pf-card-premium .pf-avatar-img{border-color:var(--gold);box-shadow:0 0 16px rgba(245,197,66,.5);}
+.pf-premium{display:inline-flex;align-items:center;gap:5px;background:linear-gradient(90deg,rgba(236,72,153,.22),rgba(245,197,66,.28),rgba(236,72,153,.22));background-size:200% auto;color:#ec4899;font-size:11.5px;font-weight:800;padding:5px 10px;border-radius:20px;margin-bottom:10px;animation:pfBadgeShift 3s linear infinite;}
+@keyframes pfBadgeShift{0%{background-position:0% 50%;}100%{background-position:200% 50%;}}
+.pf-card-premium{position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(245,197,66,.14),rgba(139,92,246,.14));border:1px solid rgba(245,197,66,.4);box-shadow:0 0 24px rgba(245,197,66,.15);animation:pfPremiumGlow 3s ease-in-out infinite;}
+.pf-card-premium::before{content:'';position:absolute;top:0;left:-60%;width:45%;height:100%;background:linear-gradient(115deg,transparent 0%,rgba(255,255,255,.22) 45%,rgba(245,197,66,.35) 50%,rgba(255,255,255,.22) 55%,transparent 100%);transform:skewX(-20deg);animation:pfShine 3.6s ease-in-out infinite;pointer-events:none;}
+@keyframes pfShine{0%{left:-60%;}55%{left:130%;}100%{left:130%;}}
+@keyframes pfPremiumGlow{0%,100%{box-shadow:0 0 20px rgba(245,197,66,.15);}50%{box-shadow:0 0 34px rgba(245,197,66,.4),0 0 14px rgba(74,222,128,.15);}}
+.pf-card-premium .pf-avatar-img{border-color:var(--gold);box-shadow:0 0 16px rgba(245,197,66,.5);animation:pfAvatarGlow 2.4s ease-in-out infinite;}
+@keyframes pfAvatarGlow{0%,100%{box-shadow:0 0 14px rgba(245,197,66,.45);}50%{box-shadow:0 0 26px rgba(245,197,66,.9),0 0 42px rgba(74,222,128,.3);}}
 .pf-joined{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-dim);}
 .pf-edit-btn{margin-left:auto;flex:none;background:var(--bg-card2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;padding:9px 13px;border-radius:11px;display:flex;align-items:center;gap:6px;align-self:flex-start;}
 
@@ -235,7 +240,14 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .pf-lock-note{font-size:11.5px;color:var(--text-dim);margin-top:14px;}
 
 /* Premium foydalanuvchi uchun kengaytirilgan bo'lim */
-.pf-vip-section{background:linear-gradient(135deg,rgba(245,197,66,.12),rgba(139,92,246,.10));border:1px solid rgba(245,197,66,.35);border-radius:18px;padding:16px 18px;margin-bottom:14px;}
+.pf-vip-section{position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(245,197,66,.14),rgba(74,222,128,.10),rgba(139,92,246,.12));background-size:220% 220%;border:1px solid rgba(245,197,66,.35);border-radius:18px;padding:16px 18px;margin-bottom:14px;animation:pfVipShift 6s ease-in-out infinite;}
+.pf-vip-section::before{content:'';position:absolute;top:0;left:-70%;width:40%;height:100%;background:linear-gradient(115deg,transparent 0%,rgba(255,255,255,.14) 50%,transparent 100%);transform:skewX(-20deg);animation:pfShine 5s ease-in-out infinite;pointer-events:none;}
+@keyframes pfVipShift{0%,100%{background-position:0% 50%;}50%{background-position:100% 50%;}}
+.pf-vip-title{position:relative;}
+@media (prefers-reduced-motion:reduce){
+  .pf-card-premium,.pf-card-premium .pf-avatar-img,.pf-premium,.pf-vip-section{animation:none;}
+  .pf-card-premium::before,.pf-vip-section::before{display:none;}
+}
 .pf-vip-title{font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:7px;color:var(--gold);}
 .pf-vip-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;font-size:13px;}
 .pf-vip-row+.pf-vip-row{border-top:1px solid rgba(245,197,66,.18);}
