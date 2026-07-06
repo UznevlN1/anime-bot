@@ -543,9 +543,9 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 
 <main id="view-maintenance" class="view">
   <div class="block-screen">
-    <div class="block-icon">🔧</div>
-    <div class="block-title">Texnik ishlar olib borilmoqda</div>
-    <div class="block-sub">Iltimos, birozdan so'ng qayta urinib ko'ring</div>
+    <div class="block-icon" id="maintenanceIcon">🔧</div>
+    <div class="block-title" id="maintenanceTitle">Texnik ishlar olib borilmoqda</div>
+    <div class="block-sub" id="maintenanceSub">Iltimos, birozdan so'ng qayta urinib ko'ring</div>
     <button class="btn-primary sub-check-btn" id="maintenanceRetry">🔄 Qayta urinish</button>
   </div>
 </main>
@@ -1478,13 +1478,26 @@ function renderSubscribeChannels(channels){
 async function checkAccess(){
   try{
     const status=await fetchJSON(`${API}/check_access?user_id=${getUid()}`);
-    if(status.maintenance){showBlockView('maintenance');return false;}
+    if(status.maintenance){
+      document.getElementById('maintenanceIcon').textContent='🔧';
+      document.getElementById('maintenanceTitle').textContent='Texnik ishlar olib borilmoqda';
+      document.getElementById('maintenanceSub').textContent='Iltimos, birozdan so\'ng qayta urinib ko\'ring';
+      showBlockView('maintenance');return false;
+    }
     if(!status.subscribed){renderSubscribeChannels(status.channels);showBlockView('subscribe');return false;}
     document.querySelector('.tabbar').style.display='';
     return true;
   }catch(e){
-    document.querySelector('.tabbar').style.display='';
-    return true;
+    // MUHIM: ilgari bu yerda xatolikni jim o'tkazib, kirish berilardi —
+    // ya'ni server bilan aloqa uzilgan har qanday holatda (qayta ishga
+    // tushirish, tarmoq muammosi va h.k.) majburiy obuna tekshiruvi
+    // butunlay chetlab o'tilardi. Endi bunday holatda ilova ochilmaydi —
+    // xatolik ekrani va "qayta urinish" tugmasi ko'rsatiladi.
+    document.getElementById('maintenanceIcon').textContent='⚠️';
+    document.getElementById('maintenanceTitle').textContent='Serverga ulanib bo\'lmadi';
+    document.getElementById('maintenanceSub').textContent='Internetni tekshiring va qayta urinib ko\'ring';
+    showBlockView('maintenance');
+    return false;
   }
 }
 document.getElementById('subCheckBtn').addEventListener('click',async()=>{const ok=await checkAccess();if(ok){showView('home');init();}});
