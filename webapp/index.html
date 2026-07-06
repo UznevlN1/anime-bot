@@ -1476,8 +1476,20 @@ function renderSubscribeChannels(channels){
   });
 }
 async function checkAccess(){
+  const uid=getUid();
+  if(!uid){
+    // MUHIM: Telegram foydalanuvchi ID'sini bermadi (tg.initDataUnsafe.user yo'q).
+    // Bu holatda serverga user_id=0 yuborib, "obuna emassiz" ekranini
+    // ko'rsatish chalkashtiradi — aslida sabab obuna emas, balki sessiya
+    // aniqlanmagani. Shuning uchun buni alohida, aniq xabar bilan ko'rsatamiz.
+    document.getElementById('maintenanceIcon').textContent='⚠️';
+    document.getElementById('maintenanceTitle').textContent='Foydalanuvchi aniqlanmadi';
+    document.getElementById('maintenanceSub').textContent='Iltimos, ilovani bot ichidagi "🎌 Animelarni ko\'rish" tugmasi orqali qayta oching';
+    showBlockView('maintenance');
+    return false;
+  }
   try{
-    const status=await fetchJSON(`${API}/check_access?user_id=${getUid()}`);
+    const status=await fetchJSON(`${API}/check_access?user_id=${uid}`);
     if(status.maintenance){
       document.getElementById('maintenanceIcon').textContent='🔧';
       document.getElementById('maintenanceTitle').textContent='Texnik ishlar olib borilmoqda';
