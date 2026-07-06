@@ -80,6 +80,7 @@ button{font-family:inherit;cursor:pointer;}
 .card-stats{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);margin-top:2px;}
 
 .fav-btn{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:rgba(10,10,15,.55);backdrop-filter:blur(4px);border:none;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;}
+.ep-range-badge{position:absolute;left:8px;background:rgba(10,10,15,.62);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:9.5px;font-weight:800;letter-spacing:.3px;padding:3px 7px;border-radius:6px;}
 .fav-btn.active{color:#ff5c7a;}
 
 /* Grid (all animes / search results) */
@@ -212,9 +213,13 @@ button{font-family:inherit;cursor:pointer;}
 .pf-edit-btn{margin-left:auto;flex:none;background:var(--bg-card2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;padding:9px 13px;border-radius:11px;display:flex;align-items:center;gap:6px;align-self:flex-start;}
 
 .pf-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
-.pf-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px 4px;text-align:center;}
-.pf-stat-icon{font-size:16px;margin-bottom:6px;}
-.pf-stat b{display:block;font-size:16px;font-weight:800;}
+.pf-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:15px 4px;text-align:center;}
+.pf-stat-icon{width:32px;height:32px;margin:0 auto 8px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;}
+.pf-stat-icon.icon-fav{background:rgba(168,85,247,.16);}
+.pf-stat-icon.icon-eye{background:rgba(59,130,246,.16);}
+.pf-stat-icon.icon-time{background:rgba(245,197,66,.16);}
+.pf-stat-icon.icon-streak{background:rgba(248,113,113,.16);}
+.pf-stat b{display:block;font-size:17px;font-weight:800;margin-bottom:1px;}
 .pf-stat span{font-size:10px;color:var(--text-dim);}
 
 .pf-section{background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:16px;margin-bottom:14px;}
@@ -438,10 +443,10 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     </div>
 
     <div class="pf-stats">
-      <div class="pf-stat"><div class="pf-stat-icon">💜</div><b id="statFav">0</b><span>Sevimlilar</span></div>
-      <div class="pf-stat"><div class="pf-stat-icon">👁️</div><b id="statWatched">0</b><span>Ko'rilgan</span></div>
-      <div class="pf-stat"><div class="pf-stat-icon">🕐</div><b id="statTime">0 soat</b><span>Tomosha vaqti</span></div>
-      <div class="pf-stat"><div class="pf-stat-icon">🔥</div><b id="statStreak">0</b><span>Davom etishda</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon icon-fav">💜</div><b id="statFav">0</b><span>Sevimlilar</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon icon-eye">👁️</div><b id="statWatched">0</b><span>Ko'rilgan</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon icon-time">🕐</div><b id="statTime">0 soat</b><span>Tomosha vaqti</span></div>
+      <div class="pf-stat"><div class="pf-stat-icon icon-streak">🔥</div><b id="statStreak">0</b><span>Davom etishda</span></div>
     </div>
 
     <div class="pf-vip-section" id="pfVipSection" style="display:none;">
@@ -630,10 +635,48 @@ function skeletonHome(){
 }
 
 /* ---------- storage helpers (client-side, this device only) ---------- */
-function favIds(){try{return JSON.parse(localStorage.getItem('anifilm_favs')||'[]');}catch(e){return [];}}
-function setFavIds(arr){localStorage.setItem('anifilm_favs',JSON.stringify(arr));}
+// Sevimlilar va statistikalar endi serverda (bazada) saqlanadi — bu Telegram
+// mini-ilova WebView xotirasini tozalab qo'yishidan mustaqil ishlashi uchun.
+// localStorage faqat tezkor (offline/optimistik) kesh sifatida ishlatiladi.
+let SERVER_FAVS=null;
+function favIds(){
+  if(SERVER_FAVS)return SERVER_FAVS;
+  try{return JSON.parse(localStorage.getItem('anifilm_favs')||'[]');}catch(e){return [];}
+}
+function setFavIds(arr){SERVER_FAVS=arr;localStorage.setItem('anifilm_favs',JSON.stringify(arr));}
 function isFav(id){return favIds().includes(id);}
-function toggleFav(id){let f=favIds();f=f.includes(id)?f.filter(x=>x!==id):[...f,id];setFavIds(f);return f.includes(id);}
+function toggleFav(id){
+  let f=favIds();
+  const active=!f.includes(id);
+  f=active?[...f,id]:f.filter(x=>x!==id);
+  setFavIds(f);
+  fetch('/api/favorite',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user_id:getUid(),anime_id:id})
+  }).catch(()=>{});
+  return active;
+}
+async function loadFavoritesFromServer(){
+  try{
+    const res=await fetch(`/api/favorites?user_id=${getUid()}`);
+    if(res.ok){const data=await res.json();SERVER_FAVS=data.ids||[];}
+  }catch(e){/* localStorage keshi bilan davom etamiz */}
+}
+async function loadProfileStats(){
+  try{
+    const res=await fetch(`/api/stats?user_id=${getUid()}`);
+    if(res.ok){
+      const s=await res.json();
+      document.getElementById('statFav').textContent=s.favorites;
+      document.getElementById('statWatched').textContent=s.watched;
+      document.getElementById('statTime').textContent=s.watch_hours+' soat';
+      document.getElementById('statStreak').textContent=s.streak;
+      return;
+    }
+  }catch(e){}
+  // Server javob bermasa — 0 emas, "—" ko'rsatib qo'yamiz (chalg'ituvchi 0 dan yaxshiroq)
+  ['statFav','statWatched','statTime','statStreak'].forEach(id=>document.getElementById(id).textContent='—');
+}
 function historyIds(){try{return JSON.parse(localStorage.getItem('anifilm_history')||'[]');}catch(e){return [];}}
 function pushHistory(id){let h=historyIds().filter(x=>x!==id);h.unshift(id);localStorage.setItem('anifilm_history',JSON.stringify(h.slice(0,15)));}
 function lastEpMap(){try{return JSON.parse(localStorage.getItem('anifilm_last_ep')||'{}');}catch(e){return {};}}
@@ -706,6 +749,10 @@ function renderCard(a,variant){
   if(variant&&variant.rank){
     const r=variant.rank;const cls=r===1?'r1':r===2?'r2':r===3?'r3':'';
     inner+=`<div class="rank-badge ${cls}">${r}</div>`;
+  }
+  if(a.media_type!=='film'&&a.episode_count>0){
+    const topOffset=(variant==='new'||(variant&&variant.rank))?36:8;
+    inner+=`<div class="ep-range-badge" style="top:${topOffset}px;">1–${a.episode_count}</div>`;
   }
   inner+=favBtn(a)+`</div>`;
   let sub='';
@@ -894,11 +941,12 @@ async function renderProfil(){
     document.getElementById(unId).textContent=uname;
   });
 
-  document.getElementById('statFav').textContent=favIds().length;
-  document.getElementById('statWatched').textContent=historyIds().length;
-  document.getElementById('statTime').textContent=calcWatchHours()+' soat';
-  document.getElementById('statStreak').textContent=calcStreak();
+  document.getElementById('statFav').textContent='—';
+  document.getElementById('statWatched').textContent='—';
+  document.getElementById('statTime').textContent='—';
+  document.getElementById('statStreak').textContent='—';
   document.getElementById('pfCacheSize').textContent=cacheSizeKB();
+  loadProfileStats();
 
   const vq=localStorage.getItem('anifilm_quality')||'Auto (720p)';
   document.getElementById('pfQualityVal').textContent=vq;
@@ -1486,7 +1534,8 @@ async function init(){
     const [animes,banners,categories]=await Promise.all([
       fetchJSON(`${API}/animes?user_id=${uid}`),
       fetchJSON(`${API}/banners?user_id=${uid}`).catch(()=>[]),
-      fetchJSON(`${API}/categories?user_id=${uid}`).catch(()=>[])
+      fetchJSON(`${API}/categories?user_id=${uid}`).catch(()=>[]),
+      loadFavoritesFromServer()
     ]);
     ALL_ANIME=animes;BANNERS=banners||[];CATEGORIES=categories||[];
     renderHome(ALL_ANIME);
