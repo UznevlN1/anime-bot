@@ -1088,7 +1088,9 @@ async function renderRecentProfil(){
     if(!items.length){section.style.display='none';return;}
     // ALL_ANIME hali yuklanmagan boʻlishi mumkin (race condition) — shuning uchun har bir anime
     // maʼlumotini toʻgʻridan-toʻgʻri /api/animes/{id} orqali olamiz, ALL_ANIME'ga tayanmaymiz.
-    const details=await Promise.all(items.map(it=>fetchJSON(`${API}/animes/${it.anime_id}`).catch(()=>null)));
+    // MUHIM: user_id albatta yuborilishi kerak — aks holda server foydalanuvchini
+    // "obunasiz" deb hisoblab 403 qaytaradi va butun ro'yxat yashirilib qoladi.
+    const details=await Promise.all(items.map(it=>fetchJSON(`${API}/animes/${it.anime_id}?user_id=${getUid()}`).catch(()=>null)));
     const lastEps=lastEpMap();
     wrap.innerHTML='';
     let rendered=0;
@@ -1619,10 +1621,32 @@ document.getElementById('pfNotifToggle').addEventListener('click',(e)=>{
 });
 
 document.getElementById('pfClearHistory').addEventListener('click',()=>{
-  localStorage.removeItem('anifilm_history');
-  localStorage.removeItem('anifilm_watched_eps');
-  localStorage.removeItem('anifilm_watch_days');
-  if(document.getElementById('view-profil').classList.contains('active'))renderProfil();
+  const doClear=async()=>{
+    localStorage.removeItem('anifilm_history');
+    localStorage.removeItem('anifilm_watched_eps');
+    localStorage.removeItem('anifilm_watch_days');
+    localStorage.removeItem('anifilm_last_ep');
+    try{
+      // Serverdagi tomosha tarixi/statistikasini ham tozalaymiz — aks holda
+      // "Ko'rilgan"/"Tomosha vaqti"/"Davom etishda" va "Oxirgi ko'rilganlar"
+      // o'zgarishsiz qolaveradi (bular server tomonida saqlanadi).
+      await fetch(`${API}/history/clear`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({user_id:getUid()})
+      });
+      pfAlert('✅ Tarix tozalandi');
+    }catch(e){
+      pfAlert("😕 Tarixni tozalab bo'lmadi. Internetni tekshirib qayta urinib ko'ring.");
+    }
+    if(document.getElementById('view-profil').classList.contains('active'))renderProfil();
+  };
+  const confirmMsg="Tomosha tarixingizni tozalamoqchimisiz? \"Ko'rilgan\", \"Tomosha vaqti\", \"Davom etishda\" statistikasi va \"Oxirgi ko'rilganlar\" ro'yxati 0/bo'sh holatga qaytadi. Sevimlilar o'chmaydi.";
+  if(tg?.showConfirm){
+    tg.showConfirm(confirmMsg,(ok)=>{if(ok)doClear();});
+  }else{
+    if(confirm(confirmMsg))doClear();
+  }
 });
 document.getElementById('pfClearCache').addEventListener('click',()=>{
   const favs=favIds();
