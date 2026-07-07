@@ -22,9 +22,35 @@
   --glow-red:rgba(239,68,68,.4);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:96px;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:88px;}
 img{-webkit-user-drag:none;}
 button{font-family:inherit;cursor:pointer;}
+
+/* Global tap/press animation — har bir bosiladigan elementga 150-200ms
+   ichida "premium" tegishga o'xshash mikro-animatsiya beradi */
+button,.tab,.seg-btn,.chip,.fav-btn,.pf-row-btn,.pf-toggle,
+.btn-primary,.btn-ghost,.comment-action-btn,.hero-actions button{
+  transition:transform .18s cubic-bezier(.4,0,.2,1),opacity .18s ease;
+  will-change:transform;
+}
+button:active,.tab:active,.seg-btn:active,.chip:active,
+.fav-btn:active,.pf-row-btn:active,.pf-toggle:active,
+.btn-primary:active,.btn-ghost:active,.comment-action-btn:active{
+  transform:scale(.94);
+  opacity:.85;
+}
+@media (prefers-reduced-motion:reduce){
+  button,.tab,.seg-btn,.chip,.fav-btn,.pf-row-btn,.pf-toggle,
+  .btn-primary,.btn-ghost,.comment-action-btn,.hero-actions button{
+    transition:none!important;
+  }
+  button:active,.tab:active,.seg-btn:active,.chip:active,
+  .fav-btn:active,.pf-row-btn:active,.pf-toggle:active,
+  .btn-primary:active,.btn-ghost:active,.comment-action-btn:active{
+    transform:none!important;
+    opacity:1!important;
+  }
+}
 
 /* Topbar */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;}
@@ -65,7 +91,12 @@ button{font-family:inherit;cursor:pointer;}
 
 .card{width:128px;flex:none;opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease;}
 .card.revealed{opacity:1;transform:translateY(0);}
-.card-img-wrap{position:relative;width:128px;height:176px;border-radius:14px;overflow:hidden;background:var(--bg-card);}
+.card-img-wrap{position:relative;width:128px;height:176px;border-radius:14px;overflow:hidden;background:var(--bg-card);transition:transform .18s cubic-bezier(.4,0,.2,1);}
+.card:active .card-img-wrap{transform:scale(.95);}
+@media (prefers-reduced-motion:reduce){
+  .card-img-wrap{transition:none!important;}
+  .card:active .card-img-wrap{transform:none!important;}
+}
 .card-img{width:100%;height:100%;object-fit:cover;display:block;}
 .card-title{font-size:12.5px;font-weight:700;margin-top:8px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
 .card-sub{font-size:11px;color:var(--text-dim);margin-top:2px;}
@@ -335,9 +366,9 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .watch-stat{display:inline-flex;align-items:center;gap:4px;color:var(--purple2);font-weight:700;}
 
 /* Tabbar */
-.tabbar{position:fixed;left:14px;right:14px;bottom:calc(12px + env(safe-area-inset-bottom));background:rgba(255,255,255,.08);backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.16);border-radius:26px;display:flex;padding:7px;gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);z-index:10;}
-.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none;border:none;color:rgba(255,255,255,.5);font-size:9.5px;font-weight:700;padding:8px 0;border-radius:19px;transition:all .2s ease;}
-.tab-icon{font-size:18px;width:34px;height:34px;border-radius:12px;display:flex;align-items:center;justify-content:center;transition:all .2s ease;}
+.tabbar{position:fixed;left:14px;right:14px;bottom:calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.08);backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.16);border-radius:24px;display:flex;padding:6px;gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);z-index:10;}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:none;border:none;color:rgba(255,255,255,.5);font-size:9px;font-weight:700;padding:7px 0;border-radius:17px;transition:all .2s ease;}
+.tab-icon{font-size:16px;width:31px;height:31px;border-radius:11px;display:flex;align-items:center;justify-content:center;transition:all .2s ease;}
 .tab.active{color:#fff;background:rgba(255,255,255,.06);}
 .tab.active .tab-icon{background:linear-gradient(135deg,var(--purple2),var(--purple));box-shadow:0 4px 14px var(--glow);transform:translateY(-1px);}
 </style>
@@ -507,7 +538,13 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
       <div class="pf-row"><button class="pf-row-btn" id="pfRate"><div class="pf-icon-box" style="background:rgba(245,197,66,.32);color:var(--gold);">⭐</div><div class="pf-row-label">Ilovani baholash</div><span class="pf-row-arrow">›</span></button></div>
       <div class="pf-row"><button class="pf-row-btn" id="pfAbout"><div class="pf-icon-box" style="background:rgba(59,130,246,.32);color:#60a5fa;">ℹ️</div><div class="pf-row-label">Ilova haqida</div><span class="pf-row-arrow">›</span></button></div>
       <div class="pf-row"><button class="pf-row-btn" id="pfTerms"><div class="pf-icon-box" style="background:rgba(34,197,94,.32);color:#4ade80;">✅</div><div class="pf-row-label">Foydalanish qoidalari</div><span class="pf-row-arrow">›</span></button></div>
-      <div class="pf-row danger"><button class="pf-row-btn" id="pfExit"><div class="pf-icon-box" style="background:rgba(239,68,68,.32);color:var(--red2);">🔒</div><div class="pf-row-label">Chiqish</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row"><div class="pf-icon-box" style="background:rgba(139,92,246,.32);color:#a78bfa;">📝</div><div class="pf-row-label">Versiya</div><span class="pf-row-val" id="pfVersion">—</span></div>
+    </div>
+
+    <div class="pf-section">
+      <div class="pf-section-title">Hisob</div>
+      <div class="pf-row"><button class="pf-row-btn" id="pfRefreshAccount"><div class="pf-icon-box" style="background:rgba(34,197,94,.32);color:#4ade80;">🔄</div><div class="pf-row-label">Hisobni yangilash</div><span class="pf-row-arrow">›</span></button></div>
+      <div class="pf-row danger"><button class="pf-row-btn" id="pfDeleteAccount"><div class="pf-icon-box" style="background:rgba(239,68,68,.32);color:var(--red2);">🗑️</div><div class="pf-row-label">Hisobni o'chirish</div><span class="pf-row-arrow">›</span></button></div>
     </div>
     </div>
   </div>
@@ -1003,6 +1040,7 @@ async function renderProfil(){
     lockedEl.style.display='none';
     fullEl.style.display='';
 
+    document.getElementById('pfVersion').textContent='v'+(p.app_version||'1.0.0');
     document.getElementById('profilJoined').textContent="Botga qo'shilgan sana: "+formatJoinDate(p.joined_at);
     const badge=document.getElementById('profilPremium');
     const card=document.querySelector('.pf-card');
@@ -1568,7 +1606,62 @@ document.getElementById('pfSupport').addEventListener('click',()=>{SUPPORT_URL?p
 document.getElementById('pfRate').addEventListener('click',()=>pfAlert('⭐ Ilovani yoqtirsangiz, do\'stlaringizga ham tavsiya qiling!'));
 document.getElementById('pfAbout').addEventListener('click',()=>pfAlert('ANIFILM BOT — anime film va seriallarni bevosita Telegram ichida tomosha qiling.'));
 document.getElementById('pfTerms').addEventListener('click',()=>pfAlert('Botdan foydalanish orqali siz xizmat qoidalariga rozilik bildirasiz. Kontentni tarqatish taqiqlanadi.'));
-document.getElementById('pfExit').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
+
+/* ---------- hisobni yangilash / o'chirish ---------- */
+document.getElementById('pfRefreshAccount').addEventListener('click',async()=>{
+  const btn=document.getElementById('pfRefreshAccount');
+  btn.disabled=true;
+  try{
+    const u=tg?.initDataUnsafe?.user;
+    const full_name=u?[u.first_name,u.last_name].filter(Boolean).join(' '):null;
+    await fetch(`${API}/account/refresh`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({user_id:getUid(),username:u?.username||null,full_name})
+    });
+    await renderProfil();
+    pfAlert("✅ Hisob ma'lumotlari yangilandi");
+  }catch(e){
+    pfAlert("😕 Hisobni yangilab bo'lmadi. Internetni tekshirib qayta urinib ko'ring.");
+  }finally{
+    btn.disabled=false;
+  }
+});
+
+document.getElementById('pfDeleteAccount').addEventListener('click',()=>{
+  const doDelete=async()=>{
+    try{
+      await fetch(`${API}/account/delete`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({user_id:getUid()})
+      });
+      Object.keys(localStorage).filter(k=>k.startsWith('anifilm_')).forEach(k=>localStorage.removeItem(k));
+      pfAlert("✅ Hisobingiz o'chirildi.");
+      setTimeout(()=>{tg?.close?tg.close():history.back();},600);
+    }catch(e){
+      pfAlert("😕 Hisobni o'chirib bo'lmadi. Internetni tekshirib qayta urinib ko'ring.");
+    }
+  };
+  const confirmMsg="Hisobingizni o'chirmoqchimisiz? Sevimlilar, tomosha tarixi va izohlaringiz butunlay o'chib ketadi. Bu amalni ortga qaytarib bo'lmaydi.";
+  if(tg?.showConfirm){
+    tg.showConfirm(confirmMsg,(ok1)=>{
+      if(!ok1)return;
+      // Ikkinchi tasdiq — tasodifan bosilib ketmasligi uchun
+      tg.showConfirm("Aniq ishonchingiz komilmi? Bu amal qaytarilmaydi.",(ok2)=>{
+        if(ok2)doDelete();
+      });
+    });
+  }else{
+    if(confirm(confirmMsg)&&confirm("Aniq ishonchingiz komilmi? Bu amal qaytarilmaydi."))doDelete();
+  }
+});
+
+/* ---------- tap haptic feedback ---------- */
+document.addEventListener('click',(e)=>{
+  const el=e.target.closest('button,.tab,.seg-btn,.chip,.fav-btn,.card');
+  if(el&&tg?.HapticFeedback?.impactOccurred)tg.HapticFeedback.impactOccurred('light');
+},true);
 
 
 /* ---------- init ---------- */
