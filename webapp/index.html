@@ -1067,53 +1067,63 @@ async function renderProfil(){
 async function renderRecentProfil(){
   const wrap=document.getElementById('pfRecentRow');
   const section=document.getElementById('pfRecentSection');
-  let ids=[];
   try{
-    const res=await fetch(`/api/history?user_id=${getUid()}`);
-    if(res.ok){const data=await res.json();ids=data.ids||[];}
-  }catch(e){}
-  if(!ids.length)ids=historyIds().slice(0,8); // server javob bermasa, lokal keshga tayanamiz
-  if(!ids.length){section.style.display='none';return;}
-  // ALL_ANIME hali yuklanmagan boʻlishi mumkin (race condition) — shuning uchun har bir anime
-  // maʼlumotini toʻgʻridan-toʻgʻri /api/animes/{id} orqali olamiz, ALL_ANIME'ga tayanmaymiz.
-  const details=await Promise.all(ids.map(id=>fetchJSON(`${API}/animes/${id}`).catch(()=>null)));
-  const watched=new Set(watchedEpIds());
-  const lastEps=lastEpMap();
-  wrap.innerHTML='';
-  let rendered=0;
-  ids.forEach((id,i)=>{
-    const det=details[i];
-    if(!det)return; // shu anime uchun maʼlumot topilmadi — oʻtkazib yuboramiz
-    const eps=det.episodes||[];
-    const watchedCount=eps.filter(e=>watched.has(e.id)).length;
-    const total=eps.length||det.episode_count||0;
-    const pct=total?Math.round(watchedCount/total*100):0;
-    const isFilm=det.media_type==='film';
-    const subText=isFilm?(watchedCount?"Film • tomosha qilingan":'Film'):(total?`<b>${watchedCount}</b> / ${total} qism`:'Malumot yoʻq');
-    const c=document.createElement('div');
-    c.className='pf-recent-card';
-    c.innerHTML=`<img class="pf-recent-img" src="${posterUrl(det)}">
-      <div class="pf-recent-title">${det.title}</div>
-      <div class="pf-recent-sub">${subText}</div>
-      <div class="pf-progress"><i style="width:${pct}%"></i></div>`;
-    c.addEventListener('click',()=>{
-      const lastEpId=lastEps[id];
-      const pos=lastEpId?pvGetPositions()[lastEpId]:null;
-      if(lastEpId && pos){
-        // Hali tugatilmagan — toʻgʻridan-toʻgʻri saqlangan joydan davom ettiramiz
-        const ep=eps.find(e=>e.id===lastEpId);
-        const title=ep?(isFilm?det.title:`${det.title} — ${ep.episode_number}-qism`):det.title;
-        pushHistory(id);
-        openPlayer(lastEpId,title);
-      }else{
-        // Tugatilgan yoki maʼlumot yoʻq — qismlarni oʻzi tanlashi uchun detail sahifasi
-        openDetail(id);
+    let ids=[];
+    try{
+      const res=await fetch(`/api/history?user_id=${getUid()}`);
+      if(res.ok){const data=await res.json();ids=data.ids||[];}
+    }catch(e){console.warn('Oxirgi ko\'rilganlar: /api/history so\'rovi muvaffaqiyatsiz',e);}
+    if(!ids.length)ids=historyIds().slice(0,8); // server javob bermasa, lokal keshga tayanamiz
+    if(!ids.length){section.style.display='none';return;}
+    // ALL_ANIME hali yuklanmagan boʻlishi mumkin (race condition) — shuning uchun har bir anime
+    // maʼlumotini toʻgʻridan-toʻgʻri /api/animes/{id} orqali olamiz, ALL_ANIME'ga tayanmaymiz.
+    const details=await Promise.all(ids.map(id=>fetchJSON(`${API}/animes/${id}`).catch(()=>null)));
+    const watched=new Set(watchedEpIds());
+    const lastEps=lastEpMap();
+    wrap.innerHTML='';
+    let rendered=0;
+    ids.forEach((id,i)=>{
+      try{
+        const det=details[i];
+        if(!det)return; // shu anime uchun maʼlumot topilmadi — oʻtkazib yuboramiz
+        const eps=det.episodes||[];
+        const watchedCount=eps.filter(e=>watched.has(e.id)).length;
+        const total=eps.length||det.episode_count||0;
+        const pct=total?Math.round(watchedCount/total*100):0;
+        const isFilm=det.media_type==='film';
+        const subText=isFilm?(watchedCount?"Film • tomosha qilingan":'Film'):(total?`<b>${watchedCount}</b> / ${total} qism`:'Malumot yoʻq');
+        const c=document.createElement('div');
+        c.className='pf-recent-card';
+        c.innerHTML=`<img class="pf-recent-img" src="${posterUrl(det)}">
+          <div class="pf-recent-title">${det.title||''}</div>
+          <div class="pf-recent-sub">${subText}</div>
+          <div class="pf-progress"><i style="width:${pct}%"></i></div>`;
+        c.addEventListener('click',()=>{
+          const lastEpId=lastEps[id];
+          const pos=lastEpId?pvGetPositions()[lastEpId]:null;
+          if(lastEpId && pos){
+            // Hali tugatilmagan — toʻgʻridan-toʻgʻri saqlangan joydan davom ettiramiz
+            const ep=eps.find(e=>e.id===lastEpId);
+            const title=ep?(isFilm?det.title:`${det.title} — ${ep.episode_number}-qism`):det.title;
+            pushHistory(id);
+            openPlayer(lastEpId,title);
+          }else{
+            // Tugatilgan yoki maʼlumot yoʻq — qismlarni oʻzi tanlashi uchun detail sahifasi
+            openDetail(id);
+          }
+        });
+        wrap.appendChild(c);
+        rendered++;
+      }catch(err){
+        // Bitta yozuvdagi kutilmagan xatolik butun roʻyxatni toʻxtatib qoʻymasligi uchun
+        console.warn('Oxirgi ko\'rilganlar: bitta anime chizishda xatolik, oʻtkazib yuborildi',id,err);
       }
     });
-    wrap.appendChild(c);
-    rendered++;
-  });
-  section.style.display=rendered?'':'none';
+    section.style.display=rendered?'':'none';
+  }catch(err){
+    console.warn('Oxirgi ko\'rilganlar bo\'limini chizishda xatolik',err);
+    section.style.display='none';
+  }
 }
 
 
