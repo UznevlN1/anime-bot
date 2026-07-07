@@ -590,9 +590,17 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 <main id="view-subscribe" class="view">
   <div class="block-screen">
     <div class="block-icon">📢</div>
-    <div class="block-title">Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling</div>
+    <div class="block-title">Botdan to'liq foydalanish uchun quyidagi kanallarga obuna bo'ling</div>
     <div class="sub-channels" id="subChannels"></div>
     <button class="btn-primary sub-check-btn" id="subCheckBtn">✅ Obuna bo'ldim</button>
+    <div style="margin:16px 0 4px;padding:0 20px;font-size:13px;color:var(--text-dim,#9a9aa5);">✅ Yoki Premium sotib oling — kanallarga obuna bo'lmasdan cheklovlarsiz foydalaning:</div>
+    <div style="margin:0 20px 12px;padding:12px 14px;border-radius:14px;background:rgba(245,197,66,.08);border:1px solid rgba(245,197,66,.3);font-size:13px;line-height:1.9;">
+      👑 Kanalsiz to'liq kirish<br>
+      👑 Reklama bannersiz<br>
+      👑 Yangi qismlarga oldinroq kirish<br>
+      👑 Izohlaringiz yuqorida va 👑 belgi bilan
+    </div>
+    <button class="btn-primary sub-check-btn" id="subPremiumBtn" style="margin-top:0;background:linear-gradient(135deg,#f5c542,#c9932e);">💎 Premium orqali kirish (kanalsiz)</button>
   </div>
 </main>
 
@@ -1068,30 +1076,40 @@ async function renderRecentProfil(){
   const wrap=document.getElementById('pfRecentRow');
   const section=document.getElementById('pfRecentSection');
   try{
-    let ids=[];
+    let items=[];
     try{
       const res=await fetch(`/api/history?user_id=${getUid()}`);
-      if(res.ok){const data=await res.json();ids=data.ids||[];}
+      if(res.ok){
+        const data=await res.json();
+        items=data.items||(data.ids||[]).map(id=>({anime_id:id,episode_number:null}));
+      }
     }catch(e){console.warn('Oxirgi ko\'rilganlar: /api/history so\'rovi muvaffaqiyatsiz',e);}
-    if(!ids.length)ids=historyIds().slice(0,8); // server javob bermasa, lokal keshga tayanamiz
-    if(!ids.length){section.style.display='none';return;}
+    if(!items.length)items=historyIds().slice(0,8).map(id=>({anime_id:id,episode_number:null})); // server javob bermasa, lokal keshga tayanamiz
+    if(!items.length){section.style.display='none';return;}
     // ALL_ANIME hali yuklanmagan boʻlishi mumkin (race condition) — shuning uchun har bir anime
     // maʼlumotini toʻgʻridan-toʻgʻri /api/animes/{id} orqali olamiz, ALL_ANIME'ga tayanmaymiz.
-    const details=await Promise.all(ids.map(id=>fetchJSON(`${API}/animes/${id}`).catch(()=>null)));
-    const watched=new Set(watchedEpIds());
+    const details=await Promise.all(items.map(it=>fetchJSON(`${API}/animes/${it.anime_id}`).catch(()=>null)));
     const lastEps=lastEpMap();
     wrap.innerHTML='';
     let rendered=0;
-    ids.forEach((id,i)=>{
+    items.forEach((it,i)=>{
       try{
+        const id=it.anime_id;
         const det=details[i];
         if(!det)return; // shu anime uchun maʼlumot topilmadi — oʻtkazib yuboramiz
         const eps=det.episodes||[];
-        const watchedCount=eps.filter(e=>watched.has(e.id)).length;
         const total=eps.length||det.episode_count||0;
-        const pct=total?Math.round(watchedCount/total*100):0;
         const isFilm=det.media_type==='film';
-        const subText=isFilm?(watchedCount?"Film • tomosha qilingan":'Film'):(total?`<b>${watchedCount}</b> / ${total} qism`:'Malumot yoʻq');
+        // Serverdan kelgan oxirgi ko'rilgan qism raqami ustuvor; topilmasa,
+        // qurilmadagi lokal keshga (lastEpMap) qaraymiz; u ham bo'lmasa 1-qism.
+        let epNum=it.episode_number;
+        let lastEpId=lastEps[id];
+        if(!epNum && lastEpId){
+          const ep=eps.find(e=>e.id===lastEpId);
+          if(ep)epNum=ep.episode_number;
+        }
+        const pct=(epNum&&total)?Math.round(epNum/total*100):0;
+        const subText=isFilm?'Film':(epNum?`<b>${epNum}-qism</b>`:(total?`${total} qism`:'Malumot yoʻq'));
         const c=document.createElement('div');
         c.className='pf-recent-card';
         c.innerHTML=`<img class="pf-recent-img" src="${posterUrl(det)}">
@@ -1099,7 +1117,10 @@ async function renderRecentProfil(){
           <div class="pf-recent-sub">${subText}</div>
           <div class="pf-progress"><i style="width:${pct}%"></i></div>`;
         c.addEventListener('click',()=>{
-          const lastEpId=lastEps[id];
+          if(!lastEpId && epNum){
+            const ep=eps.find(e=>e.episode_number===epNum);
+            if(ep)lastEpId=ep.id;
+          }
           const pos=lastEpId?pvGetPositions()[lastEpId]:null;
           if(lastEpId && pos){
             // Hali tugatilmagan — toʻgʻridan-toʻgʻri saqlangan joydan davom ettiramiz
@@ -1116,7 +1137,7 @@ async function renderRecentProfil(){
         rendered++;
       }catch(err){
         // Bitta yozuvdagi kutilmagan xatolik butun roʻyxatni toʻxtatib qoʻymasligi uchun
-        console.warn('Oxirgi ko\'rilganlar: bitta anime chizishda xatolik, oʻtkazib yuborildi',id,err);
+        console.warn('Oxirgi ko\'rilganlar: bitta anime chizishda xatolik, oʻtkazib yuborildi',it,err);
       }
     });
     section.style.display=rendered?'':'none';
@@ -1513,6 +1534,7 @@ function showBlockView(n){
   document.getElementById('view-'+n).classList.add('active');
   document.querySelector('.tabbar').style.display='none';
 }
+document.getElementById('subPremiumBtn').addEventListener('click',()=>pfOpenPremiumPurchase());
 function renderSubscribeChannels(channels){
   const wrap=document.getElementById('subChannels');wrap.innerHTML='';
   (channels||[]).forEach(ch=>{
@@ -1538,6 +1560,7 @@ async function checkAccess(){
   }
   try{
     const status=await fetchJSON(`${API}/check_access?user_id=${uid}`);
+    if(status.bot_username)BOT_USERNAME=status.bot_username;
     if(status.maintenance){
       document.getElementById('maintenanceIcon').textContent='🔧';
       document.getElementById('maintenanceTitle').textContent='Texnik ishlar olib borilmoqda';
