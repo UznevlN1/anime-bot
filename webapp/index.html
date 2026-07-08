@@ -366,7 +366,8 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .watch-stat{display:inline-flex;align-items:center;gap:4px;color:var(--purple2);font-weight:700;}
 
 /* Tabbar */
-.tabbar{position:fixed;left:14px;right:14px;bottom:calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.08);backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.16);border-radius:24px;display:flex;padding:6px;gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);z-index:10;}
+.tabbar{position:fixed;left:14px;right:14px;bottom:calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.08);backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%);border:1px solid rgba(255,255,255,.16);border-radius:24px;display:flex;padding:6px;gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08);z-index:10;transition:transform .28s cubic-bezier(.4,0,.2,1);}
+.tabbar.tabbar-hidden{transform:translateY(calc(100% + 20px + env(safe-area-inset-bottom)));}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:none;border:none;color:rgba(255,255,255,.5);font-size:9px;font-weight:700;padding:7px 0;border-radius:17px;transition:all .2s ease;}
 .tab-icon{font-size:16px;width:31px;height:31px;border-radius:11px;display:flex;align-items:center;justify-content:center;transition:all .2s ease;}
 .tab.active{color:#fff;background:rgba(255,255,255,.06);}
@@ -1214,7 +1215,7 @@ async function loadComments(animeId){
   const list=document.getElementById('commentsList');
   list.innerHTML='<div class="empty-msg">Yuklanmoqda...</div>';
   try{
-    const comments=await fetchJSON(`${API}/comments/${animeId}`);
+    const comments=await fetchJSON(`${API}/comments/${animeId}?user_id=${getUid()}`);
     if(!comments.length){list.innerHTML='<div class="empty-msg">Hali izohlar yoʻq. Birinchi boʻlib yozing!</div>';return;}
     list.innerHTML='';
     const topLevel=comments.filter(c=>!c.parent_id);
@@ -1770,6 +1771,32 @@ async function init(){
     if(pulling&&indicator.classList.contains('show')){init();}
     indicator.classList.remove('show');startY=null;pulling=false;
   });
+})();
+
+/* ---------- scroll qilganda tabbar yashirish/koʻrsatish ---------- */
+(function(){
+  const tabbar=document.querySelector('.tabbar');
+  let lastY=window.scrollY;
+  let ticking=false;
+  function onScroll(){
+    const y=Math.max(0,window.scrollY);
+    const diff=y-lastY;
+    if(y<24){
+      // Sahifa boshida — har doim koʻrinsin
+      tabbar.classList.remove('tabbar-hidden');
+    }else if(diff>6){
+      // Pastga tushayapti — yashiramiz (kontentga xalaqit bermasin)
+      tabbar.classList.add('tabbar-hidden');
+    }else if(diff<-6){
+      // Tepaga koʻtarilyapti — qaytarib chiqaramiz
+      tabbar.classList.remove('tabbar-hidden');
+    }
+    lastY=y;
+    ticking=false;
+  }
+  window.addEventListener('scroll',()=>{
+    if(!ticking){requestAnimationFrame(onScroll);ticking=true;}
+  },{passive:true});
 })();
 
 init();
