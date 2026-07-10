@@ -86,7 +86,7 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .section-title{font-size:16px;font-weight:800;}
 .section-link{font-size:12px;color:var(--purple2);font-weight:700;}
-.row-scroll{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;}
+.row-scroll{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
 .row-scroll::-webkit-scrollbar{display:none;}
 
 .card{width:128px;flex:none;opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease;}
@@ -1787,20 +1787,36 @@ async function init(){
 
 /* ---------- pull to refresh ---------- */
 (function(){
-  let startY=null;let pulling=false;
+  let startY=null;let startX=null;let pulling=false;
   const home=document.getElementById('view-home');
   const indicator=document.getElementById('pullIndicator');
   home.addEventListener('touchstart',(e)=>{
-    if(window.scrollY===0){startY=e.touches[0].clientY;pulling=true;}
+    // Gorizontal qatorlar ("Yangi qo'shilganlar", "Mashhur", "Sizga tavsiya")
+    // ichidan boshlangan teginishlarni pull-to-refresh sifatida hisoblamaymiz —
+    // aks holda ularni gorizontal aylantirishga urinish sahifani "tortib"
+    // pastga tushishga xalaqit berardi va indikator chiqib-kirib qimirlardi.
+    if(window.scrollY===0 && !e.target.closest('.row-scroll')){
+      startY=e.touches[0].clientY;
+      startX=e.touches[0].clientX;
+      pulling=true;
+    }
   },{passive:true});
   home.addEventListener('touchmove',(e)=>{
     if(!pulling||startY===null)return;
-    const diff=e.touches[0].clientY-startY;
-    if(diff>60)indicator.classList.add('show');else indicator.classList.remove('show');
+    const diffY=e.touches[0].clientY-startY;
+    const diffX=e.touches[0].clientX-startX;
+    // Agar harakat vertikaldan koʻra koʻproq gorizontal boʻlsa — bu oddiy
+    // svayp/gorizontal scroll, pull-to-refresh emas. Bekor qilamiz.
+    if(Math.abs(diffX)>Math.abs(diffY)){
+      pulling=false;
+      indicator.classList.remove('show');
+      return;
+    }
+    if(diffY>60)indicator.classList.add('show');else indicator.classList.remove('show');
   },{passive:true});
   home.addEventListener('touchend',(e)=>{
     if(pulling&&indicator.classList.contains('show')){init();}
-    indicator.classList.remove('show');startY=null;pulling=false;
+    indicator.classList.remove('show');startY=null;startX=null;pulling=false;
   });
 })();
 
