@@ -854,7 +854,7 @@ function favBtn(a){
 function renderCard(a,variant){
   const d=document.createElement('div');d.className='card';
   const typeLabel=a.media_type==='film'?'Film':'Serial';
-  let inner=`<div class="card-img-wrap"><img class="card-img" src="${posterUrl(a)}" alt="${a.title}">`;
+  let inner=`<div class="card-img-wrap"><img class="card-img" src="${posterUrl(a)}" alt="${a.title}" loading="lazy" decoding="async">`;
   if(variant==='continue'){inner+=`<div class="play-overlay"><div class="play-circle">▶</div></div>`;}
   if(variant==='new'){inner+=`<div class="badge-new">NEW</div>`;}
   if(variant&&variant.rank){
@@ -945,7 +945,9 @@ function paintHero(){
 /* ---------- rows ---------- */
 function renderRow(elId,list,variantFn){
   const el=document.getElementById(elId);el.innerHTML='';
-  list.forEach((a,i)=>el.appendChild(renderCard(a,variantFn?variantFn(a,i):null)));
+  const frag=document.createDocumentFragment();
+  list.forEach((a,i)=>frag.appendChild(renderCard(a,variantFn?variantFn(a,i):null)));
+  el.appendChild(frag);
 }
 function renderNewArrivals(){
   const items=[...ALL_ANIME].sort((a,b)=>b.id-a.id).slice(0,8);
@@ -972,7 +974,9 @@ const _gridLoadObserver=(typeof IntersectionObserver!=='undefined')?new Intersec
 function renderGridChunk(){
   const g=document.getElementById('allGrid');
   const next=_gridItems.slice(_gridRendered,_gridRendered+GRID_CHUNK_SIZE);
-  next.forEach(a=>g.appendChild(renderCard(a)));
+  const frag=document.createDocumentFragment();
+  next.forEach(a=>frag.appendChild(renderCard(a)));
+  g.appendChild(frag);
   _gridRendered+=next.length;
   if(_gridSentinel){_gridLoadObserver&&_gridLoadObserver.unobserve(_gridSentinel);_gridSentinel.remove();_gridSentinel=null;}
   if(_gridRendered<_gridItems.length){
@@ -1705,7 +1709,11 @@ document.getElementById('subCheckBtn').addEventListener('click',async()=>{const 
 document.getElementById('maintenanceRetry').addEventListener('click',async()=>{const ok=await checkAccess();if(ok){showView('home');init();}});
 
 /* ---------- events ---------- */
-document.getElementById('searchInput').addEventListener('input',renderAllGrid);
+let _searchDebounce=null;
+document.getElementById('searchInput').addEventListener('input',()=>{
+  clearTimeout(_searchDebounce);
+  _searchDebounce=setTimeout(renderAllGrid,220);
+});
 document.getElementById('segmented').addEventListener('click',(e)=>{
   const b=e.target.closest('.seg-btn');if(!b)return;
   document.querySelectorAll('.seg-btn').forEach(x=>x.classList.remove('active'));
