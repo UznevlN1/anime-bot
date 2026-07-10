@@ -126,6 +126,7 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 
 /* Grid (all animes / search results) */
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.grid-sentinel{grid-column:1/-1;height:1px;}
 .grid .card{width:100%;}
 .grid .card-img-wrap{width:100%;height:0;padding-bottom:140%;}
 .grid .card-img-wrap img{position:absolute;inset:0;}
@@ -922,6 +923,34 @@ function renderPopular(){
   const items=[...ALL_ANIME].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,8);
   renderRow('popularRow',items,(a,i)=>({rank:i+1}));
 }
+/* ---------- "Barchasi" panjarasi — uzun roʻyxatlarda scroll performansi uchun
+   bosqichma-bosqich (chunk) render qilinadi, hammasi bir vaqtda DOM'ga
+   qoʻshilmaydi. Foydalanuvchi pastga tushganda IntersectionObserver keyingi
+   qismni yuklaydi ("cheksiz scroll" uslubida). ---------- */
+const GRID_CHUNK_SIZE=24;
+let _gridItems=[];
+let _gridRendered=0;
+let _gridSentinel=null;
+const _gridLoadObserver=(typeof IntersectionObserver!=='undefined')?new IntersectionObserver((entries)=>{
+  entries.forEach(entry=>{
+    if(entry.isIntersecting)renderGridChunk();
+  });
+},{rootMargin:'400px 0px'}):null;
+
+function renderGridChunk(){
+  const g=document.getElementById('allGrid');
+  const next=_gridItems.slice(_gridRendered,_gridRendered+GRID_CHUNK_SIZE);
+  next.forEach(a=>g.appendChild(renderCard(a)));
+  _gridRendered+=next.length;
+  if(_gridSentinel){_gridLoadObserver&&_gridLoadObserver.unobserve(_gridSentinel);_gridSentinel.remove();_gridSentinel=null;}
+  if(_gridRendered<_gridItems.length){
+    _gridSentinel=document.createElement('div');
+    _gridSentinel.className='grid-sentinel';
+    g.appendChild(_gridSentinel);
+    if(_gridLoadObserver)_gridLoadObserver.observe(_gridSentinel);
+    else renderGridChunk(); // IntersectionObserver yoʻq muhitlarda hammasini birdan koʻrsatamiz
+  }
+}
 function renderAllGrid(){
   const q=document.getElementById('searchInput').value.trim().toLowerCase();
   let items=ALL_ANIME;
@@ -935,8 +964,10 @@ function renderAllGrid(){
   document.getElementById('popularSection').style.display=isFiltering?'none':'';
   document.getElementById('recommendSection').style.display=isFiltering?'none':document.getElementById('recommendSection').dataset.has==='1'?'':'none';
   const g=document.getElementById('allGrid');g.innerHTML='';
-  if(!items.length){g.innerHTML='<div class="empty-msg">Hech narsa topilmadi</div>';return;}
-  items.forEach(a=>g.appendChild(renderCard(a)));
+  _gridSentinel=null;
+  if(!items.length){g.innerHTML='<div class="empty-msg">Hech narsa topilmadi</div>';_gridItems=[];_gridRendered=0;return;}
+  _gridItems=items;_gridRendered=0;
+  renderGridChunk();
 }
 function renderCategoryChips(){
   const row=document.getElementById('categoryRow');
