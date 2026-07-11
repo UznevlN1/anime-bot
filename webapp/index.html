@@ -1916,6 +1916,52 @@ async function init(){
   });
 })();
 
+/* ---------- gorizontal qatorlarni qoʻlda (JS orqali) suriladigan qilish ----------
+   Ba'zi Telegram klientlarida (versiya/platformaga qarab) brauzerning tabiiy
+   gorizontal scroll gesti ilova ichida ishonchli tutilmaydi — teginish
+   harakati Telegram'ning o'z UI qatlamiga "yutilib" ketishi mumkin. Shu sabab
+   .row-scroll elementlarda scrollLeft'ni o'zimiz, teginish koordinatalari
+   asosida qo'lda boshqaramiz — bu Telegram nima qilishidan qat'iy nazar ishlaydi. */
+(function(){
+  function enableDragScroll(el){
+    let startX=0,startY=0,scrollStart=0,dragging=false,horizontal=null,moved=false;
+    el.addEventListener('touchstart',(e)=>{
+      if(e.touches.length!==1)return;
+      startX=e.touches[0].clientX;
+      startY=e.touches[0].clientY;
+      scrollStart=el.scrollLeft;
+      dragging=true;horizontal=null;moved=false;
+    },{passive:true});
+    el.addEventListener('touchmove',(e)=>{
+      if(!dragging||e.touches.length!==1)return;
+      const dx=e.touches[0].clientX-startX;
+      const dy=e.touches[0].clientY-startY;
+      if(horizontal===null && (Math.abs(dx)>6||Math.abs(dy)>6)){
+        horizontal=Math.abs(dx)>Math.abs(dy);
+      }
+      if(horizontal){
+        moved=true;
+        e.preventDefault();
+        e.stopPropagation();
+        el.scrollLeft=scrollStart-dx;
+      }
+    },{passive:false});
+    const end=()=>{
+      dragging=false;horizontal=null;
+      if(moved){
+        // Sudrab tashlangandan keyin tasodifiy "bosish" (kartani ochish)ni oldini olamiz.
+        const suppressClick=(e)=>{e.stopPropagation();e.preventDefault();el.removeEventListener('click',suppressClick,true);};
+        el.addEventListener('click',suppressClick,true);
+        setTimeout(()=>el.removeEventListener('click',suppressClick,true),300);
+      }
+      moved=false;
+    };
+    el.addEventListener('touchend',end,{passive:true});
+    el.addEventListener('touchcancel',end,{passive:true});
+  }
+  document.querySelectorAll('.row-scroll').forEach(enableDragScroll);
+})();
+
 /* ---------- scroll qilganda tabbar yashirish/koʻrsatish ---------- */
 (function(){
   const tabbar=document.querySelector('.tabbar');
