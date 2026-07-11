@@ -86,7 +86,7 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .section-title{font-size:16px;font-weight:800;}
 .section-link{font-size:12px;color:var(--purple2);font-weight:700;}
-.row-scroll{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+.row-scroll{display:flex;gap:12px;overflow-x:scroll;padding-bottom:4px;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
 .row-scroll::-webkit-scrollbar{display:none;}
 
 .card{width:128px;flex:none;opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease;}
@@ -689,6 +689,11 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 <script>
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
+// Sahifa boshidagi gorizontal qatorlarda (Yangi qo'shilganlar/Mashhur) svayp
+// ishlamasligi — Telegram klienti mini-ilovani "pastga tortib yopish" gestini
+// aniqlash uchun teginishlarni ushlab qolishidan kelib chiqadi, bu gorizontal
+// svaypga xalaqit beradi. Buni o'chirib qo'yamiz (Bot API 7.7+).
+tg?.disableVerticalSwipes?.();
 const API='/api';
 /* Kanal va support havolalari botdagi Admin panel > 🔗 Havolalar boʻlimidan sozlanadi */
 let CHANNEL_URL='';
