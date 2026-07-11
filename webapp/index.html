@@ -86,7 +86,7 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .section-title{font-size:16px;font-weight:800;}
 .section-link{font-size:12px;color:var(--purple2);font-weight:700;}
-.row-scroll{display:flex;gap:12px;overflow-x:scroll;padding-bottom:4px;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+.row-scroll{display:flex;gap:12px;overflow-x:scroll;padding-bottom:4px;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
 .row-scroll::-webkit-scrollbar{display:none;}
 
 .card{width:128px;flex:none;opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease;}
@@ -220,6 +220,9 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 
 /* "Keyingi qism" avtomatik taklif overlay'i (qism tugagach chiqadi) */
 .player-next-overlay{position:absolute;right:14px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:4;display:none;pointer-events:none;}
+.skip-intro-btn{position:absolute;right:14px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:4;display:none;background:rgba(20,18,28,.88);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.16);color:#fff;font-size:12.5px;font-weight:700;border-radius:12px;padding:11px 16px;box-shadow:0 8px 28px rgba(0,0,0,.5);animation:pnoIn .28s cubic-bezier(.22,1,.36,1);white-space:nowrap;}
+.skip-intro-btn.active{display:block;}
+.skip-intro-btn:active{background:rgba(40,36,52,.92);}
 .player-next-overlay.active{display:block;pointer-events:auto;animation:pnoIn .28s cubic-bezier(.22,1,.36,1);}
 @keyframes pnoIn{from{opacity:0;transform:translateY(14px) scale(.94);}to{opacity:1;transform:translateY(0) scale(1);}}
 .pno-card{background:rgba(20,18,28,.88);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 28px rgba(0,0,0,.5);max-width:min(78vw,320px);}
@@ -651,6 +654,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <div class="player-brand player-brand-bottom" aria-hidden="true">
       <span class="pb-special"><span class="pb-spark">✦</span>Animax uchun maxsus<span class="pb-spark">✦</span></span>
     </div>
+    <button class="skip-intro-btn" id="skipIntroBtn">⏭ Qoʻshiqni oʻtkazib yuborish</button>
     <div class="player-controls" id="playerControls">
       <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" step="0.1">
       <div class="player-controls-row">
@@ -1423,36 +1427,71 @@ let pvCtx=null; // {animeId, animeTitle, isFilm} — joriy ochilgan epizod tegis
 let pnoTimer=null;
 const PNO_SECONDS=5;
 const PNO_RING_LEN=107; // 2*PI*17, taxminan
+// "Keyingi qism" taklifi endi videoning aynan oxirida emas, tugashiga shuncha
+// soniya qolganda chiqadi (5-6 daqiqa oldinroq so'ralgan edi).
+const PNO_LEAD_SECONDS=330; // 5.5 daqiqa
+let pnoShownForEp=null; // bitta epizod uchun taklif faqat bir marta chiqishi uchun
+/* "Qoʻshiqni oʻtkazib yuborish" — anime seriallarida odatda boshlanish qismida
+   (OP) qoʻshiq boʻladi, koʻpchilik buni koʻrishni xohlamaydi. Aniq boshlanish/
+   tugash vaqti (timestamp) DB'da saqlanmagani uchun, odatiy OP davomiyligiga
+   (~95 soniya) asoslanib, shu oraliqda tugma koʻrsatamiz — bosilsa belgilangan
+   nuqtaga (SKIP_INTRO_TARGET) sakraydi. */
+const SKIP_INTRO_WINDOW=95;   // shu soniyagacha tugma koʻrinadi
+const SKIP_INTRO_TARGET=95;   // bosilganda shu soniyaga sakraydi
+const skipIntroBtn=document.getElementById('skipIntroBtn');
+let skipIntroDismissed=false; // foydalanuvchi bir marta bosgach/oynadan chiqib ketgach qayta chiqmasin
 
 function pnoHide(){
   clearInterval(pnoTimer);
   pnoTimer=null;
   pnoOverlay.classList.remove('active');
 }
-async function pnoMaybeShow(){
-  pnoHide();
-  if(!pvCtx||pvCtx.isFilm||!pvCtx.animeId||!pvLastEpId)return;
+// Keyingi qismni topib qaytaradi (mavjud bo'lmasa/qulflangan bo'lsa null).
+async function pnoFindNext(){
+  if(!pvCtx||pvCtx.isFilm||!pvCtx.animeId||!pvLastEpId)return null;
   let det;
-  try{det=await fetchJSON(`${API}/animes/${pvCtx.animeId}?${initDataQS()}`);}catch(e){return;}
+  try{det=await fetchJSON(`${API}/animes/${pvCtx.animeId}?${initDataQS()}`);}catch(e){return null;}
   const eps=(det.episodes||[]).slice().sort((a,b)=>a.episode_number-b.episode_number);
   const idx=eps.findIndex(e=>e.id===pvLastEpId);
-  if(idx===-1||idx>=eps.length-1)return; // oxirgi qism yoki topilmadi
+  if(idx===-1||idx>=eps.length-1)return null; // oxirgi qism yoki topilmadi
   const next=eps[idx+1];
-  if(next.is_locked)return; // keyingisi Premium-only — avtomatik taklif qilinmaydi
-  // pleer ushbu vaqt ichida yopilgan yoki boshqa qism ochilgan bo'lishi mumkin
-  if(!document.getElementById('playerView').classList.contains('active'))return;
-  pnoTitle.textContent=`${next.episode_number}-qism`;
+  if(next.is_locked)return null; // keyingisi Premium-only — avtomatik taklif qilinmaydi
+  if(!document.getElementById('playerView').classList.contains('active'))return null;
+  return {det,next,nextTitle:`${det.title} — ${next.episode_number}-qism`};
+}
+function pnoGoNext(info){
+  pnoHide();
+  if(info.det.id)pushHistory(info.det.id);
+  if(info.det.id)setLastEp(info.det.id,info.next.id);
+  markEpWatched(info.next.id);
+  openPlayer(info.next.id,info.nextTitle,{animeId:info.det.id,animeTitle:info.det.title,isFilm:false});
+}
+// Video tugashiga PNO_LEAD_SECONDS qolganda chaqiriladi — kartani koʻrsatadi,
+// lekin avtomatik oʻtmaydi (foydalanuvchi hali tomosha qilyapti).
+async function pnoShowEarly(){
+  if(pnoShownForEp===pvLastEpId)return;
+  const info=await pnoFindNext();
+  if(!info)return;
+  if(pnoShownForEp===pvLastEpId||pnoOverlay.classList.contains('active'))return; // orada allaqachon chiqarilgan
+  pnoShownForEp=pvLastEpId;
+  pnoTitle.textContent=`${info.next.episode_number}-qism`;
+  pnoOverlay.classList.add('active');
+  pnoRing.style.strokeDashoffset='0'; // hali hisoblagich yurmaydi, toʻliq halqa
+  document.getElementById('pnoPlay').onclick=()=>pnoGoNext(info);
+  document.getElementById('pnoCancel').onclick=pnoHide;
+}
+// Video haqiqatan tugaganda (`ended`) chaqiriladi — hisoblagichni ishga tushirib,
+// PNO_SECONDS ichida avtomatik keyingi qismga oʻtadi.
+async function pnoAutoAdvance(){
+  pnoHide();
+  const info=await pnoFindNext();
+  if(!info)return;
+  pnoShownForEp=pvLastEpId;
+  pnoTitle.textContent=`${info.next.episode_number}-qism`;
   pnoOverlay.classList.add('active');
   let remaining=PNO_SECONDS;
   pnoRing.style.strokeDashoffset='0';
-  const nextTitle=`${det.title} — ${next.episode_number}-qism`;
-  const goNext=()=>{
-    pnoHide();
-    if(det.id)pushHistory(det.id);
-    if(det.id)setLastEp(det.id,next.id);
-    markEpWatched(next.id);
-    openPlayer(next.id,nextTitle,{animeId:det.id,animeTitle:det.title,isFilm:false});
-  };
+  const goNext=()=>pnoGoNext(info);
   pnoTimer=setInterval(()=>{
     remaining--;
     pnoRing.style.strokeDashoffset=String(PNO_RING_LEN*(1-remaining/PNO_SECONDS));
@@ -1505,6 +1544,9 @@ async function openPlayer(epId,title,ctx){
   pvLastTitle=title;
   pvCtx=ctx||null;
   pnoHide();
+  pnoShownForEp=null;
+  skipIntroDismissed=false;
+  skipIntroBtn.classList.remove('active');
   pvLoading.classList.add('active');
   pvLoadingText.textContent='Yuklanmoqda...';
   pv.src=`/stream/${epId}?${initDataQS()}`;
@@ -1563,6 +1605,12 @@ document.getElementById('playerSkipFwd').addEventListener('click',()=>{
   pv.currentTime=Math.min(pv.duration||pv.currentTime+15,pv.currentTime+15);
   pvShowControls();
 });
+skipIntroBtn.addEventListener('click',()=>{
+  pv.currentTime=Math.min(pv.duration||SKIP_INTRO_TARGET,SKIP_INTRO_TARGET);
+  skipIntroDismissed=true;
+  skipIntroBtn.classList.remove('active');
+  tg?.HapticFeedback?.impactOccurred?.('light');
+});
 pv.addEventListener('play',()=>{pvPlayBtn.textContent='⏸';pvShowControls();});
 pv.addEventListener('pause',()=>{pvPlayBtn.textContent='▶';pvShowControls(false);});
 pv.addEventListener('loadedmetadata',()=>{
@@ -1576,10 +1624,16 @@ pv.addEventListener('timeupdate',()=>{
   pvTime.textContent=`${fmtTime(pv.currentTime)} / ${fmtTime(pv.duration)}`;
   const sec=Math.floor(pv.currentTime);
   if(pvLastEpId&&sec!==pvLastSavedSec){pvLastSavedSec=sec;pvSavePosition(pvLastEpId,pv.currentTime);}
+  if(pv.duration&&(pv.duration-pv.currentTime)<=PNO_LEAD_SECONDS){pnoShowEarly();}
+  if(!skipIntroDismissed&&pv.currentTime>0&&pv.currentTime<SKIP_INTRO_WINDOW){
+    skipIntroBtn.classList.add('active');
+  }else{
+    skipIntroBtn.classList.remove('active');
+  }
 });
 pv.addEventListener('ended',()=>{
   if(pvLastEpId)pvSavePosition(pvLastEpId,0,true);
-  pnoMaybeShow();
+  pnoAutoAdvance();
 });
 
 // Foydalanuvchi ilovadan qanday sababda chiqib ketishidan qatʼiy nazar
