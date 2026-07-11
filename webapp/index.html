@@ -744,19 +744,19 @@ function toggleFav(id){
   setFavIds(f);
   fetch('/api/favorite',{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({user_id:getUid(),anime_id:id})
+    body:JSON.stringify({init_data:getInitData(),anime_id:id})
   }).catch(()=>{});
   return active;
 }
 async function loadFavoritesFromServer(){
   try{
-    const res=await fetch(`/api/favorites?user_id=${getUid()}`);
+    const res=await fetch(`/api/favorites?${initDataQS()}`);
     if(res.ok){const data=await res.json();SERVER_FAVS=data.ids||[];}
   }catch(e){/* localStorage keshi bilan davom etamiz */}
 }
 async function loadProfileStats(){
   try{
-    const res=await fetch(`/api/stats?user_id=${getUid()}`);
+    const res=await fetch(`/api/stats?${initDataQS()}`);
     if(res.ok){
       const s=await res.json();
       document.getElementById('statFav').textContent=s.favorites;
@@ -820,6 +820,10 @@ function placeholderImg(t){return`https://placehold.co/300x420/15151d/7c5cff?tex
 function posterUrl(a){return a.photo_id?`${API}/photo/${a.photo_id}`:placeholderImg(a.title);}
 async function fetchJSON(url){const r=await fetch(url);if(!r.ok)throw new Error(r.status);return r.json();}
 function getUid(){return tg?.initDataUnsafe?.user?.id||0;}
+// Server endi user_id'ga emas, faqat Telegram imzolagan `initData`ga ishonadi
+// (soxtalashtirib bo'lmaydi) — shuning uchun har bir so'rovda shuni yuboramiz.
+function getInitData(){return tg?.initData||'';}
+function initDataQS(){return `init_data=${encodeURIComponent(getInitData())}`;}
 
 function showView(n){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -1045,7 +1049,7 @@ let sponsorLoaded=false;
 function renderSponsorBanner(){
   if(sponsorLoaded)return;
   sponsorLoaded=true;
-  fetchJSON(`${API}/sponsor?user_id=${getUid()}`).then(s=>{
+  fetchJSON(`${API}/sponsor?${initDataQS()}`).then(s=>{
     if(!s.enabled)return;
     const banner=document.getElementById('sponsorBanner');
     document.getElementById('sponsorImg').src=s.photo_url;
@@ -1102,7 +1106,7 @@ async function renderProfil(){
   const fullEl=document.getElementById('pfFullContent');
 
   try{
-    const p=await fetchJSON(`${API}/profile?user_id=${getUid()}`);
+    const p=await fetchJSON(`${API}/profile?${initDataQS()}`);
     CHANNEL_URL=p.channel_url||'';
     SUPPORT_URL=p.support_url||'';
     BOT_USERNAME=p.bot_username||'';
@@ -1146,7 +1150,7 @@ async function renderRecentProfil(){
   try{
     let items=[];
     try{
-      const res=await fetch(`/api/history?user_id=${getUid()}`);
+      const res=await fetch(`/api/history?${initDataQS()}`);
       if(res.ok){
         const data=await res.json();
         items=data.items||(data.ids||[]).map(id=>({anime_id:id,episode_number:null}));
@@ -1158,7 +1162,7 @@ async function renderRecentProfil(){
     // maʼlumotini toʻgʻridan-toʻgʻri /api/animes/{id} orqali olamiz, ALL_ANIME'ga tayanmaymiz.
     // MUHIM: user_id albatta yuborilishi kerak — aks holda server foydalanuvchini
     // "obunasiz" deb hisoblab 403 qaytaradi va butun ro'yxat yashirilib qoladi.
-    const details=await Promise.all(items.map(it=>fetchJSON(`${API}/animes/${it.anime_id}?user_id=${getUid()}`).catch(()=>null)));
+    const details=await Promise.all(items.map(it=>fetchJSON(`${API}/animes/${it.anime_id}?${initDataQS()}`).catch(()=>null)));
     const lastEps=lastEpMap();
     wrap.innerHTML='';
     let rendered=0;
@@ -1229,7 +1233,7 @@ async function openDetail(id){
   document.getElementById('epGrid').innerHTML='';
   document.getElementById('commentsList').innerHTML='';
   try{
-    const d=await fetchJSON(`${API}/animes/${id}?user_id=${getUid()}`);
+    const d=await fetchJSON(`${API}/animes/${id}?${initDataQS()}`);
     document.getElementById('detailImg').src=posterUrl(d);
     document.getElementById('detailTitle').textContent=d.title;
     const typeLabel=d.media_type==='film'?'Film':'Serial';
@@ -1282,7 +1286,7 @@ async function loadComments(animeId){
   const list=document.getElementById('commentsList');
   list.innerHTML='<div class="empty-msg">Yuklanmoqda...</div>';
   try{
-    const comments=await fetchJSON(`${API}/comments/${animeId}?user_id=${getUid()}`);
+    const comments=await fetchJSON(`${API}/comments/${animeId}?${initDataQS()}`);
     if(!comments.length){list.innerHTML='<div class="empty-msg">Hali izohlar yoʻq. Birinchi boʻlib yozing!</div>';return;}
     list.innerHTML='';
     const topLevel=comments.filter(c=>!c.parent_id);
@@ -1310,7 +1314,7 @@ document.getElementById('commentsList').addEventListener('click',async(e)=>{
   if(btn.dataset.action==='like'){
     btn.disabled=true;
     try{
-      const r=await fetch(`${API}/comments/like`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:getUid(),comment_id:cid})});
+      const r=await fetch(`${API}/comments/like`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:getInitData(),comment_id:cid})});
       const res=await r.json();
       if(res.ok){
         btn.classList.toggle('liked',res.liked);
@@ -1335,10 +1339,9 @@ document.getElementById('commentSend').addEventListener('click',async()=>{
   const input=document.getElementById('commentInput');
   const text=input.value.trim();
   if(!text||!CURRENT_DETAIL_ID)return;
-  const u=tg?.initDataUnsafe?.user;
   try{
     const r=await fetch(`${API}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      user_id:getUid(),anime_id:CURRENT_DETAIL_ID,text,username:u?.username||'',parent_id:REPLY_TO?.id||null
+      init_data:getInitData(),anime_id:CURRENT_DETAIL_ID,text,parent_id:REPLY_TO?.id||null
     })});
     const res=await r.json();
     if(res.error){
@@ -1354,8 +1357,7 @@ document.getElementById('commentSend').addEventListener('click',async()=>{
 });
 
 function sendEp(eid,animeId){
-  const uid=getUid();
-  fetch(`${API}/send_episode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid,episode_id:eid})})
+  fetch(`${API}/send_episode`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:getInitData(),episode_id:eid})})
     .then(r=>r.json()).then(res=>{
       if(res.error){
         const msg=res.error==='premium_only'?"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq.":'Xatolik: '+res.error;
@@ -1426,7 +1428,7 @@ async function pnoMaybeShow(){
   pnoHide();
   if(!pvCtx||pvCtx.isFilm||!pvCtx.animeId||!pvLastEpId)return;
   let det;
-  try{det=await fetchJSON(`${API}/animes/${pvCtx.animeId}?user_id=${getUid()}`);}catch(e){return;}
+  try{det=await fetchJSON(`${API}/animes/${pvCtx.animeId}?${initDataQS()}`);}catch(e){return;}
   const eps=(det.episodes||[]).slice().sort((a,b)=>a.episode_number-b.episode_number);
   const idx=eps.findIndex(e=>e.id===pvLastEpId);
   if(idx===-1||idx>=eps.length-1)return; // oxirgi qism yoki topilmadi
@@ -1487,7 +1489,7 @@ function pvSavePosition(epId,seconds,force){
     fetch('/api/position',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({user_id:getUid(),episode_id:epId,position:Math.floor(seconds)}),
+      body:JSON.stringify({init_data:getInitData(),episode_id:epId,position:Math.floor(seconds)}),
       keepalive:true
     }).catch(()=>{});
   }catch(e){}
@@ -1500,7 +1502,7 @@ async function openPlayer(epId,title,ctx){
   pnoHide();
   pvLoading.classList.add('active');
   pvLoadingText.textContent='Yuklanmoqda...';
-  pv.src=`/stream/${epId}?user_id=${getUid()}`;
+  pv.src=`/stream/${epId}?${initDataQS()}`;
   document.getElementById('playerTitle').textContent=title;
   document.getElementById('playerView').classList.add('active');
   pvSeek.value=0;
@@ -1510,7 +1512,7 @@ async function openPlayer(epId,title,ctx){
   try{
     const ctrl=new AbortController();
     const timer=setTimeout(()=>ctrl.abort(),2500);
-    const res=await fetch(`/api/position/${epId}?user_id=${getUid()}`,{signal:ctrl.signal});
+    const res=await fetch(`/api/position/${epId}?${initDataQS()}`,{signal:ctrl.signal});
     clearTimeout(timer);
     if(res.ok){
       const data=await res.json();
@@ -1636,7 +1638,7 @@ pv.addEventListener('error',()=>{
     pvRetryCount++;
     const resumeAt=pv.currentTime||0;
     pvLoading.classList.add('active');
-    pv.src=`/stream/${pvLastEpId}?user_id=${getUid()}`;
+    pv.src=`/stream/${pvLastEpId}?${initDataQS()}`;
     pv.addEventListener('loadedmetadata',function onceResume(){
       pv.currentTime=resumeAt;
       pv.play().catch(()=>{});
@@ -1681,7 +1683,7 @@ async function checkAccess(){
     return false;
   }
   try{
-    const status=await fetchJSON(`${API}/check_access?user_id=${uid}`);
+    const status=await fetchJSON(`${API}/check_access?${initDataQS()}`);
     if(status.bot_username)BOT_USERNAME=status.bot_username;
     if(status.maintenance){
       document.getElementById('maintenanceIcon').textContent='🔧';
@@ -1757,7 +1759,7 @@ document.getElementById('pfClearHistory').addEventListener('click',()=>{
       await fetch(`${API}/history/clear`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({user_id:getUid()})
+        body:JSON.stringify({init_data:getInitData()})
       });
       pfAlert('✅ Tarix tozalandi');
     }catch(e){
@@ -1793,12 +1795,10 @@ document.getElementById('pfRefreshAccount').addEventListener('click',async()=>{
   const btn=document.getElementById('pfRefreshAccount');
   btn.disabled=true;
   try{
-    const u=tg?.initDataUnsafe?.user;
-    const full_name=u?[u.first_name,u.last_name].filter(Boolean).join(' '):null;
     await fetch(`${API}/account/refresh`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({user_id:getUid(),username:u?.username||null,full_name})
+      body:JSON.stringify({init_data:getInitData()})
     });
     await renderProfil();
     pfAlert("✅ Hisob ma'lumotlari yangilandi");
@@ -1815,7 +1815,7 @@ document.getElementById('pfDeleteAccount').addEventListener('click',()=>{
       await fetch(`${API}/account/delete`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({user_id:getUid()})
+        body:JSON.stringify({init_data:getInitData()})
       });
       Object.keys(localStorage).filter(k=>k.startsWith('anifilm_')).forEach(k=>localStorage.removeItem(k));
       pfAlert("✅ Hisobingiz o'chirildi.");
@@ -1861,13 +1861,12 @@ function showHomeError(){
 async function init(){
   const ok=await checkAccess();
   if(!ok)return;
-  const uid=getUid();
   skeletonHome();
   try{
     const [animes,banners,categories]=await Promise.all([
-      fetchJSON(`${API}/animes?user_id=${uid}`),
-      fetchJSON(`${API}/banners?user_id=${uid}`).catch(()=>[]),
-      fetchJSON(`${API}/categories?user_id=${uid}`).catch(()=>[]),
+      fetchJSON(`${API}/animes?${initDataQS()}`),
+      fetchJSON(`${API}/banners?${initDataQS()}`).catch(()=>[]),
+      fetchJSON(`${API}/categories?${initDataQS()}`).catch(()=>[]),
       loadFavoritesFromServer()
     ]);
     ALL_ANIME=animes;BANNERS=banners||[];CATEGORIES=categories||[];
