@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AniFilm — Tarjima qilingan animelar o'zbek tilida</title>
+<meta name="description" content="AniFilm botida eng so'nggi animelarni o'zbek tilida sub va dub qilingan holda bepul tomosha qiling. Yangi qismlar har kuni yuklanadi, ro'yxatdan o'tish shart emas.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://anifilm.uz/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AniFilm — Tarjima qilingan animelar o'zbek tilida">
+<meta property="og:description" content="Sub va dub qilingan animelarni bepul tomosha qiling. Yangi qismlar har kuni.">
+<meta property="og:url" content="https://anifilm.uz/">
+<meta name="theme-color" content="#0d0d0f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0c0c0e;
+    --ink2:#17171b;
+    --paper:#f4efe4;
+    --paper-dim:#c9c3b5;
+    --crimson:#e6394a;
+    --crimson-dim:#a8283a;
+    --gold:#d7ab55;
+    --line: rgba(244,239,228,.14);
+    --text:#f4efe4;
+    --text-dim:#918f97;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--ink);
+    color:var(--text);
+    font-family:'Plus Jakarta Sans', system-ui, sans-serif;
+    overflow-x:hidden;
+  }
+  .disp{font-family:'Anton', sans-serif; font-weight:400; letter-spacing:.01em;}
+  .mono{font-family:'JetBrains Mono', monospace;}
+
+  a{color:inherit; text-decoration:none;}
+  img{max-width:100%; display:block;}
+
+  /* ---------- halftone texture ---------- */
+  .halftone{
+    position:absolute; inset:0;
+    background-image: radial-gradient(circle, rgba(244,239,228,.16) 1px, transparent 1.4px);
+    background-size: 14px 14px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 20%, #000 40%, transparent 90%);
+    pointer-events:none;
+  }
+
+  /* ---------- header ---------- */
+  .topbar{
+    position:sticky; top:0; z-index:40;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 20px;
+    background:rgba(12,12,14,.82);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex; align-items:center; gap:9px; font-size:19px;}
+  .brand .mark{
+    width:26px; height:26px; background:var(--crimson);
+    display:flex; align-items:center; justify-content:center;
+    border-radius:4px; transform:rotate(-6deg);
+    box-shadow:2px 2px 0 rgba(0,0,0,.5);
+    font-family:'Anton', sans-serif; font-size:14px; color:var(--paper);
+  }
+  .topbar .cta-small{
+    font-size:12.5px; font-weight:700; padding:9px 15px;
+    background:var(--paper); color:var(--ink); border-radius:20px;
+    letter-spacing:.02em;
+  }
+
+  /* ---------- hero ---------- */
+  .hero{
+    position:relative;
+    padding:56px 22px 64px;
+    text-align:center;
+    overflow:hidden;
+  }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:7px;
+    font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700;
+    letter-spacing:.14em; color:var(--crimson);
+    border:1px solid rgba(230,57,74,.4);
+    padding:6px 12px; border-radius:20px;
+    background:rgba(230,57,74,.08);
+  }
+  .eyebrow .dot{
+    width:7px; height:7px; border-radius:50%; background:var(--crimson);
+    box-shadow:0 0 0 3px rgba(230,57,74,.25);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.35;}}
+
+  .hero h1{
+    font-size:clamp(52px,17vw,88px);
+    line-height:.92;
+    margin-top:20px;
+    color:var(--paper);
+    text-shadow: 4px 4px 0 var(--crimson-dim);
+  }
+  .hero .sub-disp{
+    font-size:clamp(22px,6.4vw,32px);
+    line-height:1.14;
+    margin-top:18px;
+    color:var(--paper);
+  }
+  .hero .sub-disp em{
+    font-style:normal; color:var(--gold);
+  }
+  .hero p.lead{
+    max-width:340px; margin:18px auto 0;
+    color:var(--text-dim); font-size:15px; line-height:1.6;
+  }
+
+  .bubble-cta{
+    position:relative;
+    display:inline-flex; align-items:center; gap:10px;
+    margin-top:34px;
+    background:var(--crimson); color:var(--paper);
+    font-weight:800; font-size:16px;
+    padding:16px 26px 18px;
+    border-radius:26px 26px 26px 4px;
+    box-shadow:5px 5px 0 rgba(0,0,0,.55);
+    transition:transform .15s cubic-bezier(.4,0,.2,1), box-shadow .15s ease;
+  }
+  .bubble-cta:active{
+    transform:translate(3px,3px);
+    box-shadow:2px 2px 0 rgba(0,0,0,.55);
+  }
+  .bubble-cta svg{width:18px; height:18px; flex:none;}
+
+  .tg-handle{
+    display:block; margin-top:14px;
+    font-family:'JetBrains Mono', monospace; font-size:12.5px;
+    color:var(--text-dim); letter-spacing:.03em;
+  }
+
+  /* ---------- section shell ---------- */
+  section.block{padding:64px 20px 8px;}
+  .sec-eyebrow{
+    font-family:'JetBrains Mono', monospace; font-size:11.5px; font-weight:700;
+    letter-spacing:.16em; color:var(--gold); text-align:center;
+    margin-bottom:10px;
+  }
+  .sec-title{
+    font-family:'Anton', sans-serif; font-size:clamp(26px,7vw,34px);
+    text-align:center; color:var(--paper); margin-bottom:40px;
+  }
+
+  /* ---------- comic panels ---------- */
+  .panels{display:flex; flex-direction:column; gap:26px; max-width:420px; margin:0 auto;}
+  .panel{
+    position:relative;
+    background:var(--ink2);
+    border:3px solid var(--paper-dim);
+    border-radius:6px;
+    padding:22px 20px 20px;
+    box-shadow:7px 7px 0 rgba(0,0,0,.45);
+    opacity:0; transform:translateY(16px) rotate(0deg);
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  .panel.revealed{opacity:1;}
+  .panel:nth-child(1).revealed{transform:rotate(-1.4deg);}
+  .panel:nth-child(2).revealed{transform:rotate(1deg);}
+  .panel:nth-child(3).revealed{transform:rotate(-.8deg);}
+  .panel .num{
+    font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:700;
+    color:var(--crimson); letter-spacing:.1em;
+  }
+  .panel h3{
+    font-family:'Anton', sans-serif; font-weight:400; font-size:21px;
+    color:var(--paper); margin:8px 0 8px; letter-spacing:.01em;
+  }
+  .panel p{color:var(--text-dim); font-size:14px; line-height:1.6;}
+
+  /* ---------- filmstrip steps ---------- */
+  .strip{max-width:440px; margin:0 auto; border-top:1px dashed var(--line);}
+  .step{
+    display:flex; gap:16px; align-items:flex-start;
+    padding:22px 0; border-bottom:1px dashed var(--line);
+  }
+  .sprockets{
+    flex:none; width:26px; display:flex; flex-direction:column; gap:5px; align-items:center; padding-top:4px;
+  }
+  .sprockets span{width:7px; height:7px; border-radius:50%; background:var(--ink2); border:1.5px solid var(--paper-dim);}
+  .step .num{
+    flex:none; font-family:'Anton', sans-serif; font-size:34px; color:var(--crimson-dim); line-height:1; width:52px;
+  }
+  .step .txt h4{font-size:16px; font-weight:700; color:var(--paper); margin-bottom:5px;}
+  .step .txt p{font-size:13.5px; color:var(--text-dim); line-height:1.55;}
+
+  /* ---------- footer cta ---------- */
+  .footer-cta{
+    margin:70px 20px 0; padding:38px 22px 34px; text-align:center;
+    background:var(--ink2); border:3px solid var(--paper-dim); border-radius:10px;
+    box-shadow:7px 7px 0 rgba(0,0,0,.45);
+  }
+  .footer-cta h2{
+    font-family:'Anton', sans-serif; font-size:clamp(24px,7vw,30px); color:var(--paper);
+    margin-bottom:10px;
+  }
+  .footer-cta p{color:var(--text-dim); font-size:14px; margin-bottom:24px;}
+
+  footer{
+    padding:34px 20px 46px; text-align:center;
+  }
+  footer .brand-mini{
+    display:inline-flex; align-items:center; gap:8px; margin-bottom:10px;
+  }
+  footer .brand-mini .mark{
+    width:20px; height:20px; background:var(--crimson); border-radius:4px;
+    display:flex; align-items:center; justify-content:center; transform:rotate(-6deg);
+    font-family:'Anton', sans-serif; font-size:11px; color:var(--paper);
+  }
+  footer .brand-mini span{font-family:'Anton', sans-serif; font-size:15px; color:var(--paper);}
+  footer p{font-size:12px; color:var(--text-dim);}
+
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto;}
+    .eyebrow .dot{animation:none;}
+    .panel{transition:none; opacity:1; transform:none;}
+    .bubble-cta{transition:none;}
+  }
+
+  a:focus-visible, .bubble-cta:focus-visible{
+    outline:2px solid var(--gold); outline-offset:3px;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">A</div>
+    <span class="disp">ANIFILM</span>
+  </div>
+  <a class="cta-small" href="https://t.me/ANIFILM_BOT">Botni ochish</a>
+</header>
+
+<section class="hero">
+  <div class="halftone"></div>
+  <span class="eyebrow"><span class="dot"></span>ON AIR</span>
+  <h1 class="disp">ANIFILM</h1>
+  <p class="sub-disp disp">Tarjima qilingan animelar<br><em>o'zbek tilida</em></p>
+  <p class="lead">Sub va dub qilingan qismlar har kuni yangilanadi. Sevimli animeng bir tugma bosishda tayyor.</p>
+  <a class="bubble-cta" href="https://t.me/ANIFILM_BOT">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M21 4L3 11.5L10 13.5M21 4L15 20L10 13.5M21 4L10 13.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    Botni ochish
+  </a>
+  <span class="tg-handle">Telegram — @ANIFILM_BOT</span>
+</section>
+
+<section class="block">
+  <div class="sec-eyebrow">NEGA ANIFILM?</div>
+  <h2 class="sec-title">Uch sababi bor</h2>
+  <div class="panels">
+    <div class="panel"><span class="num mono">01</span><h3>Yangi qismlar</h3><p>Chiqishi bilanoq — kutish yo'q, kechikish yo'q. Yangi epizod, yangi bildirishnoma.</p></div>
+    <div class="panel"><span class="num mono">02</span><h3>Sub va dub</h3><p>Ikkala formatda ham mavjud — o'zi tanlaydi, xohlagan tarzda tomosha qiladi.</p></div>
+    <div class="panel"><span class="num mono">03</span><h3>Bepul va oson</h3><p>Ro'yxatdan o'tish shart emas. Botni oching va darhol boshlang.</p></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-eyebrow">QANDAY ISHLAYDI</div>
+  <h2 class="sec-title">Uch qadam, tayyor</h2>
+  <div class="strip">
+    <div class="step">
+      <span class="num disp">01</span>
+      <div class="sprockets"><span></span><span></span><span></span></div>
+      <div class="txt"><h4>Botni oching</h4><p>Yuqoridagi yoki pastdagi tugmani bosing — Telegram avtomatik ochiladi.</p></div>
+    </div>
+    <div class="step">
+      <span class="num disp">02</span>
+      <div class="sprockets"><span></span><span></span><span></span></div>
+      <div class="txt"><h4>Anime tanlang</h4><p>Nomi yoki janr bo'yicha qidiring, ro'yxatdan tanlab oling.</p></div>
+    </div>
+    <div class="step">
+      <span class="num disp">03</span>
+      <div class="sprockets"><span></span><span></span><span></span></div>
+      <div class="txt"><h4>Tomosha qiling</h4><p>Sub yoki dub tanlang va ko'rishni shu zahoti boshlang.</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="footer-cta">
+  <h2 class="disp">Birinchi bo'lib ko'ring</h2>
+  <p>Yangi qismlar chiqqanda birinchilardan bo'lib xabardor bo'lish uchun botga qo'shiling.</p>
+  <a class="bubble-cta" href="https://t.me/ANIFILM_BOT">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M21 4L3 11.5L10 13.5M21 4L15 20L10 13.5M21 4L10 13.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    @ANIFILM_BOT
+  </a>
+</div>
+
+<footer>
+  <div class="brand-mini"><div class="mark">A</div><span>ANIFILM</span></div>
+  <p>© 2026 AniFilm · anifilm.uz</p>
+</footer>
+
+<script>
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('revealed'); io.unobserve(e.target); } });
+    }, { threshold: .2 });
+    document.querySelectorAll('.panel').forEach(el => io.observe(el));
+  } else {
+    document.querySelectorAll('.panel').forEach(el => el.classList.add('revealed'));
+  }
+</script>
+
+</body>
+</html>
