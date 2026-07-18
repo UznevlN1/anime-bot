@@ -3423,6 +3423,31 @@ async def health_check(request):
     except Exception:
         return web.Response(text="AniFilm Bot ishlayapti!")
 
+async def serve_favicon(request):
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return web.FileResponse(os.path.join(base_dir, "favicon.ico"))
+
+async def serve_sitemap(request):
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(base_dir, "sitemap.xml"), "r", encoding="utf-8") as f:
+            content = f.read()
+        return web.Response(text=content, content_type="application/xml", charset="utf-8")
+    except Exception:
+        return web.Response(status=404)
+
+async def serve_robots(request):
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(base_dir, "robots.txt"), "r", encoding="utf-8") as f:
+            content = f.read()
+        return web.Response(text=content, content_type="text/plain", charset="utf-8")
+    except Exception:
+        return web.Response(status=404)
+
 def verify_init_data(init_data: str, max_age_seconds: int = 86400):
     """Telegram WebApp initData imzosini tekshiradi (rasmiy Telegram algoritmi:
     https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app).
@@ -4327,6 +4352,9 @@ async def start_web_server():
 
     app = web.Application()
     app.router.add_get("/", health_check)
+    app.router.add_get("/favicon.ico", serve_favicon)
+    app.router.add_get("/sitemap.xml", serve_sitemap)
+    app.router.add_get("/robots.txt", serve_robots)
     app.router.add_get("/debug", debug_path)
     app.router.add_get("/webapp", serve_webapp_index)
     app.router.add_get("/webapp/", serve_webapp_index)
