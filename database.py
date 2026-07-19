@@ -215,6 +215,38 @@ def init_db():
         PRIMARY KEY (site_user_id, anime_id)
     )""")
 
+    # ===== QO'SHIMCHA ADMINLAR (asosiy ADMIN_ID'dan tashqari) =====
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS admins (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        added_by BIGINT,
+        added_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+
+    # ===== ADMIN FAOLIYATI LOGI =====
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS admin_logs (
+        id SERIAL PRIMARY KEY,
+        admin_id BIGINT,
+        admin_name TEXT,
+        action TEXT,
+        details TEXT,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_admin_logs_created ON admin_logs(created_at DESC)")
+
+    # ===== PREMIUM SOVG'ALARI (kim kimga sovg'a qildi) =====
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS premium_gifts (
+        id SERIAL PRIMARY KEY,
+        from_user_id BIGINT,
+        to_user_id BIGINT,
+        plan TEXT,
+        days INTEGER,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+
     # Sayt foydalanuvchisi ko'rgan animelar tarixi ("Ko'rilganlar")
     c.execute("""
     CREATE TABLE IF NOT EXISTS site_history (
@@ -261,6 +293,7 @@ def init_db():
         created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
         processed_at TEXT
     )""")
+    c.execute("ALTER TABLE premium_payments ADD COLUMN IF NOT EXISTS gift_to BIGINT")
 
     # --- Tezlik uchun indekslar (mavjud ma'lumot yoki xulq-atvorni o'zgartirmaydi,
     # faqat qidiruv/filtrlashni tezlashtiradi) ---
@@ -428,12 +461,12 @@ def expire_premiums():
     return affected
 
 # ---- Premium to'lov so'rovlari ----
-def create_payment_request(user_id, plan, amount, screenshot_file_id):
+def create_payment_request(user_id, plan, amount, screenshot_file_id, gift_to=None):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO premium_payments (user_id, plan, amount, screenshot_file_id) VALUES (%s,%s,%s,%s) RETURNING id",
-        (user_id, plan, amount, screenshot_file_id)
+        "INSERT INTO premium_payments (user_id, plan, amount, screenshot_file_id, gift_to) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        (user_id, plan, amount, screenshot_file_id, gift_to)
     )
     new_id = c.fetchone()[0]
     conn.commit()
@@ -1365,3 +1398,135 @@ def clear_site_history(site_user_id):
     c.execute("DELETE FROM site_history WHERE site_user_id=%s", (site_user_id,))
     conn.commit()
     put_conn(conn)
+
+# ===== QO'SHIMCHA ADMINLAR =====
+def add_admin(user_id, username, added_by):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO admins (user_id, username, added_by) VALUES (%s,%s,%s) "
+        "ON CONFLICT (user_id) DO UPDATE SET username=EXCLUDED.username",
+        (user_id, username, added_by)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def remove_admin(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM admins WHERE user_id=%s", (user_id,))
+    conn.commit()
+    put_conn(conn)
+
+def get_admins():
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute("SELECT * FROM admins ORDER BY added_at DESC")
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+def is_extra_admin(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM admins WHERE user_id=%s", (user_id,))
+    row = c.fetchone()
+    put_conn(conn)
+    return bool(row)
+
+# ===== ADMIN FAOLIYATI LOGI =====
+def log_admin_action(admin_id, admin_name, action, details=None):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO admin_logs (admin_id, admin_name, action, details) VALUES (%s,%s,%s,%s)",
+        (admin_id, admin_name, action, details)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def get_admin_logs(limit=30, admin_id=None):
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    if admin_id:
+        c.execute("SELECT * FROM admin_logs WHERE admin_id=%s ORDER BY id DESC LIMIT %s", (admin_id, limit))
+    else:
+        c.execute("SELECT * FROM admin_logs ORDER BY id DESC LIMIT %s", (limit,))
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+# ===== O'SISH STATISTIKASI (grafik uchun) =====
+def get_growth_stats(days=7):
+    """Oxirgi `days` kun uchun har kunlik yangi foydalanuvchilar va ko'rishlar sonini qaytaradi.
+    Natija: [{"date": "YYYY-MM-DD", "new_users": N, "views": N}, ...] (eskidan yangiga qarab tartiblangan)."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        """
+        SELECT to_char(d, 'YYYY-MM-DD') AS date
+        FROM generate_series(CURRENT_DATE - (%s::int - 1), CURRENT_DATE, interval '1 day') AS d
+        """,
+        (days,)
+    )
+    date_rows = [r["date"] for r in c.fetchall()]
+
+    c.execute(
+        """
+        SELECT date(joined_at) AS d, COUNT(*) AS cnt
+        FROM users
+        WHERE joined_at >= to_char(CURRENT_DATE - (%s::int - 1), 'YYYY-MM-DD')
+        GROUP BY date(joined_at)
+        """,
+        (days,)
+    )
+    users_map = {str(r["d"]): r["cnt"] for r in c.fetchall()}
+
+    c.execute(
+        """
+        SELECT date(watched_at) AS d, COUNT(*) AS cnt
+        FROM watch_log
+        WHERE watched_at >= to_char(CURRENT_DATE - (%s::int - 1), 'YYYY-MM-DD')
+        GROUP BY date(watched_at)
+        """,
+        (days,)
+    )
+    views_map = {str(r["d"]): r["cnt"] for r in c.fetchall()}
+
+    put_conn(conn)
+    return [
+        {"date": d, "new_users": users_map.get(d, 0), "views": views_map.get(d, 0)}
+        for d in date_rows
+    ]
+
+# ===== PREMIUM SOVG'ASI =====
+def record_premium_gift(from_user_id, to_user_id, plan, days):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO premium_gifts (from_user_id, to_user_id, plan, days) VALUES (%s,%s,%s,%s)",
+        (from_user_id, to_user_id, plan, days)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def get_sent_gifts_count(from_user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM premium_gifts WHERE from_user_id=%s", (from_user_id,))
+    count = c.fetchone()[0]
+    put_conn(conn)
+    return count
+
+# ===== REFERAL STATISTIKASI =====
+def get_referral_stats(user_id):
+    """Foydalanuvchi taklif qilgan do'stlar soni va ulardan nechtasi
+    Premium sotib olganini qaytaradi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users WHERE referred_by=%s", (user_id,))
+    total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE referred_by=%s AND is_premium=1", (user_id,))
+    premium_count = c.fetchone()[0]
+    put_conn(conn)
+    return {"total": total, "premium_count": premium_count}

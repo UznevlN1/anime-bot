@@ -57,6 +57,36 @@ STREAM_ENABLED = bool(API_ID and API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_extra_admin_cache = {"ids": set(), "loaded_at": 0}
+_EXTRA_ADMIN_TTL = 60
+
+async def is_admin_user(user_id):
+    """Asosiy ADMIN_ID yoki DB'ga qo'shilgan qo'shimcha adminlardan biri bo'lsa True.
+    Qo'shimcha adminlar ro'yxati DB'dan olinadi, tez-tez so'ralmasligi uchun
+    qisqa muddat (60s) keshlanadi."""
+    if user_id == ADMIN_ID:
+        return True
+    now = time.time()
+    if now - _extra_admin_cache["loaded_at"] > _EXTRA_ADMIN_TTL:
+        try:
+            admins = await asyncio.to_thread(db.get_admins)
+            _extra_admin_cache["ids"] = {a["user_id"] for a in admins}
+            _extra_admin_cache["loaded_at"] = now
+        except Exception:
+            pass
+    return user_id in _extra_admin_cache["ids"]
+
+def _invalidate_extra_admin_cache():
+    _extra_admin_cache["loaded_at"] = 0
+
+async def log_admin_action(user, action, details=None):
+    """Admin faoliyatini log qiladi (kim, nima qildi)."""
+    try:
+        name = f"@{user.username}" if getattr(user, "username", None) else getattr(user, "full_name", str(user.id))
+        await asyncio.to_thread(db.log_admin_action, user.id, name, action, details)
+    except Exception as e:
+        logger.warning(f"Admin log yozilmadi: {e}")
+
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -213,6 +243,12 @@ class UnblockState(StatesGroup):
 
 class FindUserState(StatesGroup):
     query = State()
+
+class AdminManageState(StatesGroup):
+    add_id = State()
+
+class PremiumGiftState(StatesGroup):
+    user_id = State()
 
 class VersionState(StatesGroup):
     version = State()
@@ -447,6 +483,7 @@ def premium_menu_keyboard(prices):
         rows.append([InlineKeyboardButton(text=f"3 oy — {fmt_som(prices['3m'])}", callback_data="premium_buy_3m", style="success")])
     if prices["plan_1y_on"]:
         rows.append([InlineKeyboardButton(text=f"1 yil — {fmt_som(prices['1y'])}", callback_data="premium_buy_1y", style="success")])
+    rows.append([InlineKeyboardButton(text="🎁 Do'stga sovg'a qilish", callback_data="premium_gift_start")])
     rows.append([InlineKeyboardButton(text="🎁 Do'stlarni taklif qilish", callback_data="premium_referral")])
     rows.append([InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -510,15 +547,18 @@ async def premium_menu(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("premium_buy_"))
 async def premium_buy(call: CallbackQuery, state: FSMContext):
     plan = call.data.replace("premium_buy_", "")
-    status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
-    if status["is_premium"] and status["days_left"] > PREMIUM_RENEWAL_WINDOW_DAYS:
-        await call.answer(
-            "👑 Siz allaqachon Premium foydalanuvchisiz!\n"
-            f"Amal qilish muddati: {status['days_left']} kun qoldi.\n"
-            "Yangi tarif sotib olish hozircha kerak emas 😉",
-            show_alert=True
-        )
-        return
+    data = await state.get_data()
+    gift_to = data.get("gift_to")
+    if not gift_to:
+        status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
+        if status["is_premium"] and status["days_left"] > PREMIUM_RENEWAL_WINDOW_DAYS:
+            await call.answer(
+                "👑 Siz allaqachon Premium foydalanuvchisiz!\n"
+                f"Amal qilish muddati: {status['days_left']} kun qoldi.\n"
+                "Yangi tarif sotib olish hozircha kerak emas 😉",
+                show_alert=True
+            )
+            return
     prices = await premium_settings()
     if not prices["enabled"]:
         await call.answer("⏸ Premium xizmati hozircha vaqtincha o'chirilgan.", show_alert=True)
@@ -536,11 +576,13 @@ async def premium_buy(call: CallbackQuery, state: FSMContext):
         return
     await call.answer()
     await state.set_state(PremiumState.waiting_screenshot)
-    await state.update_data(plan=plan, amount=amount)
+    await state.update_data(plan=plan, amount=amount, gift_to=gift_to)
     card_line = f"💳 <code>{prices['card']}</code>"
     holder_line = f"\n👤 {prices['holder']}" if prices["holder"] else ""
+    gift_line = f"\n🎁 Sovg'a qilinadi: <code>{gift_to}</code> foydalanuvchiga\n" if gift_to else ""
     await call.message.edit_text(
-        f"💳 <b>{PLAN_LABELS[plan]} — {fmt_som(amount)}</b>\n\n"
+        f"💳 <b>{PLAN_LABELS[plan]} — {fmt_som(amount)}</b>\n"
+        f"{gift_line}\n"
         f"Quyidagi kartaga to'lovni amalga oshiring:\n\n"
         f"{card_line}{holder_line}\n\n"
         f"💰 Summa: <b>{fmt_som(amount)}</b>\n\n"
@@ -556,16 +598,21 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
     data = await state.get_data()
     plan = data.get("plan")
     amount = data.get("amount")
+    gift_to = data.get("gift_to")
     if not plan:
         await state.clear()
         return
     payment_id = await asyncio.to_thread(
-        db.create_payment_request, message.from_user.id, plan, amount, message.photo[-1].file_id
+        db.create_payment_request, message.from_user.id, plan, amount, message.photo[-1].file_id, gift_to
     )
     await state.clear()
-    await message.answer("✅ Chek qabul qilindi! Admin tomonidan tekshirilib, tez orada tasdiqlanadi.")
+    if gift_to:
+        await message.answer("✅ Chek qabul qilindi! Admin tasdiqlagach, sovg'a do'stingizga yetkaziladi 🎁")
+    else:
+        await message.answer("✅ Chek qabul qilindi! Admin tomonidan tekshirilib, tez orada tasdiqlanadi.")
     u = message.from_user
     uname = f"@{u.username}" if u.username else u.full_name
+    gift_caption = f"\n🎁 Sovg'a qilinadi → ID: <code>{gift_to}</code>" if gift_to else ""
     try:
         await bot.send_photo(
             ADMIN_ID,
@@ -574,7 +621,7 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
                 f"💎 <b>Yangi Premium to'lovi</b>\n\n"
                 f"👤 {uname} (ID: <code>{u.id}</code>)\n"
                 f"📦 Tarif: {PLAN_LABELS.get(plan, plan)}\n"
-                f"💰 Summa: {fmt_som(amount)}"
+                f"💰 Summa: {fmt_som(amount)}{gift_caption}"
             ),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [
@@ -591,9 +638,45 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
 async def premium_screenshot_wrong(message: Message):
     await message.answer("📸 Iltimos, chek skrinshotini rasm sifatida yuboring.")
 
+# ---- PREMIUM SOVG'A QILISH ----
+@dp.callback_query(F.data == "premium_gift_start")
+async def premium_gift_start(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await state.set_state(PremiumGiftState.user_id)
+    await call.message.edit_text(
+        "🎁 Sovg'a qilmoqchi bo'lgan do'stingizning ID yoki @username'ini yozing:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="premium_menu")],
+        ])
+    )
+
+@dp.message(PremiumGiftState.user_id)
+async def premium_gift_target(message: Message, state: FSMContext):
+    query = message.text.strip()
+    if query.startswith("@"):
+        u = await asyncio.to_thread(db.get_user_by_username, query)
+    else:
+        try:
+            u = await asyncio.to_thread(db.get_user, int(query))
+        except Exception:
+            u = None
+    if not u:
+        await message.answer("❌ Bunday foydalanuvchi topilmadi. Do'stingiz avval botdan foydalangan bo'lishi kerak.")
+        return
+    if u["user_id"] == message.from_user.id:
+        await message.answer("❌ O'zingizga sovg'a qila olmaysiz 🙂 Boshqa foydalanuvchi ID sini yozing.")
+        return
+    await state.update_data(gift_to=u["user_id"])
+    prices = await premium_settings()
+    await message.answer(
+        f"🎁 <b>{u['full_name']}</b> uchun tarif tanlang:",
+        reply_markup=premium_menu_keyboard(prices),
+        parse_mode="HTML"
+    )
+
 @dp.callback_query(F.data.startswith("pay_ok_"))
 async def premium_approve(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     payment_id = int(call.data.split("_")[-1])
     payment = await asyncio.to_thread(db.get_payment_request, payment_id)
@@ -601,26 +684,44 @@ async def premium_approve(call: CallbackQuery):
         await call.answer("Bu so'rov allaqachon ko'rib chiqilgan", show_alert=True)
         return
     days = PLAN_DAYS.get(payment["plan"], 30)
-    new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
+    gift_to = payment.get("gift_to")
+    recipient_id = gift_to or payment["user_id"]
+    new_until = await asyncio.to_thread(db.extend_premium, recipient_id, days, payment["plan"])
     await asyncio.to_thread(db.set_payment_status, payment_id, "approved")
-    _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
+    _invalidate_sub_cache(recipient_id)  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
+    if gift_to:
+        await asyncio.to_thread(db.record_premium_gift, payment["user_id"], gift_to, payment["plan"], days)
     try:
         await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ <b>Tasdiqlandi</b>", parse_mode="HTML")
     except Exception:
         pass
-    try:
-        await bot.send_message(
-            payment["user_id"],
-            f"🎉 Tabriklaymiz! Premium yoqildi.\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
-            parse_mode="HTML"
-        )
-    except Exception:
-        pass
+    if gift_to:
+        try:
+            await bot.send_message(
+                gift_to,
+                f"🎁 Sizga do'stingizdan Premium sovg'a qilindi!\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        try:
+            await bot.send_message(payment["user_id"], "✅ Sovg'angiz tasdiqlandi va do'stingizga yetkazildi! 🎉")
+        except Exception:
+            pass
+    else:
+        try:
+            await bot.send_message(
+                payment["user_id"],
+                f"🎉 Tabriklaymiz! Premium yoqildi.\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
     await call.answer("✅ Tasdiqlandi")
 
 @dp.callback_query(F.data.startswith("pay_no_"))
 async def premium_reject(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     payment_id = int(call.data.split("_")[-1])
     payment = await asyncio.to_thread(db.get_payment_request, payment_id)
@@ -646,11 +747,17 @@ async def premium_referral(call: CallbackQuery):
     await call.answer()
     prices = await premium_settings()
     link = f"https://t.me/{BOT_USERNAME}?start=ref_{call.from_user.id}"
+    stats = await asyncio.to_thread(db.get_referral_stats, call.from_user.id)
+    gifts_sent = await asyncio.to_thread(db.get_sent_gifts_count, call.from_user.id)
     await call.message.edit_text(
         f"🎁 <b>Do'stlaringizni taklif qiling!</b>\n\n"
         f"Har bir do'stingiz sizning havolangiz orqali botga birinchi marta kirsa, "
         f"Premium muddatingizga <b>+{prices['ref_bonus']} kun</b> qo'shiladi.\n\n"
-        f"🔗 Sizning shaxsiy havolangiz:\n<code>{link}</code>",
+        f"🔗 Sizning shaxsiy havolangiz:\n<code>{link}</code>\n\n"
+        f"📊 <b>Statistikangiz:</b>\n"
+        f"👥 Taklif qilinganlar: <b>{stats['total']}</b>\n"
+        f"👑 Ulardan Premium bo'lganlar: <b>{stats['premium_count']}</b>\n"
+        f"🎁 Sovg'a qilingan Premiumlar: <b>{gifts_sent}</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Orqaga", callback_data="premium_menu")],
         ]),
@@ -736,19 +843,19 @@ def _padm_kb_for(callback_data):
 
 @dp.callback_query(F.data == "padm_cat_pricing")
 async def padm_cat_pricing(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_pricing_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "padm_cat_general")
 async def padm_cat_general(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_general_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "padm_cat_unlock")
 async def padm_cat_unlock(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_unlock_kb(), parse_mode="HTML")
 
@@ -761,7 +868,7 @@ _PADM_TOGGLE_MAP = {
 
 @dp.callback_query(F.data.in_(list(_PADM_TOGGLE_MAP.keys())))
 async def padm_toggle(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     key = _PADM_TOGGLE_MAP[call.data]
     current = await asyncio.to_thread(db.get_setting, key)
@@ -774,7 +881,7 @@ async def padm_toggle(call: CallbackQuery):
 
 @dp.callback_query(F.data == "padm_unlock_old")
 async def padm_unlock_old(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.answer("Bajarilmoqda...")
     count = await asyncio.to_thread(db.unlock_all_old_episodes)
@@ -786,7 +893,7 @@ async def padm_unlock_old(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_premium")
 async def admin_premium(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_premium_admin_kb(), parse_mode="HTML")
@@ -801,7 +908,7 @@ _PADM_FIELD_MAP = {
 
 @dp.callback_query(F.data.in_(list(_PADM_FIELD_MAP.keys())))
 async def padm_field_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     key, st, prompt = _PADM_FIELD_MAP[call.data]
     await state.set_state(st)
@@ -817,7 +924,7 @@ async def padm_field_start(call: CallbackQuery, state: FSMContext):
 @dp.message(PremiumAdminState.early_hours)
 @dp.message(PremiumAdminState.referral_bonus)
 async def padm_field_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     data = await state.get_data()
     key = data.get("setting_key")
@@ -835,7 +942,7 @@ async def padm_field_save(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "padm_card")
 async def padm_card_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(PremiumAdminState.card)
     await call.message.edit_text(
@@ -850,7 +957,7 @@ async def padm_card_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(PremiumAdminState.card)
 async def padm_card_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     text = (message.text or "").strip()
     if "-" in text:
@@ -867,7 +974,7 @@ async def padm_card_save(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "padm_pending")
 async def padm_pending(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     pending = await asyncio.to_thread(db.get_pending_payments)
     if not pending:
@@ -901,7 +1008,7 @@ def _premium_anime_kb(animes, page, total, per_page=10):
 
 @dp.callback_query(F.data == "padm_premium_animes")
 async def padm_premium_animes(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     animes = await asyncio.to_thread(db.get_animes, None, 0, 10)
@@ -915,7 +1022,7 @@ async def padm_premium_animes(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("padm_pa_page_"))
 async def padm_premium_animes_page(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     page = int(call.data.split("_")[3])
     animes = await asyncio.to_thread(db.get_animes, None, page, 10)
@@ -934,7 +1041,7 @@ def _premium_anime_detail_kb(anime, episodes):
 
 @dp.callback_query(F.data.startswith("padm_pa_sel_"))
 async def padm_premium_anime_detail(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     anime_id = int(call.data.split("_")[3])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
@@ -952,7 +1059,7 @@ async def padm_premium_anime_detail(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("padm_pa_toggle_"))
 async def padm_premium_anime_toggle(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     anime_id = int(call.data.split("_")[3])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
@@ -999,7 +1106,7 @@ def _premium_episodes_kb(anime_id, episodes, page, per_page=15):
 
 @dp.callback_query(F.data.startswith("padm_pa_eps_"))
 async def padm_premium_episodes_list(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     parts = call.data.split("_")
     anime_id, page = int(parts[3]), int(parts[4])
@@ -1011,7 +1118,7 @@ async def padm_premium_episodes_list(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("padm_pa_ept_"))
 async def padm_premium_episode_toggle(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     parts = call.data.split("_")
     episode_id, anime_id, page = int(parts[3]), int(parts[4]), int(parts[5])
@@ -1093,8 +1200,10 @@ def admin_cat_users_keyboard():
             InlineKeyboardButton(text="👑 Admin qo'shish", callback_data="admin_add_admin", style="success"),
         ],
         [
+            InlineKeyboardButton(text="🗑 Admin o'chirish", callback_data="admin_list_admins", style="danger"),
             InlineKeyboardButton(text="🚫 Bloklash", callback_data="admin_block", style="danger"),
         ],
+        [InlineKeyboardButton(text="📜 Admin faoliyati", callback_data="admin_activity_log", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -1302,11 +1411,8 @@ async def start_handler(message: Message, state: FSMContext):
                 return
             ep = episodes[0]
             if await is_episode_locked_for_user(ep, message.from_user.id):
-                prices = await premium_settings()
-                await message.answer(
-                    f"👑 Bu anime faqat Premium foydalanuvchilar uchun ochiq "
-                    f"({prices['early_hours']} soatdan keyin hammaga ochilishi mumkin)."
-                )
+                text, kb = await locked_episode_message(ep)
+                await message.answer(text, reply_markup=kb, parse_mode="HTML")
                 return
             protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
             try:
@@ -1341,11 +1447,8 @@ async def start_handler(message: Message, state: FSMContext):
             ep = await asyncio.to_thread(db.get_episode, episode_id)
             if ep:
                 if await is_episode_locked_for_user(ep, message.from_user.id):
-                    prices = await premium_settings()
-                    await message.answer(
-                        f"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq "
-                        f"({prices['early_hours']} soatdan keyin hammaga ochiladi)."
-                    )
+                    text, kb = await locked_episode_message(ep)
+                    await message.answer(text, reply_markup=kb, parse_mode="HTML")
                     return
                 protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
                 try:
@@ -1365,7 +1468,7 @@ async def start_handler(message: Message, state: FSMContext):
                 await message.answer("❌ Epizod topilmadi.")
             return
 
-    if await asyncio.to_thread(db.get_setting, "maintenance") == "1" and message.from_user.id != ADMIN_ID:
+    if await asyncio.to_thread(db.get_setting, "maintenance") == "1" and not await is_admin_user(message.from_user.id):
         await message.answer("🔧 Texnik ishlar olib borilmoqda.\nIltimos, kuting...")
         return
 
@@ -1673,12 +1776,12 @@ async def download_handler(call: CallbackQuery):
     if anime["media_type"] == "film":
         ep = episodes[0]
         if await is_episode_locked_for_user(ep, call.from_user.id):
-            prices = await premium_settings()
-            await call.answer(
-                f"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq "
-                f"({prices['early_hours']} soatdan keyin hammaga ochiladi).",
-                show_alert=True
-            )
+            await call.answer("👑 Bu film faqat Premium foydalanuvchilar uchun ochiq", show_alert=True)
+            text, kb = await locked_episode_message(ep, anime)
+            try:
+                await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+            except Exception:
+                pass
             return
         video_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"backcard_{anime_id}", style="primary")],
@@ -1822,6 +1925,31 @@ async def is_episode_locked_for_user(episode, user_id):
         return False
     return not is_premium
 
+async def locked_episode_message(episode, anime=None):
+    """Qulflangan qism uchun foydalanuvchiga ko'rsatiladigan matn va
+    '💎 Premium sotib olish' tugmasi bilan klaviaturani qaytaradi."""
+    permanent = bool(episode.get("is_premium_only")) or bool(anime and anime.get("is_premium_only"))
+    if not permanent and episode.get("anime_id") and not anime:
+        a = await asyncio.to_thread(db.get_anime, episode["anime_id"])
+        if a and a.get("is_premium_only"):
+            permanent = True
+    if permanent:
+        text = (
+            "👑 <b>Bu qism faqat Premium foydalanuvchilar uchun mavjud.</b>\n\n"
+            "Cheklovsiz tomosha qilish uchun Premium sotib oling 👇"
+        )
+    else:
+        prices = await premium_settings()
+        text = (
+            f"👑 <b>Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq</b>\n\n"
+            f"({prices['early_hours']} soatdan keyin hammaga ochiladi)\n"
+            f"Hoziroq ko'rish uchun Premium sotib oling 👇"
+        )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Premium sotib olish", callback_data="premium_menu", style="success")],
+    ])
+    return text, kb
+
 @dp.callback_query(F.data.regexp(r"^ep_\d+$"))
 async def episode_handler(call: CallbackQuery):
     if not await guard_access(call):
@@ -1834,12 +1962,11 @@ async def episode_handler(call: CallbackQuery):
         return
 
     if await is_episode_locked_for_user(ep, call.from_user.id):
-        prices = await premium_settings()
-        await call.answer(
-            f"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq "
-            f"({prices['early_hours']} soatdan keyin hammaga ochiladi).",
-            show_alert=True
-        )
+        text, kb = await locked_episode_message(ep)
+        try:
+            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            pass
         return
 
     protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
@@ -1892,63 +2019,63 @@ async def random_handler(call: CallbackQuery):
 # ===================== /ADMIN =====================
 @dp.message(Command("admin"))
 async def admin_handler(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         await message.answer("❌ Ruxsat yoq!")
         return
     await message.answer("👑 <b>Admin Panel</b>", reply_markup=admin_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_back")
 async def admin_back_handler(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     await call.message.edit_text("👑 <b>Admin Panel</b>", reply_markup=admin_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_content")
 async def admin_cat_content(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("📚 <b>Kontent boshqaruvi</b>", reply_markup=admin_cat_content_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_content_anime")
 async def admin_cat_content_anime(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("📀 <b>Animelar</b>", reply_markup=admin_cat_content_anime_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_content_episodes")
 async def admin_cat_content_episodes(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("🎬 <b>Qismlar</b>", reply_markup=admin_cat_content_episodes_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_users")
 async def admin_cat_users(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("👥 <b>Foydalanuvchilar</b>", reply_markup=admin_cat_users_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_stats")
 async def admin_cat_stats(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("📊 <b>Statistika</b>", reply_markup=admin_cat_stats_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_comm")
 async def admin_cat_comm(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("📨 <b>Muloqot</b>", reply_markup=admin_cat_comm_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_settings")
 async def admin_cat_settings(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text("⚙️ <b>Sozlamalar</b>", reply_markup=admin_cat_settings_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_announce_channel")
 async def admin_announce_channel(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     current = await asyncio.to_thread(db.get_setting, "announce_channel_id")
@@ -1968,7 +2095,7 @@ async def admin_announce_channel(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_announce_channel_set")
 async def admin_announce_channel_set(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(AnnounceChannelState.waiting)
     await call.message.edit_text(
@@ -1983,7 +2110,7 @@ async def admin_announce_channel_set(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AnnounceChannelState.waiting)
 async def admin_announce_channel_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     value = (message.text or "").strip()
     if not value:
@@ -2017,7 +2144,7 @@ async def admin_announce_channel_save(message: Message, state: FSMContext):
 # ---- ANIME QO'SHISH ----
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(AddAnime.photo)
     await call.message.edit_text("🖼 Anime rasmini yuboring:", reply_markup=admin_back())
@@ -2150,6 +2277,7 @@ async def add_done(message: Message, state: FSMContext):
 
     total = data.get("total_episodes")
     progress_line = f"\n📦 Yuklandi: {len(data['video_ids'])}/{total} qism" if total else f"\n📹 {len(data['video_ids'])} ta video"
+    await log_admin_action(message.from_user, "Anime qo'shdi", f"{data['title']} ({len(data['video_ids'])} qism)")
     await message.answer(
         f"✅ <b>{data['title']}</b> qoshildi!{progress_line}",
         reply_markup=admin_keyboard(),
@@ -2159,7 +2287,7 @@ async def add_done(message: Message, state: FSMContext):
 # ---- DAVOM QO'SHISH ----
 @dp.callback_query(F.data == "admin_add_episode")
 async def admin_add_episode(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
         "➕ Davom qo'shish — serial tanlash usuli:",
@@ -2248,7 +2376,7 @@ async def addepi_done(message: Message, state: FSMContext):
 # ---- ANIME RO'YXATI ADMIN ----
 @dp.callback_query(F.data.startswith("admin_list_"))
 async def admin_list(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     page = int(call.data.split("_")[2])
     animes = await asyncio.to_thread(db.get_animes, page=page)
@@ -2299,7 +2427,7 @@ async def alist_detail(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("unlockanime_"))
 async def unlockanime(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     anime_id = int(call.data.split("_")[1])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
@@ -2326,7 +2454,7 @@ async def unlockanime(call: CallbackQuery):
 # ---- TAHRIRLASH ----
 @dp.callback_query(F.data == "admin_edit")
 async def admin_edit(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
         "✏️ Tahrirlash — anime tanlash usuli:",
@@ -2396,6 +2524,7 @@ async def edit_value(message: Message, state: FSMContext):
             return
     await asyncio.to_thread(db.update_anime, data["edit_anime_id"], data["edit_field"], value)
     await state.clear()
+    await log_admin_action(message.from_user, "Animeni tahrirladi", f"maydon: {data['edit_field']}, anime_id: {data['edit_anime_id']}")
     await message.answer("✅ Yangilandi!", reply_markup=admin_keyboard())
 
 # ---- BANNERLAR ----
@@ -2412,7 +2541,7 @@ def banner_list_keyboard(banners):
 
 @dp.callback_query(F.data == "admin_banners")
 async def admin_banners(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     banners = await asyncio.to_thread(db.get_banners, False)
@@ -2421,7 +2550,7 @@ async def admin_banners(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "banner_add")
 async def banner_add(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(AddBanner.photo)
     await call.message.edit_text("🖼 Banner rasmini yuboring:", reply_markup=admin_back())
@@ -2471,7 +2600,7 @@ async def banner_link(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("bview_"))
 async def banner_view(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     banner_id = int(call.data.split("_")[1])
     banners = await asyncio.to_thread(db.get_banners, False)
@@ -2492,7 +2621,7 @@ async def banner_view(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("btoggle_"))
 async def banner_toggle(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     banner_id = int(call.data.split("_")[1])
     banners = await asyncio.to_thread(db.get_banners, False)
@@ -2504,7 +2633,7 @@ async def banner_toggle(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("bdel_"))
 async def banner_delete(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     banner_id = int(call.data.split("_")[1])
     await asyncio.to_thread(db.delete_banner, banner_id)
@@ -2517,7 +2646,7 @@ class ModerateComment(StatesGroup):
 
 @dp.callback_query(F.data == "admin_comments_anime")
 async def admin_comments_anime(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(ModerateComment.search_query)
     await call.message.edit_text("🔍 Izohlarini ko'rmoqchi bo'lgan anime nomini yozing:", reply_markup=admin_back())
@@ -2543,7 +2672,7 @@ async def admin_comments_result(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("cdel_"))
 async def comment_delete(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     comment_id = int(call.data.split("_")[1])
     await asyncio.to_thread(db.delete_comment, comment_id)
@@ -2552,7 +2681,7 @@ async def comment_delete(call: CallbackQuery):
 # ---- O'CHIRISH ----
 @dp.callback_query(F.data == "admin_delete")
 async def admin_delete(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
         "🗑 O'chirish — anime tanlash usuli:",
@@ -2605,6 +2734,7 @@ async def del_confirm(call: CallbackQuery, state: FSMContext):
     anime = await asyncio.to_thread(db.get_anime, data["del_anime_id"])
     await asyncio.to_thread(db.delete_anime, data["del_anime_id"])
     await state.clear()
+    await log_admin_action(call.from_user, "Anime o'chirdi", anime["title"] if anime else str(data["del_anime_id"]))
     await call.message.edit_text(
         f"🗑 <b>{anime['title']}</b> ochirildi!",
         reply_markup=admin_back(),
@@ -2614,7 +2744,7 @@ async def del_confirm(call: CallbackQuery, state: FSMContext):
 # ---- QISMLAR ----
 @dp.callback_query(F.data == "admin_episodes")
 async def admin_episodes(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
         "🎬 <b>Qism boshqaruvi</b>",
@@ -2716,7 +2846,7 @@ async def epact_new_video(message: Message, state: FSMContext):
 # ---- STATISTIKA ----
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     s = await asyncio.to_thread(db.get_stats)
     top_text = ""
@@ -2734,14 +2864,62 @@ async def admin_stats(call: CallbackQuery):
         f"📈 Hafta: {s['week']}\n"
         f"📈 Oy: {s['month']}\n\n"
         f"🔥 <b>Eng kop korilgan:</b>\n{top_text}",
-        reply_markup=admin_back(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📈 O'sish grafigi", callback_data="admin_growth_chart", style="primary")],
+            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
         parse_mode="HTML"
     )
+
+def _sparkline(values):
+    """Qiymatlar ro'yxatini Unicode blok-grafik (▁▂▃▄▅▆▇█) satriga aylantiradi."""
+    blocks = "▁▂▃▄▅▆▇█"
+    vmax = max(values) if values and max(values) > 0 else 1
+    return "".join(blocks[min(7, int((v / vmax) * 7))] for v in values)
+
+@dp.callback_query(F.data == "admin_growth_chart")
+async def admin_growth_chart(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    growth = await asyncio.to_thread(db.get_growth_stats, 7)
+    users_vals = [g["new_users"] for g in growth]
+    views_vals = [g["views"] for g in growth]
+    days_labels = " ".join(g["date"][5:] for g in growth)  # MM-DD
+    lines = "\n".join(
+        f"{g['date'][5:]}   👥 {g['new_users']:<4} 👁 {g['views']}" for g in growth
+    )
+    await call.message.edit_text(
+        f"📈 <b>Oxirgi 7 kunlik o'sish</b>\n\n"
+        f"👥 Yangi foydalanuvchilar:\n<code>{_sparkline(users_vals)}</code>\n\n"
+        f"👁 Ko'rishlar:\n<code>{_sparkline(views_vals)}</code>\n\n"
+        f"📅 <b>Kunlik tafsilot:</b>\n<code>{lines}</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
+        ]),
+        parse_mode="HTML"
+    )
+
+# ---- ADMIN FAOLIYATI LOGI ----
+@dp.callback_query(F.data == "admin_activity_log")
+async def admin_activity_log(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    logs = await asyncio.to_thread(db.get_admin_logs, 20)
+    if not logs:
+        text = "📜 <b>Admin faoliyati</b>\n\nHozircha yozuv yo'q."
+    else:
+        lines = []
+        for lg in logs:
+            when = (lg.get("created_at") or "")[5:16].replace("-", ".")
+            details = f" — {lg['details']}" if lg.get("details") else ""
+            lines.append(f"🕒 {when} | {lg['admin_name']}\n   {lg['action']}{details}")
+        text = "📜 <b>Admin faoliyati (oxirgi 20 ta)</b>\n\n" + "\n\n".join(lines)
+    await call.message.edit_text(text, reply_markup=admin_back(), parse_mode="HTML")
 
 # ---- XABAR YUBORISH ----
 @dp.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(BroadcastState.choose_type)
     await call.message.edit_text(
@@ -2840,7 +3018,7 @@ async def bc_send(call: CallbackQuery, state: FSMContext):
 # ---- KANALLAR ----
 @dp.callback_query(F.data == "admin_channels")
 async def admin_channels(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     channels = await asyncio.to_thread(db.get_channels)
     text = "📢 <b>Majburiy kanallar</b>\n\n"
@@ -2861,7 +3039,7 @@ async def admin_channels(call: CallbackQuery):
 
 @dp.callback_query(F.data == "ch_add")
 async def ch_add(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(AddChannelState.channel)
     await call.message.edit_text(
@@ -2870,7 +3048,7 @@ async def ch_add(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AddChannelState.channel)
 async def ch_add_done(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     await state.clear()
     parts = message.text.split("|")
@@ -2882,7 +3060,7 @@ async def ch_add_done(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "ch_del")
 async def ch_del(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     channels = await asyncio.to_thread(db.get_channels)
     if not channels:
@@ -2900,7 +3078,7 @@ async def ch_del(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("ch_del_"))
 async def ch_del_done(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     channel_id = call.data.replace("ch_del_", "")
     await asyncio.to_thread(db.delete_channel, channel_id)
@@ -2910,7 +3088,7 @@ async def ch_del_done(call: CallbackQuery):
 # ---- BLOKLASH ----
 @dp.callback_query(F.data == "admin_block")
 async def admin_block_menu(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
         "🚫 <b>Bloklash</b>",
@@ -2924,14 +3102,14 @@ async def admin_block_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data == "do_block")
 async def do_block(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(BlockState.user_id)
     await call.message.edit_text("🚫 Foydalanuvchi ID yoki @username yozing:")
 
 @dp.message(BlockState.user_id)
 async def block_action(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     await state.clear()
     query = message.text.strip()
@@ -2946,6 +3124,7 @@ async def block_action(message: Message, state: FSMContext):
         await message.answer("❌ Topilmadi!", reply_markup=admin_keyboard())
         return
     await asyncio.to_thread(db.block_user, u["user_id"])
+    await log_admin_action(message.from_user, "Foydalanuvchini bloklandi", f"{u['full_name']} (ID: {u['user_id']})")
     await message.answer(
         f"🚫 <b>{u['full_name']}</b> bloklandi!",
         reply_markup=admin_keyboard(),
@@ -2954,14 +3133,14 @@ async def block_action(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "do_unblock")
 async def do_unblock(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(UnblockState.user_id)
     await call.message.edit_text("✅ Blokdan chiqarish uchun ID yoki @username yozing:")
 
 @dp.message(UnblockState.user_id)
 async def unblock_action(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     await state.clear()
     query = message.text.strip()
@@ -2976,6 +3155,7 @@ async def unblock_action(message: Message, state: FSMContext):
         await message.answer("❌ Topilmadi!", reply_markup=admin_keyboard())
         return
     await asyncio.to_thread(db.unblock_user, u["user_id"])
+    await log_admin_action(message.from_user, "Foydalanuvchini blokdan chiqardi", f"{u['full_name']} (ID: {u['user_id']})")
     await message.answer(
         f"✅ <b>{u['full_name']}</b> blokdan chiqarildi!",
         reply_markup=admin_keyboard(),
@@ -2985,7 +3165,7 @@ async def unblock_action(message: Message, state: FSMContext):
 # ---- TEXNIK ISHLAR ----
 @dp.callback_query(F.data == "admin_maintenance")
 async def admin_maintenance(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     current = await asyncio.to_thread(db.get_setting, "maintenance")
     status = "✅ Yoqiq" if current == "1" else "❌ Ochiq"
@@ -3006,13 +3186,14 @@ async def set_maintenance(call: CallbackQuery):
     value = "1" if call.data == "maint_on" else "0"
     await asyncio.to_thread(db.set_setting, "maintenance", value)
     status = "✅ Yoqildi" if value == "1" else "❌ Ochirildi"
+    await log_admin_action(call.from_user, "Texnik ishlar rejimi", status)
     await call.answer(f"🔧 {status}", show_alert=True)
     await admin_maintenance(call)
 
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
 async def admin_content(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     current = await asyncio.to_thread(db.get_setting, "content_protect")
     status = "✅ Yoqiq" if current == "1" else "❌ Ochiq"
@@ -3043,7 +3224,7 @@ async def _links_text():
 
 @dp.callback_query(F.data == "admin_links")
 async def admin_links(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     await call.message.edit_text(
@@ -3058,7 +3239,7 @@ async def admin_links(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.in_(["link_set_channel", "link_set_support"]))
 async def link_set_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     key = "profile_channel_url" if call.data == "link_set_channel" else "profile_support_url"
     label = "Telegram kanal" if key == "profile_channel_url" else "Support (foydalanuvchi/kanal)"
@@ -3074,7 +3255,7 @@ async def link_set_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(LinksState.new_value)
 async def link_set_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     value = (message.text or "").strip()
     if not value.startswith("http"):
@@ -3108,14 +3289,14 @@ def _wordfilter_kb():
 
 @dp.callback_query(F.data == "admin_wordfilter")
 async def admin_wordfilter(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     await call.message.edit_text(await _wordfilter_text(), reply_markup=_wordfilter_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "wf_add")
 async def wf_add_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(WordFilterState.add_words)
     await call.message.edit_text(
@@ -3128,7 +3309,7 @@ async def wf_add_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(WordFilterState.add_words)
 async def wf_add_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     new_words = [w.strip().lower() for w in (message.text or "").split(",") if w.strip()]
     if not new_words:
@@ -3144,7 +3325,7 @@ async def wf_add_save(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "wf_clear")
 async def wf_clear(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await asyncio.to_thread(db.set_setting, "banned_words", "")
     await call.answer("✅ Roʻyxat tozalandi", show_alert=True)
@@ -3175,14 +3356,14 @@ def _sponsor_kb():
 
 @dp.callback_query(F.data == "admin_sponsor")
 async def admin_sponsor(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
     await call.message.edit_text(await _sponsor_text(), reply_markup=_sponsor_kb(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "sp_photo")
 async def sp_photo_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(SponsorState.photo)
     await call.message.edit_text("🖼 Sponsor baner rasmini yuboring:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -3191,7 +3372,7 @@ async def sp_photo_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(SponsorState.photo, F.photo)
 async def sp_photo_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     await asyncio.to_thread(db.set_setting, "sponsor_photo_id", message.photo[-1].file_id)
     await state.clear()
@@ -3200,7 +3381,7 @@ async def sp_photo_save(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "sp_title")
 async def sp_title_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(SponsorState.title)
     await call.message.edit_text("✏️ Sponsor baner sarlavhasini yuboring (masalan: \"Bizning boshqa botimiz\"):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -3209,7 +3390,7 @@ async def sp_title_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(SponsorState.title)
 async def sp_title_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     await asyncio.to_thread(db.set_setting, "sponsor_title", (message.text or "").strip()[:80])
     await state.clear()
@@ -3218,7 +3399,7 @@ async def sp_title_save(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "sp_url")
 async def sp_url_start(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(SponsorState.url)
     await call.message.edit_text("🔗 Bosilganda ochiladigan havolani yuboring (https:// bilan):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -3227,7 +3408,7 @@ async def sp_url_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(SponsorState.url)
 async def sp_url_save(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id):
         return
     value = (message.text or "").strip()
     if not value.startswith("http"):
@@ -3240,7 +3421,7 @@ async def sp_url_save(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "sp_delete")
 async def sp_delete(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await asyncio.to_thread(db.set_setting, "sponsor_photo_id", "")
     await asyncio.to_thread(db.set_setting, "sponsor_title", "")
@@ -3251,7 +3432,7 @@ async def sp_delete(call: CallbackQuery):
 # ---- FOYDALANUVCHI QIDIRISH ----
 @dp.callback_query(F.data == "admin_find_user")
 async def admin_find_user(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(FindUserState.query)
     await call.message.edit_text("🔍 Foydalanuvchi ID yoki @username yozing:")
@@ -3290,7 +3471,7 @@ async def find_user_result(message: Message, state: FSMContext):
 # ---- KUNLIK HISOBOT ----
 @dp.callback_query(F.data == "admin_report")
 async def admin_report(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     from datetime import datetime
     s = await asyncio.to_thread(db.get_daily_stats)
@@ -3308,7 +3489,7 @@ async def admin_report(call: CallbackQuery):
 # ---- ADMIN QO'LLANMA ----
 @dp.callback_query(F.data == "admin_help")
 async def admin_help(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
         "📖 <b>Admin Qollanma</b>\n\n"
@@ -3337,17 +3518,100 @@ async def admin_help(call: CallbackQuery):
     )
 
 
+def admin_manage_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Admin qo'shish", callback_data="admin_add_admin", style="success")],
+        [InlineKeyboardButton(text="📋 Adminlar ro'yxati", callback_data="admin_list_admins", style="primary")],
+        [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+    ])
+
 # ---- ADMIN QO'SHISH ----
+# FAQAT asosiy egasi (ADMIN_ID) yangi admin qo'sha oladi — qo'shimcha adminlar
+# o'zlari boshqa admin qo'sha olmaydi, aks holda nazoratdan chiqib ketishi mumkin.
 @dp.callback_query(F.data == "admin_add_admin")
 async def admin_add_admin(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
+        await call.answer("Faqat asosiy admin yangi admin qo'sha oladi", show_alert=True)
         return
     await call.message.edit_text(
         "👑 Yangi admin ID sini yozing:",
         reply_markup=admin_back()
     )
-    await state.set_state(FindUserState.query)
-    await state.update_data(action="add_admin")
+    await state.set_state(AdminManageState.add_id)
+
+@dp.message(AdminManageState.add_id)
+async def admin_add_admin_save(message: Message, state: FSMContext):
+    await state.clear()
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        new_admin_id = int(message.text.strip())
+    except Exception:
+        await message.answer("❌ Noto'g'ri ID. Faqat raqam yuboring.", reply_markup=admin_back())
+        return
+    if new_admin_id == ADMIN_ID:
+        await message.answer("❌ Bu ID allaqachon asosiy admin.", reply_markup=admin_back())
+        return
+    u = await asyncio.to_thread(db.get_user, new_admin_id)
+    username = f"@{u['username']}" if u and u.get("username") else None
+    await asyncio.to_thread(db.add_admin, new_admin_id, username, message.from_user.id)
+    _invalidate_extra_admin_cache()
+    await log_admin_action(message.from_user, "Admin qo'shdi", f"ID: {new_admin_id}")
+    await message.answer(
+        f"✅ Yangi admin qo'shildi!\n🆔 ID: <code>{new_admin_id}</code>" + (f"\n👤 {username}" if username else ""),
+        reply_markup=admin_manage_kb(),
+        parse_mode="HTML"
+    )
+    try:
+        await bot.send_message(new_admin_id, "👑 Sizga botda admin huquqi berildi!")
+    except Exception:
+        pass
+
+# ---- ADMINLAR RO'YXATI / O'CHIRISH ----
+@dp.callback_query(F.data == "admin_list_admins")
+async def admin_list_admins(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    admins = await asyncio.to_thread(db.get_admins)
+    rows = [[InlineKeyboardButton(
+        text=f"🗑 {(a['username'] or a['user_id'])}",
+        callback_data=f"admin_remove_admin_{a['user_id']}",
+        style="danger"
+    )] for a in admins]
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_cat_users")])
+    text = "📋 <b>Qo'shimcha adminlar:</b>\n\n" + (
+        "\n".join(f"🆔 <code>{a['user_id']}</code> — {a['username'] or 'username yoq'}" for a in admins)
+        if admins else "Hozircha qo'shimcha admin yo'q."
+    )
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("admin_remove_admin_"))
+async def admin_remove_admin(call: CallbackQuery):
+    # Qo'shimcha admin o'chirishni ham faqat asosiy admin qila oladi.
+    if call.from_user.id != ADMIN_ID:
+        await call.answer("Faqat asosiy admin adminlikdan chiqara oladi", show_alert=True)
+        return
+    target_id = int(call.data.replace("admin_remove_admin_", ""))
+    await asyncio.to_thread(db.remove_admin, target_id)
+    _invalidate_extra_admin_cache()
+    await log_admin_action(call.from_user, "Adminlikdan chiqardi", f"ID: {target_id}")
+    await call.answer("✅ Admin o'chirildi", show_alert=True)
+    try:
+        await bot.send_message(target_id, "❗️ Sizning admin huquqingiz bekor qilindi.")
+    except Exception:
+        pass
+    admins = await asyncio.to_thread(db.get_admins)
+    rows = [[InlineKeyboardButton(
+        text=f"🗑 {(a['username'] or a['user_id'])}",
+        callback_data=f"admin_remove_admin_{a['user_id']}",
+        style="danger"
+    )] for a in admins]
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_cat_users")])
+    text = "📋 <b>Qo'shimcha adminlar:</b>\n\n" + (
+        "\n".join(f"🆔 <code>{a['user_id']}</code> — {a['username'] or 'username yoq'}" for a in admins)
+        if admins else "Hozircha qo'shimcha admin yo'q."
+    )
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
 
 # ===================== DB "UYG'OQ" TUTISH =====================
 async def db_keepalive_task():
@@ -4417,11 +4681,8 @@ async def handle_webapp_data(message: Message):
             await message.answer("❌ Epizod topilmadi.")
             return
         if await is_episode_locked_for_user(ep, message.from_user.id):
-            prices = await premium_settings()
-            await message.answer(
-                f"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq "
-                f"({prices['early_hours']} soatdan keyin hammaga ochiladi)."
-            )
+            text, kb = await locked_episode_message(ep)
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
             return
 
         protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
