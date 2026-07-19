@@ -1398,6 +1398,9 @@ def admin_cat_settings_keyboard():
         [
             InlineKeyboardButton(text="🔧 Texnik ishlar", callback_data="admin_maintenance", style="danger"),
         ],
+        [
+            InlineKeyboardButton(text="👤 Profil bo'limi (bepul)", callback_data="admin_profile_lock", style="danger"),
+        ],
         [InlineKeyboardButton(text="📣 E'lon kanali", callback_data="admin_announce_channel", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
@@ -3347,6 +3350,38 @@ async def set_maintenance(call: CallbackQuery):
     await call.answer(f"🔧 {status}", show_alert=True)
     await admin_maintenance(call)
 
+# ---- PROFIL BO'LIMI (bepul foydalanuvchilar uchun vaqtincha yopish) ----
+@dp.callback_query(F.data == "admin_profile_lock")
+async def admin_profile_lock(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    current = await asyncio.to_thread(db.get_setting, "profile_disabled_for_free")
+    status = "✅ Yopiq (faqat Premium kira oladi)" if current == "1" else "❌ Ochiq (hammaga)"
+    await call.message.edit_text(
+        f"👤 <b>Profil bo'limi (bepul foydalanuvchilar uchun)</b>\n"
+        f"Holat: {status}\n\n"
+        f"Yoqilsa — Premium bo'lmagan foydalanuvchilar Webappdagi Profil "
+        f"bo'limini ocholmaydi, oʻrniga Premium sotib olish taklifini koʻradi. "
+        f"Premium foydalanuvchilar va admin har doim kira oladi.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Yopish", callback_data="proflock_on"),
+                InlineKeyboardButton(text="❌ Ochish", callback_data="proflock_off"),
+            ],
+            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.in_(["proflock_on", "proflock_off"]))
+async def set_profile_lock(call: CallbackQuery):
+    value = "1" if call.data == "proflock_on" else "0"
+    await asyncio.to_thread(db.set_setting, "profile_disabled_for_free", value)
+    status = "✅ Yopildi" if value == "1" else "❌ Ochildi"
+    await log_admin_action(call.from_user, "Profil bo'limi (bepul foydalanuvchilar)", status)
+    await call.answer(f"👤 {status}", show_alert=True)
+    await admin_profile_lock(call)
+
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
 async def admin_content(call: CallbackQuery):
@@ -4152,15 +4187,30 @@ async def webapp_sponsor(request):
 
 async def webapp_profile(request):
     user_id = _webapp_user_id(request)
-    u, channel_url, support_url, premium, prices, app_version = await asyncio.gather(
+    u, channel_url, support_url, premium, prices, app_version, profile_disabled = await asyncio.gather(
         asyncio.to_thread(db.get_user, user_id),
         asyncio.to_thread(db.get_setting, "profile_channel_url"),
         asyncio.to_thread(db.get_setting, "profile_support_url"),
         asyncio.to_thread(db.get_premium_status, user_id),
         premium_settings(),
         asyncio.to_thread(db.get_setting, "bot_version"),
+        asyncio.to_thread(db.get_setting, "profile_disabled_for_free"),
     )
+    is_admin = user_id == ADMIN_ID
+
+    # Kampaniya: bepul (Premium bo'lmagan) foydalanuvchilar uchun Profil
+    # bo'limi vaqtincha yopilgan bo'lishi mumkin — Premium/admin har doim kiradi.
+    if profile_disabled == "1" and not premium["is_premium"] and not is_admin:
+        return web.json_response({
+            "disabled": True,
+            "is_premium": False,
+            "channel_url": channel_url or "",
+            "support_url": support_url or "",
+            "bot_username": BOT_USERNAME or "",
+        })
+
     return web.json_response({
+        "disabled": False,
         "joined_at": u.get("joined_at") if u else None,
         "is_premium": premium["is_premium"],
         "premium_days_left": premium["days_left"],
