@@ -250,6 +250,11 @@ class AdminManageState(StatesGroup):
 class PremiumGiftState(StatesGroup):
     user_id = State()
 
+class AdminPremiumGiftState(StatesGroup):
+    user_id = State()
+    choosing_plan = State()
+    custom_days = State()
+
 class VersionState(StatesGroup):
     version = State()
     changes = State()
@@ -793,6 +798,7 @@ def _premium_admin_kb():
         [InlineKeyboardButton(text="⚙️ Umumiy sozlamalar", callback_data="padm_cat_general", style="primary")],
         [InlineKeyboardButton(text="🔓 Qulflarni ochish", callback_data="padm_cat_unlock", style="danger")],
         [InlineKeyboardButton(text="👑 Premium animelar", callback_data="padm_premium_animes", style="primary")],
+        [InlineKeyboardButton(text="🎁 Foydalanuvchiga Premium berish", callback_data="padm_gift_start", style="success")],
         [InlineKeyboardButton(text="📋 To'lov so'rovlari", callback_data="padm_pending", style="success")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
@@ -897,6 +903,157 @@ async def admin_premium(call: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_premium_admin_kb(), parse_mode="HTML")
+
+# ---- ADMIN: FOYDALANUVCHIGA PREMIUM SOVG'A QILISH ----
+# Do'stlar bir-biriga sovg'a qilgani kabi, admin ham istalgan foydalanuvchiga
+# to'g'ridan-to'g'ri (to'lovsiz) Premium bera oladi.
+def _admgift_plan_kb():
+    rows = []
+    for key in ("1m", "3m", "1y"):
+        rows.append([InlineKeyboardButton(
+            text=f"{PLAN_LABELS[key]} — {PLAN_DAYS[key]} kun",
+            callback_data=f"admgift_plan_{key}", style="success"
+        )])
+    rows.append([InlineKeyboardButton(text="✏️ Boshqa muddat (kun)", callback_data="admgift_custom", style="primary")])
+    rows.append([InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_premium")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+async def _admgift_grant(admin_id, target_id, plan, days):
+    """extend_premium + sovg'a yozuvi + kesh tozalash + foydalanuvchiga xabar."""
+    new_until = await asyncio.to_thread(db.extend_premium, target_id, days, plan)
+    await asyncio.to_thread(db.record_premium_gift, admin_id, target_id, plan, days)
+    _invalidate_sub_cache(target_id)  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
+    try:
+        await bot.send_message(
+            target_id,
+            f"🎁 Sizga Premium sovg'a qilindi!\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    return new_until
+
+@dp.callback_query(F.data == "padm_gift_start")
+async def padm_gift_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(AdminPremiumGiftState.user_id)
+    await call.message.edit_text(
+        "🎁 Premium bermoqchi bo'lgan foydalanuvchining ID yoki @username'ini yozing:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_premium")],
+        ])
+    )
+
+@dp.message(AdminPremiumGiftState.user_id)
+async def padm_gift_target(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    query = message.text.strip()
+    if query.startswith("@"):
+        u = await asyncio.to_thread(db.get_user_by_username, query)
+    else:
+        try:
+            u = await asyncio.to_thread(db.get_user, int(query))
+        except Exception:
+            u = None
+    if not u:
+        await message.answer("❌ Bunday foydalanuvchi topilmadi. Foydalanuvchi avval botdan foydalangan bo'lishi kerak.")
+        return
+    await state.update_data(admgift_to=u["user_id"])
+    await state.set_state(AdminPremiumGiftState.choosing_plan)
+    await message.answer(
+        f"🎁 <b>{u['full_name']}</b> (<code>{u['user_id']}</code>) uchun muddatni tanlang:",
+        reply_markup=_admgift_plan_kb(),
+        parse_mode="HTML"
+    )
+
+@dp.message(AdminPremiumGiftState.choosing_plan)
+async def padm_gift_choosing_plan_wrong(message: Message):
+    await message.answer("Iltimos, yuqoridagi tugmalardan birini tanlang 👆")
+
+@dp.callback_query(F.data.startswith("admgift_plan_"))
+async def padm_gift_plan(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    data = await state.get_data()
+    target_id = data.get("admgift_to")
+    if not target_id:
+        await call.answer("❌ Foydalanuvchi tanlanmagan, qaytadan boshlang.", show_alert=True)
+        await state.clear()
+        return
+    plan = call.data.replace("admgift_plan_", "")
+    days = PLAN_DAYS.get(plan, 30)
+    new_until = await _admgift_grant(call.from_user.id, target_id, plan, days)
+    await log_admin_action(call.from_user, "Premium sovg'a qildi", f"ID: {target_id}, {PLAN_LABELS.get(plan, plan)}")
+    await state.clear()
+    await call.message.edit_text(
+        f"✅ Premium berildi!\n\n🆔 ID: <code>{target_id}</code>\n📅 Muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+        reply_markup=admin_back(),
+        parse_mode="HTML"
+    )
+    await call.answer("✅ Berildi")
+
+@dp.callback_query(F.data == "admgift_custom")
+async def padm_gift_custom_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    data = await state.get_data()
+    if not data.get("admgift_to"):
+        await call.answer("❌ Foydalanuvchi tanlanmagan, qaytadan boshlang.", show_alert=True)
+        await state.clear()
+        return
+    await state.set_state(AdminPremiumGiftState.custom_days)
+    await call.message.edit_text(
+        "✏️ Necha kunlik Premium berilsin? Faqat raqam yuboring (masalan: 7):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_premium")],
+        ])
+    )
+
+@dp.message(AdminPremiumGiftState.custom_days)
+async def padm_gift_custom_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    data = await state.get_data()
+    target_id = data.get("admgift_to")
+    if not target_id:
+        await state.clear()
+        await message.answer("❌ Xatolik: foydalanuvchi topilmadi. Qaytadan boshlang.", reply_markup=admin_back())
+        return
+    text = (message.text or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer("❌ Faqat musbat raqam yuboring. Qaytadan urinib ko'ring.")
+        return
+    days = int(text)
+    new_until = await _admgift_grant(message.from_user.id, target_id, "admin_gift", days)
+    await log_admin_action(message.from_user, "Premium sovg'a qildi", f"ID: {target_id}, {days} kun")
+    await state.clear()
+    await message.answer(
+        f"✅ Premium berildi!\n\n🆔 ID: <code>{target_id}</code>\n📅 Muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+        reply_markup=admin_back(),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("admgift_direct_"))
+async def padm_gift_direct(call: CallbackQuery, state: FSMContext):
+    """Foydalanuvchi qidiruv kartasidagi '🎁 Premium berish' tugmasi — ID qayta
+    kiritilmasdan to'g'ridan-to'g'ri muddat tanlash bosqichiga o'tadi."""
+    if not await is_admin_user(call.from_user.id):
+        return
+    try:
+        target_id = int(call.data.replace("admgift_direct_", ""))
+    except Exception:
+        await call.answer("❌ Xatolik", show_alert=True)
+        return
+    await state.update_data(admgift_to=target_id)
+    await state.set_state(AdminPremiumGiftState.choosing_plan)
+    await call.message.answer(
+        f"🎁 <code>{target_id}</code> uchun muddatni tanlang:",
+        reply_markup=_admgift_plan_kb(),
+        parse_mode="HTML"
+    )
+    await call.answer()
 
 _PADM_FIELD_MAP = {
     "padm_price_1m": ("premium_price_1m", PremiumAdminState.price_1m, "1 oylik narxni faqat raqam bilan yuboring (masalan: 15000):"),
@@ -3463,6 +3620,7 @@ async def find_user_result(message: Message, state: FSMContext):
         f"📊 Holat: {status}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👤 Profilni ko'rish", url=f"tg://user?id={u['user_id']}")],
+            [InlineKeyboardButton(text="🎁 Premium berish", callback_data=f"admgift_direct_{u['user_id']}", style="success")],
             [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")]
         ]),
         parse_mode="HTML"
