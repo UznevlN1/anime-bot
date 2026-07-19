@@ -210,13 +210,17 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .player-seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--purple2);box-shadow:0 0 8px var(--glow);margin-top:-4.5px;}
 .player-seek::-webkit-slider-runnable-track{height:4px;border-radius:3px;background:rgba(255,255,255,.25);}
 .player-controls-row{display:flex;align-items:center;gap:14px;}
-.player-play-btn{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--purple2),var(--purple));border:none;color:#fff;font-size:17px;flex:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px var(--glow);}
 .player-time{color:rgba(255,255,255,.85);font-size:11.5px;font-weight:600;flex:1;letter-spacing:.2px;}
 .player-fs-btn{width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:15px;flex:none;}
-.player-skip-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:50%;width:42px;height:42px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;line-height:1;transition:background .15s,transform .1s;}
-.player-skip-btn:active{background:rgba(255,255,255,.26);transform:scale(.92);}
-.player-skip-btn .psb-icon{font-size:15px;}
-.player-skip-btn .psb-num{font-size:8.5px;font-weight:800;letter-spacing:.3px;margin-top:1px;}
+
+/* Markazdagi (video ustidagi) boshqaruv guruhi: orqaga 15 / play-pause / oldinga 15 */
+.player-center-controls{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:3;display:flex;align-items:center;justify-content:center;gap:26px;transition:opacity .25s;}
+.player-center-controls.hidden{opacity:0;pointer-events:none;}
+.player-play-btn{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--purple2),var(--purple));border:none;color:#fff;font-size:22px;flex:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 18px var(--glow);}
+.player-play-btn:active{transform:scale(.93);}
+.player-skip-btn{background:rgba(20,20,28,.42);backdrop-filter:blur(3px);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:50%;width:50px;height:50px;flex:none;display:flex;align-items:center;justify-content:center;transition:background .15s,transform .1s;}
+.player-skip-btn:active{background:rgba(255,255,255,.18);transform:scale(.92);}
+.player-skip-btn svg{width:30px;height:30px;display:block;}
 
 /* "Keyingi qism" avtomatik taklif overlay'i (qism tugagach chiqadi) */
 .player-next-overlay{position:absolute;right:14px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:4;display:none;pointer-events:none;}
@@ -655,12 +659,24 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
       <span class="pb-special"><span class="pb-spark">✦</span>Animax uchun maxsus<span class="pb-spark">✦</span></span>
     </div>
     <button class="skip-intro-btn" id="skipIntroBtn">⏭ Qoʻshiqni oʻtkazib yuborish</button>
+    <div class="player-center-controls" id="playerCenterControls">
+      <button class="player-skip-btn" id="playerSkipBack" aria-label="15 soniya orqaga">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" fill="currentColor"/>
+          <text x="12" y="16.3" text-anchor="middle" font-size="7.5" font-weight="800" fill="currentColor" font-family="-apple-system,Segoe UI,Roboto,sans-serif">15</text>
+        </svg>
+      </button>
+      <button class="player-play-btn" id="playerPlayBtn">▶</button>
+      <button class="player-skip-btn" id="playerSkipFwd" aria-label="15 soniya oldinga">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" fill="currentColor"/>
+          <text x="12" y="16.3" text-anchor="middle" font-size="7.5" font-weight="800" fill="currentColor" font-family="-apple-system,Segoe UI,Roboto,sans-serif">15</text>
+        </svg>
+      </button>
+    </div>
     <div class="player-controls" id="playerControls">
       <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" step="0.1">
       <div class="player-controls-row">
-        <button class="player-skip-btn" id="playerSkipBack"><span class="psb-icon">⏪</span><span class="psb-num">15</span></button>
-        <button class="player-play-btn" id="playerPlayBtn">▶</button>
-        <button class="player-skip-btn" id="playerSkipFwd"><span class="psb-icon">⏩</span><span class="psb-num">15</span></button>
         <span class="player-time" id="playerTime">0:00 / 0:00</span>
         <button class="player-fs-btn" id="playerFsBtn">⛶</button>
       </div>
@@ -1414,6 +1430,7 @@ const pvSeek=document.getElementById('playerSeek');
 const pvPlayBtn=document.getElementById('playerPlayBtn');
 const pvTime=document.getElementById('playerTime');
 const pvControls=document.getElementById('playerControls');
+const pvCenterControls=document.getElementById('playerCenterControls');
 const pvLoading=document.getElementById('playerLoading');
 const pvLoadingText=document.getElementById('playerLoadingText');
 const pvTopbar=document.querySelector('.player-topbar');
@@ -1510,9 +1527,10 @@ function fmtTime(s){
 }
 function pvShowControls(autoHide=true){
   pvControls.classList.remove('hidden');
+  pvCenterControls.classList.remove('hidden');
   pvTopbar.classList.remove('hidden');
   clearTimeout(pvHideTimer);
-  if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>{pvControls.classList.add('hidden');pvTopbar.classList.add('hidden');},3000);
+  if(autoHide&&!pv.paused)pvHideTimer=setTimeout(()=>{pvControls.classList.add('hidden');pvCenterControls.classList.add('hidden');pvTopbar.classList.add('hidden');},3000);
 }
 function pvGetPositions(){try{return JSON.parse(localStorage.getItem('anifilm_positions')||'{}');}catch(e){return {};}}
 function pvSavePositionLocal(epId,seconds){
