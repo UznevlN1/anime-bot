@@ -475,6 +475,23 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   </div>
 
   <div class="pf-wrap">
+    <div id="pfDisabledScreen" style="display:none;">
+      <div class="pf-lock-wrap">
+        <div class="pf-lock-crown">⏳</div>
+        <div class="pf-lock-title">Profil vaqtincha yopiq</div>
+        <div class="pf-lock-sub">Bepul foydalanuvchilar uchun Profil bo'limi vaqtincha ishlamayapti. Premium obunachilar uchun cheklovsiz ochiq.</div>
+      </div>
+      <div class="pf-lock-mini">
+        <div class="pf-avatar" style="width:52px;height:52px;"><div class="pf-avatar-img" id="disAvatar" style="width:52px;height:52px;font-size:18px;">?</div></div>
+        <div style="flex:1;min-width:0;">
+          <div class="pf-name" id="disName" style="font-size:15px;">Foydalanuvchi</div>
+          <div class="pf-username" id="disUsername" style="margin-bottom:0;"></div>
+        </div>
+      </div>
+      <button class="pf-lock-cta" id="pfDisabledCta">💎 Premium sotib olish</button>
+      <div class="pf-lock-note">Premium bo'lsangiz, Profil bo'limi darhol ochiladi.</div>
+    </div>
+
     <div id="pfLockedScreen" style="display:none;">
       <div class="pf-lock-wrap">
         <div class="pf-lock-crown">👑</div>
@@ -1118,7 +1135,7 @@ async function renderProfil(){
   const initial=(u?.first_name||'?').charAt(0).toUpperCase();
 
   // Avatar/ism ikkala holatda ham (locked va full) kerak
-  [['profilAvatar','profilName','profilUsername'],['lockAvatar','lockName','lockUsername']].forEach(([avId,nameId,unId])=>{
+  [['profilAvatar','profilName','profilUsername'],['lockAvatar','lockName','lockUsername'],['disAvatar','disName','disUsername']].forEach(([avId,nameId,unId])=>{
     const av=document.getElementById(avId);
     if(u?.photo_url){av.innerHTML=`<img src="${u.photo_url}">`;}
     else{av.textContent=initial;}
@@ -1138,6 +1155,7 @@ async function renderProfil(){
 
   const lockedEl=document.getElementById('pfLockedScreen');
   const fullEl=document.getElementById('pfFullContent');
+  const disabledEl=document.getElementById('pfDisabledScreen');
 
   try{
     const p=await fetchJSON(`${API}/profile?${initDataQS()}`);
@@ -1145,12 +1163,21 @@ async function renderProfil(){
     SUPPORT_URL=p.support_url||'';
     BOT_USERNAME=p.bot_username||'';
 
+    if(p.disabled){
+      disabledEl.style.display='';
+      lockedEl.style.display='none';
+      fullEl.style.display='none';
+      return;
+    }
+
     if(!p.is_premium){
+      disabledEl.style.display='none';
       lockedEl.style.display='';
       fullEl.style.display='none';
       return;
     }
 
+    disabledEl.style.display='none';
     lockedEl.style.display='none';
     fullEl.style.display='';
 
@@ -1173,6 +1200,7 @@ async function renderProfil(){
     renderRecentProfil();
   }catch(e){
     // Xatolik holatida ham foydalanuvchini qulflangan ekranda qoldiramiz (xavfsiz taraf)
+    disabledEl.style.display='none';
     lockedEl.style.display='';
     fullEl.style.display='none';
   }
@@ -1825,6 +1853,7 @@ document.getElementById('pfPremium').addEventListener('click',pfOpenPremiumPurch
 function pfAlert(msg){tg?.showAlert?tg.showAlert(msg):alert(msg);}
 function pfOpenLink(url){tg?.openTelegramLink?tg.openTelegramLink(url):window.open(url,'_blank');}
 document.getElementById('pfLockCta').addEventListener('click',pfOpenPremiumPurchase);
+document.getElementById('pfDisabledCta').addEventListener('click',pfOpenPremiumPurchase);
 
 document.getElementById('pfBellBtn').addEventListener('click',()=>pfAlert('Hozircha yangi bildirishnomalar yoʻq'));
 document.getElementById('profilEditBtn').addEventListener('click',()=>pfAlert('Profil maʼlumotlari Telegram akkauntingizdan olinadi. Oʻzgartirish uchun Telegram sozlamalariga oʻting.'));
