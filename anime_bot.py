@@ -2534,7 +2534,7 @@ async def addepi_done(message: Message, state: FSMContext):
     )
 
 # ---- ANIME RO'YXATI ADMIN ----
-@dp.callback_query(F.data.startswith("admin_list_"))
+@dp.callback_query(F.data.regexp(r"^admin_list_\d+$"))
 async def admin_list(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
@@ -4196,7 +4196,7 @@ async def webapp_profile(request):
         asyncio.to_thread(db.get_setting, "bot_version"),
         asyncio.to_thread(db.get_setting, "profile_disabled_for_free"),
     )
-    is_admin = user_id == ADMIN_ID
+    is_admin = await is_admin_user(user_id)
 
     # Kampaniya: bepul (Premium bo'lmagan) foydalanuvchilar uchun Profil
     # bo'limi vaqtincha yopilgan bo'lishi mumkin — Premium/admin har doim kiradi.
