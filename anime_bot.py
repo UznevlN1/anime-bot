@@ -176,6 +176,11 @@ userbot = PyroClient(
 ) if USERBOT_ENABLED else None
 
 import userbot_stream
+import episode_relay
+
+# Botda saqlangan epizodni RTMP orqali jonli efirga uzatish holati (faqat bitta
+# epizod bir vaqtning o'zida uzatilishi mumkin).
+_live_relay = {"proc": None, "path": None, "episode_id": None}
 
 
 # ===================== STATES =====================
@@ -289,6 +294,9 @@ class AnnounceChannelState(StatesGroup):
 
 class LiveStreamState(StatesGroup):
     waiting_channel = State()
+
+class LiveRelayState(StatesGroup):
+    search_query = State()
 
 async def get_announce_channel():
     """E'lon kanali admin panelida sozlanadi (settings jadvalida saqlanadi).
@@ -3434,6 +3442,9 @@ def _live_stream_keyboard(channel):
             InlineKeyboardButton(text="▶️ Boshlash", callback_data="live_start", style="success"),
             InlineKeyboardButton(text="⏹ Tugatish", callback_data="live_stop", style="danger"),
         ])
+        rows.append([InlineKeyboardButton(text="🎬 Epizodni efirga qo'yish", callback_data="live_pick_ep", style="primary")])
+        if _live_relay["proc"] is not None:
+            rows.append([InlineKeyboardButton(text="⏹ Epizod uzatishni to'xtatish", callback_data="live_stop_relay", style="danger")])
     rows.append([InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -3524,6 +3535,175 @@ async def live_stop(call: CallbackQuery):
     except Exception as e:
         logger.error(f"Jonli efirni tugatishda xatolik: {e}")
         await call.message.answer(f"❌ Xatolik: {e}")
+
+# ---- EPIZODNI JONLI EFIRGA UZATISH ----
+@dp.callback_query(F.data == "live_pick_ep")
+async def live_pick_ep(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not USERBOT_ENABLED:
+        await call.answer("⚠️ Userbot sozlanmagan", show_alert=True)
+        return
+    channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    if not channel:
+        await call.answer("⚠️ Avval kanalni belgilang", show_alert=True)
+        return
+    await state.clear()
+    await call.message.edit_text(
+        "🎬 Efirga qo'yiladigan serial/film tanlash usuli:",
+        reply_markup=search_method_keyboard("liveep")
+    )
+
+@dp.callback_query(F.data == "liveep_list")
+async def liveep_list(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    animes = await asyncio.to_thread(db.get_animes, "serial", 0)
+    total = await asyncio.to_thread(db.get_anime_count, "serial")
+    await call.message.edit_text(
+        "Serial tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, 0, total, "liveep_sel")
+    )
+
+@dp.callback_query(F.data == "liveep_search")
+async def liveep_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(LiveRelayState.search_query)
+    await call.message.edit_text("🔍 Serial/film nomini yozing:")
+
+@dp.message(LiveRelayState.search_query)
+async def liveep_search_result(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    await state.clear()
+    results = await asyncio.to_thread(db.search_anime, message.text.strip())
+    if not results:
+        await message.answer("❌ Topilmadi!")
+        return
+    buttons = [[InlineKeyboardButton(text=a["title"], callback_data=f"liveep_sel_{a['id']}")] for a in results]
+    await message.answer("Tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.startswith("liveep_sel_"))
+async def liveep_sel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    anime_id = int(call.data.split("_")[2])
+    episodes = await asyncio.to_thread(db.get_episodes, anime_id)
+    if not episodes:
+        await call.answer("❌ Bu animeda epizod topilmadi", show_alert=True)
+        return
+    buttons = []
+    row = []
+    for ep in episodes:
+        row.append(InlineKeyboardButton(text=f"{ep['episode_number']}-qism", callback_data=f"liveep_go_{ep['id']}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
+    await call.message.edit_text("Qismni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.startswith("liveep_go_"))
+async def liveep_go(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if _live_relay["proc"] is not None:
+        await call.answer("⚠️ Hozir boshqa epizod uzatilmoqda. Avval uni to'xtating.", show_alert=True)
+        return
+    ep_id = int(call.data.split("_")[2])
+    ep = await asyncio.to_thread(db.get_episode, ep_id)
+    if not ep:
+        await call.answer("❌ Topilmadi", show_alert=True)
+        return
+    channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    if not channel:
+        await call.answer("⚠️ Avval jonli efir kanalini belgilang", show_alert=True)
+        return
+    await call.answer("⏳ Boshlanmoqda...")
+    status_msg = await call.message.answer("⏳ Video tayyorlanmoqda, biroz kuting...")
+    asyncio.create_task(_run_episode_relay(ep, channel, status_msg, call.from_user))
+
+async def _run_episode_relay(ep, channel, status_msg, admin_user):
+    global _live_relay
+    path = None
+    try:
+        if not STREAM_ENABLED or not pyro:
+            await status_msg.edit_text("❌ Xatolik: onlayn striming (API_ID/API_HASH) sozlanmagan")
+            return
+        if not await _ensure_pyro_ready(pyro):
+            await status_msg.edit_text("❌ Xatolik: video xizmati vaqtincha ishlamayapti")
+            return
+
+        chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
+        url, key = await userbot_stream.start_rtmp(userbot, chan)
+        rtmp_url = episode_relay.build_rtmp_url(url, key)
+
+        msg = await pyro.get_messages(STORAGE_CHANNEL, ep["channel_message_id"])
+        media = msg.video or msg.document or msg.animation
+        if not media:
+            await status_msg.edit_text("❌ Xatolik: bu qismda video topilmadi")
+            return
+
+        last_pct = {"v": -1}
+        async def _progress(current, total):
+            pct = int(current * 100 / total) if total else 0
+            if pct != last_pct["v"] and pct % 10 == 0:
+                last_pct["v"] = pct
+                try:
+                    await status_msg.edit_text(f"⏳ Video yuklanmoqda: {pct}%")
+                except Exception:
+                    pass
+
+        path = await episode_relay.download_episode(pyro, msg, progress_cb=_progress)
+        proc = await episode_relay.start_ffmpeg_relay(path, rtmp_url)
+        _live_relay.update({"proc": proc, "path": path, "episode_id": ep["id"]})
+
+        await status_msg.edit_text(
+            f"🔴 <b>{ep['episode_number']}-qism jonli efirga uzatilmoqda!</b>\n\n"
+            f"Kanal video-chatini oching — bir necha soniyada video ko'rina boshlaydi.",
+            parse_mode="HTML"
+        )
+        await log_admin_action(admin_user, "Epizodni efirga qo'ydi", f"Episode ID: {ep['id']}")
+
+        returncode = await proc.wait()
+        if _live_relay.get("episode_id") == ep["id"]:
+            if returncode == 0:
+                await status_msg.answer(f"✅ {ep['episode_number']}-qism uzatish tugadi.")
+            else:
+                stderr = b""
+                try:
+                    stderr = await proc.stderr.read()
+                except Exception:
+                    pass
+                logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-500:]}")
+                await status_msg.answer(f"❌ Uzatish xato bilan tugadi (kod: {returncode}).")
+    except Exception as e:
+        logger.error(f"[live relay] xatolik: {e}")
+        try:
+            await status_msg.edit_text(f"❌ Xatolik: {e}")
+        except Exception:
+            pass
+    finally:
+        episode_relay.cleanup_file(path)
+        if _live_relay.get("path") == path:
+            _live_relay.update({"proc": None, "path": None, "episode_id": None})
+
+@dp.callback_query(F.data == "live_stop_relay")
+async def live_stop_relay(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    proc = _live_relay.get("proc")
+    if not proc:
+        await call.answer("ℹ️ Hozir hech narsa uzatilmayapti", show_alert=True)
+        return
+    await episode_relay.stop_ffmpeg_relay(proc)
+    episode_relay.cleanup_file(_live_relay.get("path"))
+    await log_admin_action(call.from_user, "Epizod uzatishni to'xtatdi", f"Episode ID: {_live_relay.get('episode_id')}")
+    _live_relay.update({"proc": None, "path": None, "episode_id": None})
+    await call.answer("⏹ Epizod uzatish to'xtatildi", show_alert=True)
+    await call.message.answer("⏹ Epizod uzatish to'xtatildi.")
 
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
