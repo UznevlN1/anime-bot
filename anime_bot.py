@@ -3690,7 +3690,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     stderr = await proc.stderr.read()
                 except Exception:
                     pass
-                logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-500:]}")
+                logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-3000:]}")
                 await status_msg.answer(f"❌ Uzatish xato bilan tugadi (kod: {returncode}).")
     except Exception as e:
         logger.error(f"[live relay] xatolik: {e}")

@@ -56,7 +56,8 @@ def build_rtmp_url(url, key):
 async def start_ffmpeg_relay(local_path, rtmp_url):
     """ffmpeg jarayonini fon rejimida ishga tushiradi, subprocess obyektini qaytaradi."""
     cmd = [
-        FFMPEG_PATH, "-re", "-i", local_path,
+        FFMPEG_PATH, "-nostdin", "-loglevel", "verbose",
+        "-re", "-i", local_path,
         "-c", "copy",
         "-f", "flv", rtmp_url,
     ]
