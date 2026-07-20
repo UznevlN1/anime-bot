@@ -3635,6 +3635,34 @@ async def liveep_go(call: CallbackQuery, state: FSMContext):
     status_msg = await call.message.answer("⏳ Video tayyorlanmoqda, biroz kuting...")
     asyncio.create_task(_run_episode_relay(ep, channel, status_msg, call.from_user))
 
+async def _warm_userbot_peer_cache(chat):
+    """userbot (shaxsiy akkaunt) sessiyasi berilgan kanalni "tanishi" uchun kamida
+    bitta yangi hodisani ko'rishi kerak — aks holda ID orqali murojaat qilganda
+    "Peer id invalid" xato beradi. Jonli efir kanali admin panel orqali dinamik
+    belgilanadigani uchun bu isitish har safar efir boshlanishidan OLDIN, aynan
+    o'sha kanal uchun bajariladi (startupdagi umumiy warm-up bunga yetarli emas,
+    chunki u faqat STORAGE_CHANNEL uchun ishlaydi va userbotni umuman qamramaydi).
+    """
+    try:
+        await userbot.get_chat(chat)
+        logger.info(f"Userbot: kanal ({chat}) peer keshi allaqachon mavjud.")
+        return
+    except Exception:
+        logger.info(f"Userbot: kanal ({chat}) peer keshi bo'sh, sinxronlash signali yuborilmoqda...")
+    try:
+        sync_msg = await bot.send_message(chat, "🔄")
+        await asyncio.sleep(2)
+        try:
+            await sync_msg.delete()
+        except Exception:
+            pass
+        await userbot.get_chat(chat)
+        logger.info(f"Userbot: kanal ({chat}) peer keshi muvaffaqiyatli to'ldirildi.")
+    except Exception as e:
+        logger.warning(f"Userbot: kanal ({chat}) uchun sinxronlash signali yuborilmadi/xato: {e}")
+        raise
+
+
 async def _run_episode_relay(ep, channel, status_msg, admin_user):
     global _live_relay
     path = None
@@ -3648,8 +3676,20 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             except Exception as e:
                 await status_msg.edit_text(f"❌ Xatolik: video xizmati ulanmadi ({e})")
                 return
+        if not USERBOT_ENABLED or not userbot:
+            await status_msg.edit_text("❌ Xatolik: userbot (jonli efir) sozlanmagan")
+            return
 
         chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
+        try:
+            await _warm_userbot_peer_cache(chan)
+        except Exception as e:
+            await status_msg.edit_text(
+                f"❌ Xatolik: userbot kanalni tanimadi ({e}).\n\n"
+                f"Userbot akkaunti shu kanalda ADMIN ekanligini va bot kanalga "
+                f"kamida bitta xabar yuborganini tekshiring."
+            )
+            return
         url, key = await userbot_stream.start_rtmp(userbot, chan)
         rtmp_url = episode_relay.build_rtmp_url(url, key)
 
@@ -3670,7 +3710,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     pass
 
         path = await episode_relay.download_episode(pyro, msg, progress_cb=_progress)
-        proc = await episode_relay.start_ffmpeg_relay(path, rtmp_url)
+        proc, stderr_tail = await episode_relay.start_ffmpeg_relay(path, rtmp_url)
         _live_relay.update({"proc": proc, "path": path, "episode_id": ep["id"]})
 
         await status_msg.edit_text(
@@ -3685,13 +3725,13 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             if returncode == 0:
                 await status_msg.answer(f"✅ {ep['episode_number']}-qism uzatish tugadi.")
             else:
-                stderr = b""
-                try:
-                    stderr = await proc.stderr.read()
-                except Exception:
-                    pass
+                stderr = stderr_tail.get("tail", b"")
                 logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-3000:]}")
-                await status_msg.answer(f"❌ Uzatish xato bilan tugadi (kod: {returncode}).")
+                await status_msg.answer(
+                    f"❌ Uzatish xato bilan tugadi (kod: {returncode}).\n\n"
+                    f"<code>{stderr[-500:].decode(errors='ignore')}</code>",
+                    parse_mode="HTML"
+                )
     except Exception as e:
         logger.error(f"[live relay] xatolik: {e}")
         try:

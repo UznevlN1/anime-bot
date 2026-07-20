@@ -70,13 +70,36 @@ def _build_relay_cmd(local_path, rtmp_url, reencode_video=True):
         if reencode_video else ["-c:v", "copy"]
     )
     return [
-        FFMPEG_PATH, "-nostdin", "-loglevel", "verbose",
+        FFMPEG_PATH, "-nostdin", "-loglevel", "error",
         "-re", "-i", local_path,
         *video_codec,
         "-c:a", "aac", "-b:a", "128k", "-bsf:a", "aac_adtstoasc",
         "-avoid_negative_ts", "make_zero",
         "-f", "flv", rtmp_url,
     ]
+
+
+async def _drain_stderr(proc, tail_holder, max_tail=4000):
+    """ffmpeg'ning stderr oqimini jarayon davomida UZLUKSIZ o'qib turadi.
+
+    Bu shart, chunki OS pipe buferi cheklangan (odatda ~64KB): agar hech kim
+    o'qimasa va ffmpeg yoza-yoza bufer to'lib qolsa, ffmpeg yozishda bloklanib
+    (deadlock) osilib qoladi — bu uzoq davom etgan efirlarda kutilmagan
+    qulash/to'xtashlarning yashirin sababi bo'lishi mumkin. Oxirgi ~4KB log
+    xato bo'lganda ko'rsatish uchun tail_holder'da saqlanadi.
+    """
+    buf = b""
+    try:
+        while True:
+            chunk = await proc.stderr.read(4096)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > max_tail:
+                buf = buf[-max_tail:]
+    except Exception:
+        pass
+    tail_holder["tail"] = buf
 
 
 async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
@@ -87,6 +110,11 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
     oladi. Agar barcha fayllaringiz "toza" (standart, 16 ga karrali) o'lchamda
     bo'lsa, tezroq ishlashi uchun reencode_video=False berib stream-copy
     rejimiga o'tishingiz mumkin.
+
+    Qaytaradi: (proc, stderr_tail_holder). stderr_tail_holder — jarayon
+    tugagach ["tail"] kaliti orqali oxirgi log matnini o'z ichiga oladigan dict
+    (proc.stderr endi to'g'ridan-to'g'ri o'qilmaydi, chunki uni fon vazifasi
+    allaqachon uzluksiz iste'mol qilib turadi).
     """
     cmd = _build_relay_cmd(local_path, rtmp_url, reencode_video=reencode_video)
     proc = await asyncio.create_subprocess_exec(
@@ -94,7 +122,9 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    return proc
+    tail_holder = {"tail": b""}
+    asyncio.create_task(_drain_stderr(proc, tail_holder))
+    return proc, tail_holder
 
 
 async def stop_ffmpeg_relay(proc):
