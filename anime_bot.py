@@ -54,6 +54,18 @@ API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 STREAM_ENABLED = bool(API_ID and API_HASH)
 
+# Jonli efir (RTMP) userbot uchun alohida yaratilgan ilova (my.telegram.org).
+# Render'da muhit o'zgaruvchisi sifatida beriladi — kodga yozilmaydi (repo
+# public bo'lgani uchun xavfsizlik maqsadida).
+USERBOT_API_ID = os.environ.get("USERBOT_API_ID")
+USERBOT_API_HASH = os.environ.get("USERBOT_API_HASH")
+
+# Jonli efir (RTMP) uchun USERBOT sessiyasi — `generate_userbot_session.py`
+# orqali BIR MARTA lokal kompyuterda yaratiladi (yuqoridagi USERBOT_API_ID/
+# USERBOT_API_HASH bilan, lekin bot tokeni EMAS — shaxsiy akkaunt sessiyasi).
+USERBOT_SESSION_STRING = os.environ.get("USERBOT_SESSION_STRING")
+USERBOT_ENABLED = bool(USERBOT_SESSION_STRING and USERBOT_API_ID and USERBOT_API_HASH)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -151,6 +163,19 @@ def _next_stream_client():
     client = _stream_clients[_stream_client_counter % len(_stream_clients)]
     _stream_client_counter += 1
     return client
+
+# Jonli efir (RTMP) uchun alohida USERBOT klienti — bot tokeni bilan EMAS,
+# `USERBOT_SESSION_STRING` (shaxsiy akkaunt sessiyasi) bilan kiradi, chunki
+# Telegram botlarga kanal video-chatini boshlashga ruxsat bermaydi.
+userbot = PyroClient(
+    "live_userbot",
+    api_id=int(USERBOT_API_ID) if USERBOT_API_ID else None,
+    api_hash=USERBOT_API_HASH,
+    session_string=USERBOT_SESSION_STRING,
+    in_memory=True,
+) if USERBOT_ENABLED else None
+
+import userbot_stream
 
 
 # ===================== STATES =====================
@@ -261,6 +286,9 @@ class VersionState(StatesGroup):
 
 class AnnounceChannelState(StatesGroup):
     waiting = State()
+
+class LiveStreamState(StatesGroup):
+    waiting_channel = State()
 
 async def get_announce_channel():
     """E'lon kanali admin panelida sozlanadi (settings jadvalida saqlanadi).
@@ -1400,6 +1428,9 @@ def admin_cat_settings_keyboard():
         ],
         [
             InlineKeyboardButton(text="👤 Profil bo'limi (bepul)", callback_data="admin_profile_lock", style="danger"),
+        ],
+        [
+            InlineKeyboardButton(text="🔴 Jonli efir", callback_data="admin_live_stream", style="danger"),
         ],
         [InlineKeyboardButton(text="📣 E'lon kanali", callback_data="admin_announce_channel", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
@@ -3382,6 +3413,118 @@ async def set_profile_lock(call: CallbackQuery):
     await call.answer(f"👤 {status}", show_alert=True)
     await admin_profile_lock(call)
 
+# ---- JONLI EFIR (RTMP, kanal video-chatiga) ----
+async def _live_status_text():
+    channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    lines = ["🔴 <b>Jonli efir (RTMP)</b>\n"]
+    if not USERBOT_ENABLED:
+        lines.append(
+            "⚠️ Userbot sozlanmagan. <code>USERBOT_SESSION_STRING</code> muhit "
+            "o'zgaruvchisi topilmadi — <code>generate_userbot_session.py</code> "
+            "skriptini lokal kompyuteringizda ishga tushirib sessiya oling."
+        )
+        return "\n".join(lines), channel
+    lines.append(f"Kanal: <code>{channel}</code>" if channel else "Kanal hali belgilanmagan.")
+    return "\n".join(lines), channel
+
+def _live_stream_keyboard(channel):
+    rows = [[InlineKeyboardButton(text="✏️ Kanalni belgilash", callback_data="live_set_channel", style="primary")]]
+    if USERBOT_ENABLED and channel:
+        rows.append([
+            InlineKeyboardButton(text="▶️ Boshlash", callback_data="live_start", style="success"),
+            InlineKeyboardButton(text="⏹ Tugatish", callback_data="live_stop", style="danger"),
+        ])
+    rows.append([InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+@dp.callback_query(F.data == "admin_live_stream")
+async def admin_live_stream(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.clear()
+    text, channel = await _live_status_text()
+    await call.message.edit_text(text, reply_markup=_live_stream_keyboard(channel), parse_mode="HTML")
+
+@dp.callback_query(F.data == "live_set_channel")
+async def live_set_channel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(LiveStreamState.waiting_channel)
+    await call.message.edit_text(
+        "🔴 Jonli efir boshlanadigan kanal username'ini (masalan <code>@Ani_Max</code>) "
+        "yoki ID'sini (masalan <code>-100123456789</code>) yuboring.\n\n"
+        "⚠️ USERBOT akkaunti o'sha kanalda ADMIN bo'lishi shart "
+        "(\"Video chatlarni boshqarish\" huquqi bilan).",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_live_stream")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.message(LiveStreamState.waiting_channel)
+async def live_set_channel_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    value = (message.text or "").strip()
+    if not value:
+        await message.answer("❌ Bo'sh bo'lishi mumkin emas. Qaytadan yuboring.")
+        return
+    channel = int(value) if value.lstrip("-").isdigit() else (value if value.startswith("@") else f"@{value}")
+    await asyncio.to_thread(db.set_setting, "live_stream_channel_id", str(channel))
+    await state.clear()
+    text, saved_channel = await _live_status_text()
+    await message.answer(text, reply_markup=_live_stream_keyboard(saved_channel), parse_mode="HTML")
+
+@dp.callback_query(F.data == "live_start")
+async def live_start(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not USERBOT_ENABLED:
+        await call.answer("⚠️ Userbot sozlanmagan", show_alert=True)
+        return
+    channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    if not channel:
+        await call.answer("⚠️ Avval kanalni belgilang", show_alert=True)
+        return
+    await call.answer("⏳ Boshlanmoqda...")
+    try:
+        chan = int(channel) if channel.lstrip("-").isdigit() else channel
+        url, key = await userbot_stream.start_rtmp(userbot, chan)
+        await log_admin_action(call.from_user, "Jonli efir boshlandi", f"Kanal: {channel}")
+        await call.message.answer(
+            "🔴 <b>Jonli efir boshlandi!</b>\n\n"
+            "Quyidagi ma'lumotlarni OBS Studio (yoki boshqa RTMP dastur)ga kiriting:\n\n"
+            f"<b>Server URL:</b>\n<code>{url}</code>\n\n"
+            f"<b>Stream key:</b>\n<tg-spoiler>{key}</tg-spoiler>\n\n"
+            "⚠️ Stream key'ni hech kimga ko'rsatmang — uni bilgan odam sizning "
+            "nomingizdan efir boshlashi mumkin.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Jonli efir boshlanmadi: {e}")
+        await call.message.answer(f"❌ Xatolik: {e}")
+
+@dp.callback_query(F.data == "live_stop")
+async def live_stop(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not USERBOT_ENABLED:
+        await call.answer("⚠️ Userbot sozlanmagan", show_alert=True)
+        return
+    channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    if not channel:
+        await call.answer("⚠️ Kanal belgilanmagan", show_alert=True)
+        return
+    await call.answer("⏳ Tugatilmoqda...")
+    try:
+        chan = int(channel) if channel.lstrip("-").isdigit() else channel
+        stopped = await userbot_stream.stop_rtmp(userbot, chan)
+        await log_admin_action(call.from_user, "Jonli efir tugatildi", f"Kanal: {channel}")
+        await call.message.answer("⏹ Jonli efir tugatildi." if stopped else "ℹ️ Faol jonli efir topilmadi.")
+    except Exception as e:
+        logger.error(f"Jonli efirni tugatishda xatolik: {e}")
+        await call.message.answer(f"❌ Xatolik: {e}")
+
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
 async def admin_content(call: CallbackQuery):
@@ -4948,6 +5091,16 @@ async def main():
             logger.error(f"Pyrogram ishga tushmadi: {e}")
     else:
         logger.warning("API_ID/API_HASH topilmadi — onlayn striming o'chirilgan.")
+
+    if USERBOT_ENABLED:
+        try:
+            await userbot.start()
+            logger.info("Userbot (jonli efir) ishga tushdi!")
+        except Exception as e:
+            logger.error(f"Userbot ishga tushmadi: {e}")
+    else:
+        logger.warning("USERBOT_SESSION_STRING topilmadi — jonli efir o'chirilgan.")
+
     await start_web_server()
     asyncio.create_task(daily_report_task())
     asyncio.create_task(premium_maintenance_task())
@@ -4964,6 +5117,11 @@ async def main():
                     await _client.stop()
                 except Exception:
                     pass
+        if USERBOT_ENABLED:
+            try:
+                await userbot.stop()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     # asyncio.run() emas — importda yaratilgan _MAIN_LOOP'ning aynan oʻzida ishga tushiramiz,
