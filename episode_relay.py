@@ -70,7 +70,7 @@ def _build_relay_cmd(local_path, rtmp_url, reencode_video=True):
         if reencode_video else ["-c:v", "copy"]
     )
     return [
-        FFMPEG_PATH, "-nostdin", "-loglevel", "warning",
+        FFMPEG_PATH, "-nostdin", "-loglevel", "verbose",
         "-re", "-i", local_path,
         *video_codec,
         "-c:a", "aac", "-b:a", "128k", "-bsf:a", "aac_adtstoasc",
