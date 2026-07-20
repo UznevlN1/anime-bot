@@ -3,3 +3,4 @@ aiohttp>=3.9.0
 psycopg2-binary
 pyrogram>=2.0.106
 tgcrypto>=1.2.5
+imageio-ffmpeg
