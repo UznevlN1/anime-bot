@@ -3558,11 +3558,21 @@ async def live_pick_ep(call: CallbackQuery, state: FSMContext):
 async def liveep_list(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
-    animes = await asyncio.to_thread(db.get_animes, "serial", 0)
-    total = await asyncio.to_thread(db.get_anime_count, "serial")
+    serials = await asyncio.to_thread(db.get_animes, "serial", 0)
+    films = await asyncio.to_thread(db.get_animes, "film", 0)
+    animes = serials + films
+    if not animes:
+        await call.answer("❌ Hech narsa topilmadi", show_alert=True)
+        return
+    buttons = []
+    for a in animes:
+        icon = "🎬" if a["media_type"] == "film" else "📺"
+        buttons.append([InlineKeyboardButton(text=f"{icon} {a['title']}", callback_data=f"liveep_sel_{a['id']}")])
+    buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
     await call.message.edit_text(
-        "Serial tanlang:",
-        reply_markup=admin_anime_list_keyboard(animes, 0, total, "liveep_sel")
+        "Anime tanlang (ro'yxatning birinchi sahifasi ko'rsatilgan; agar kerakli anime "
+        "bu yerda bo'lmasa, orqaga qaytib \"🔍 Nomi orqali qidirish\"dan foydalaning):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
 @dp.callback_query(F.data == "liveep_search")
@@ -3632,9 +3642,12 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         if not STREAM_ENABLED or not pyro:
             await status_msg.edit_text("❌ Xatolik: onlayn striming (API_ID/API_HASH) sozlanmagan")
             return
-        if not await _ensure_pyro_ready(pyro):
-            await status_msg.edit_text("❌ Xatolik: video xizmati vaqtincha ishlamayapti")
-            return
+        if not getattr(pyro, "is_connected", False):
+            try:
+                await pyro.start()
+            except Exception as e:
+                await status_msg.edit_text(f"❌ Xatolik: video xizmati ulanmadi ({e})")
+                return
 
         chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
         url, key = await userbot_stream.start_rtmp(userbot, chan)
