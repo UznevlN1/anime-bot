@@ -53,14 +53,42 @@ def build_rtmp_url(url, key):
     return base + key
 
 
-async def start_ffmpeg_relay(local_path, rtmp_url):
-    """ffmpeg jarayonini fon rejimida ishga tushiradi, subprocess obyektini qaytaradi."""
-    cmd = [
-        FFMPEG_PATH, "-nostdin", "-loglevel", "verbose",
+def _build_relay_cmd(local_path, rtmp_url, reencode_video=True):
+    """ffmpeg buyrug'ini quradi.
+
+    reencode_video=False bo'lsa video "-c copy" bilan uzatiladi (tezkor, CPU
+    tejaydi). Ammo ba'zi MP4 fayllarda kadr balandligi 16 ga karrali bo'lmasa
+    (masalan 1280x694 -> ichkarida 1280x704 ga to'ldiriladi) "-c copy" bilan
+    to'g'ridan-to'g'ri FLV'ga yozish johnvansickle statik ffmpeg build'larida
+    SIGSEGV (-11) bilan qulashi ma'lum muammo — sabab FLV muxer shu "g'alati"
+    o'lchamli oqim uchun original SPS/extradata'ni to'g'ri yoza olmasligi.
+    Yechim: video qayta kodlash (re-encode) — bu toza SPS/PPS bilan yangi
+    extradata yaratadi va muxer qulamaydi.
+    """
+    video_codec = (
+        ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"]
+        if reencode_video else ["-c:v", "copy"]
+    )
+    return [
+        FFMPEG_PATH, "-nostdin", "-loglevel", "warning",
         "-re", "-i", local_path,
-        "-c", "copy",
+        *video_codec,
+        "-c:a", "aac", "-b:a", "128k", "-bsf:a", "aac_adtstoasc",
+        "-avoid_negative_ts", "make_zero",
         "-f", "flv", rtmp_url,
     ]
+
+
+async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
+    """ffmpeg jarayonini fon rejimida ishga tushiradi, subprocess obyektini qaytaradi.
+
+    reencode_video=True (standart) — video qayta kodlanadi, CPU'ni ko'proq band
+    qiladi, lekin g'alati o'lchamli/metadata'li fayllarda SIGSEGV'ni oldini
+    oladi. Agar barcha fayllaringiz "toza" (standart, 16 ga karrali) o'lchamda
+    bo'lsa, tezroq ishlashi uchun reencode_video=False berib stream-copy
+    rejimiga o'tishingiz mumkin.
+    """
+    cmd = _build_relay_cmd(local_path, rtmp_url, reencode_video=reencode_video)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
