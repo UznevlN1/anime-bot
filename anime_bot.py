@@ -180,7 +180,7 @@ import episode_relay
 
 # Botda saqlangan epizodni RTMP orqali jonli efirga uzatish holati (faqat bitta
 # epizod bir vaqtning o'zida uzatilishi mumkin).
-_live_relay = {"proc": None, "path": None, "episode_id": None, "skip_requested": False}
+_live_relay = {"proc": None, "path": None, "episode_id": None, "skip_requested": False, "status_msg": None}
 
 
 # ===================== STATES =====================
@@ -3709,17 +3709,15 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         RETRY_LIMIT = 3
         retry_count = 0
         first_pass = True
-        transition_msg = None  # oxirgi "X-qism tugadi, Y-ga o'tilmoqda..." xabari — bir joyni
-        # egallab turishi uchun har safar yangisini yuborishdan oldin eskisi o'chiriladi.
+        _live_relay["status_msg"] = status_msg
 
         async def _send_transition(text, parse_mode=None):
-            nonlocal transition_msg
-            if transition_msg is not None:
-                try:
-                    await transition_msg.delete()
-                except Exception:
-                    pass
-            transition_msg = await status_msg.answer(text, parse_mode=parse_mode)
+            # Yangi xabar yubormasdan, bitta status_msg'ni tahrirlaydi — shu bilan
+            # kanalda "X-qism tugadi..." xabarlari to'planib qolmaydi.
+            try:
+                await status_msg.edit_text(text, parse_mode=parse_mode)
+            except Exception:
+                pass
 
         while True:
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
@@ -3825,7 +3823,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     f"<code>{stderr[-500:].decode(errors='ignore')}</code>",
                     parse_mode="HTML"
                 )
-                _live_relay.update({"proc": None, "path": None, "episode_id": None})
+                _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
                 return
 
             retry_count = 0  # muvaffaqiyatli yoki qo'lda "keyingisi" bosilgan -> hisoblagich tozalanadi
@@ -3835,7 +3833,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     await _send_transition("ℹ️ Bu film — keyingi qism mavjud emas.")
                 else:
                     await _send_transition(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
-                _live_relay.update({"proc": None, "path": None, "episode_id": None})
+                _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
                 return
 
             episodes = await asyncio.to_thread(db.get_episodes, current_ep["anime_id"])
@@ -3848,7 +3846,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                      else f"✅ {current_ep['episode_number']}-qism uzatish tugadi. ")
                     + "Keyingi qism hali yuklanmagan, efir shu bilan yakunlandi."
                 )
-                _live_relay.update({"proc": None, "path": None, "episode_id": None})
+                _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
                 return
 
             await _send_transition(
@@ -3866,7 +3864,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
     finally:
         episode_relay.cleanup_file(path)
         if _live_relay.get("path") == path:
-            _live_relay.update({"proc": None, "path": None, "episode_id": None})
+            _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
 
 @dp.callback_query(F.data == "live_stop_relay")
 async def live_stop_relay(call: CallbackQuery):
@@ -3879,8 +3877,15 @@ async def live_stop_relay(call: CallbackQuery):
     await episode_relay.stop_ffmpeg_relay(proc)
     episode_relay.cleanup_file(_live_relay.get("path"))
     await log_admin_action(call.from_user, "Epizod uzatishni to'xtatdi", f"Episode ID: {_live_relay.get('episode_id')}")
-    _live_relay.update({"proc": None, "path": None, "episode_id": None})
+    status_msg = _live_relay.get("status_msg")
+    _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
     await call.answer("⏹ Epizod uzatish to'xtatildi", show_alert=True)
+    if status_msg:
+        try:
+            await status_msg.edit_text("⏹ Epizod uzatish to'xtatildi.", reply_markup=None)
+            return
+        except Exception:
+            pass
     await call.message.answer("⏹ Epizod uzatish to'xtatildi.")
 
 @dp.callback_query(F.data == "live_skip_relay")
