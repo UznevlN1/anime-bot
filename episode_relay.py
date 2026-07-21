@@ -15,6 +15,7 @@ Ishlash tartibi:
 """
 
 import asyncio
+import glob
 import logging
 import os
 import shutil
@@ -22,6 +23,52 @@ import tempfile
 import time
 
 logger = logging.getLogger(__name__)
+
+# ===================== OVERLAY (anime nomi + qism) UCHUN SHRIFT =====================
+# Video ustiga matn "kuydirish" (ffmpeg drawtext) uchun .ttf shrift fayli kerak.
+# Avval eng ko'p tarqalgan yo'llarni tekshiramiz, topilmasa tizimdagi istalgan
+# botqalin (bold) shriftni qidiramiz. Hech narsa topilmasa, overlay funksiyasi
+# ogohlantirish bilan o'chirib qo'yiladi (efir baribir davom etadi, faqat
+# matnsiz) — Dockerfile'ga masalan "fonts-dejavu-core" paketini qo'shish tavsiya
+# etiladi.
+_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+]
+
+
+def _find_overlay_font():
+    for path in _FONT_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    for pattern in ("/usr/share/fonts/**/*Bold*.ttf", "/usr/share/fonts/**/*bold*.ttf"):
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            return matches[0]
+    return None
+
+
+OVERLAY_FONT = _find_overlay_font()
+if OVERLAY_FONT:
+    logger.info(f"Overlay uchun shrift topildi: {OVERLAY_FONT}")
+else:
+    logger.warning(
+        "Overlay uchun .ttf shrift fayli topilmadi — anime nomi/qism matni videoga "
+        "yozilmaydi. Dockerfile'ga 'apt-get install -y fonts-dejavu-core' qo'shing."
+    )
+
+
+def _escape_drawtext(text):
+    """ffmpeg drawtext filtri uchun matnni xavfsiz qiladi (filtr sintaksisini
+    buzadigan belgilarni escape qiladi: backslash, ikki nuqta, foiz, qo'shtirnoq)."""
+    return (
+        (text or "")
+        .replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("%", "\\%")
+        .replace("'", "\u2019")  # to'g'ridan-to'g'ri qo'shtirnoq filtr ichida muammo qiladi
+    )
 
 # Avval TIZIM ffmpeg'ini qidiramiz (Dockerfile orqali apt-get bilan
 # o'rnatilgan). Bu imageio_ffmpeg'ning statik build'idan ustun turadi,
@@ -72,8 +119,15 @@ def build_rtmp_url(url, key):
     return base + key
 
 
-def _build_relay_cmd(local_path, rtmp_url, reencode_video=True, fast_preset=False, scale_720p=False):
+def _build_relay_cmd(local_path, rtmp_url, reencode_video=True, fast_preset=False, scale_720p=False, overlay_text=None):
     """ffmpeg buyrug'ini quradi.
+
+    overlay_text berilsa (va shrift topilgan bo'lsa), matn (masalan anime nomi
+    va qism raqami) videoning chap-pastki burchagiga fon (qora, yarim shaffof)
+    bilan "kuydiriladi". DIQQAT: matnni kuydirish uchun video albatta qayta
+    kodlanishi kerak (drawtext filtri "-c copy" bilan ishlamaydi) — shu sabab
+    overlay_text berilganda reencode_video har doim True bo'lishi kerak
+    (chaqiruvchi tomonda ta'minlanadi, start_relay_auto'ga qarang).
 
     reencode_video=False bo'lsa video "-c copy" bilan uzatiladi (tezkor, CPU
     tejaydi). Ammo ba'zi MP4 fayllarda kadr balandligi 16 ga karrali bo'lmasa
@@ -107,7 +161,17 @@ def _build_relay_cmd(local_path, rtmp_url, reencode_video=True, fast_preset=Fals
             "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
             "-maxrate", maxrate, "-bufsize", bufsize,
         ]
-        vf = ["-vf", "scale=-2:min(720\\,ih)"] if scale_720p else []
+        vf_filters = []
+        if scale_720p:
+            vf_filters.append("scale=-2:min(720\\,ih)")
+        if overlay_text and OVERLAY_FONT:
+            escaped = _escape_drawtext(overlay_text)
+            vf_filters.append(
+                f"drawtext=fontfile={OVERLAY_FONT}:text='{escaped}':"
+                "fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=12:"
+                "x=24:y=h-th-24"
+            )
+        vf = ["-vf", ",".join(vf_filters)] if vf_filters else []
     else:
         video_codec = ["-c:v", "copy"]
         vf = []
@@ -145,7 +209,7 @@ async def _drain_stderr(proc, tail_holder, max_tail=4000):
     tail_holder["tail"] = buf
 
 
-async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True, fast_preset=False, scale_720p=False):
+async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True, fast_preset=False, scale_720p=False, overlay_text=None):
     """ffmpeg jarayonini fon rejimida ishga tushiradi, subprocess obyektini qaytaradi.
 
     reencode_video=True (standart) — video qayta kodlanadi, CPU'ni ko'proq band
@@ -157,6 +221,9 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True, fast_pre
     fast_preset va scale_720p — qarang: _build_relay_cmd. Kuchsiz serverlarda
     (masalan Render bepul tarifi) qotishlarni kamaytirish uchun ishlatiladi.
 
+    overlay_text berilsa, matn (anime nomi + qism raqami) videoga kuydiriladi
+    — bu reencode_video=True talab qiladi (chaqiruvchida ta'minlanishi kerak).
+
     Qaytaradi: (proc, stderr_tail_holder). stderr_tail_holder — jarayon
     tugagach ["tail"] kaliti orqali oxirgi log matnini o'z ichiga oladigan dict
     (proc.stderr endi to'g'ridan-to'g'ri o'qilmaydi, chunki uni fon vazifasi
@@ -165,6 +232,7 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True, fast_pre
     cmd = _build_relay_cmd(
         local_path, rtmp_url,
         reencode_video=reencode_video, fast_preset=fast_preset, scale_720p=scale_720p,
+        overlay_text=overlay_text,
     )
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -176,7 +244,7 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True, fast_pre
     return proc, tail_holder
 
 
-async def start_relay_auto(local_path, rtmp_url, startup_check_secs=4):
+async def start_relay_auto(local_path, rtmp_url, startup_check_secs=4, overlay_text=None):
     """Kuchsiz CPU'li serverlar (masalan Render bepul tarifi) uchun avtomatik
     rejim tanlovchi ishga tushirish funksiyasi.
 
@@ -191,9 +259,21 @@ async def start_relay_auto(local_path, rtmp_url, startup_check_secs=4):
     3) Agar startup_check_secs ichida jarayon davom etayotgan bo'lsa —
        demak copy rejimi ishladi, shu holicha davom ettiriladi.
 
+    overlay_text berilsa (anime nomi + qism raqami), matnni videoga kuydirish
+    "-c copy" bilan mumkin emasligi sababli, stream-copy urinishi butunlay
+    o'tkazib yuboriladi va to'g'ridan-to'g'ri reencode (ultrafast, 720p)
+    rejimida ishga tushiriladi.
+
     Qaytaradi: (proc, stderr_tail_holder, used_mode) — used_mode "copy" yoki
     "reencode".
     """
+    if overlay_text:
+        proc, tail = await start_ffmpeg_relay(
+            local_path, rtmp_url, reencode_video=True, fast_preset=True, scale_720p=True,
+            overlay_text=overlay_text,
+        )
+        return proc, tail, "reencode"
+
     proc, tail = await start_ffmpeg_relay(local_path, rtmp_url, reencode_video=False)
     try:
         await asyncio.wait_for(proc.wait(), timeout=startup_check_secs)

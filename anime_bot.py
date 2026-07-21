@@ -180,7 +180,7 @@ import episode_relay
 
 # Botda saqlangan epizodni RTMP orqali jonli efirga uzatish holati (faqat bitta
 # epizod bir vaqtning o'zida uzatilishi mumkin).
-_live_relay = {"proc": None, "path": None, "episode_id": None}
+_live_relay = {"proc": None, "path": None, "episode_id": None, "skip_requested": False}
 
 
 # ===================== STATES =====================
@@ -3701,8 +3701,14 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         # HAR BIR QISM UCHUN TSIKL: agar anime turi "serial" bo'lsa va joriy
         # qism muvaffaqiyatli uzatib bo'lingandan so'ng keyingi qism mavjud
         # bo'lsa, avtomatik ravishda o'sha qismga o'tiladi. Film uchun (yoki
-        # keyingi qism topilmasa, xato yuz bersa, admin qo'lda to'xtatsa)
-        # tsikl bir marta ishlab tugaydi.
+        # keyingi qism topilmasa, admin qo'lda to'xtatsa) tsikl bir marta
+        # ishlab tugaydi. Xato yuz bersa, shu qism avtomatik 1 marta qayta
+        # urinib ko'riladi (RETRY_LIMIT) — kuchsiz serverlarda (masalan
+        # Render bepul tarifi) vaqti-vaqti bilan yuzaga keladigan vaqtinchalik
+        # nosozliklar (masalan RTMP ulanish uzilishi) uchun.
+        RETRY_LIMIT = 2
+        retry_count = 0
+        first_pass = True
         while True:
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
             media = msg.video or msg.document or msg.animation
@@ -3721,18 +3727,46 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                         pass
 
             path = await episode_relay.download_episode(pyro, msg, progress_cb=_progress)
-            proc, stderr_tail, relay_mode = await episode_relay.start_relay_auto(path, rtmp_url)
+
+            if not first_pass:
+                # MUHIM: bu birinchi qism EMAS — demak yo (a) oldingi qism xato bilan
+                # tugab qayta urinilmoqda, yoki (b) serial avtomatik keyingi qismga
+                # o'tmoqda. Ikkala holatda ham video yuklanib bo'lguncha (bir necha
+                # soniya-daqiqa) RTMP oqimga hech narsa yuborilmagani uchun Telegram
+                # eski sessiyani "eskirgan"/bekor deb topib, keyingi push'ni rad etishi
+                # (yoki oqimni "qotirib" qo'yishi) mumkin. Shu sabab har safar (birinchi
+                # qismdan tashqari) ffmpeg ishga tushishidan oldin YANGI RTMP url/key
+                # so'raymiz. Yangilab bo'lmasa, eski rtmp_url bilan davom etiladi.
+                try:
+                    url, key = await userbot_stream.start_rtmp(userbot, chan)
+                    rtmp_url = episode_relay.build_rtmp_url(url, key)
+                    logger.info(f"[live relay] RTMP sessiyasi yangilandi ({current_ep['episode_number']}-qism oldidan).")
+                except Exception as e:
+                    logger.warning(f"[live relay] RTMP sessiyasini yangilab bo'lmadi, eskisi bilan davom etiladi: {e}")
+            first_pass = False
+
+            overlay_text = (
+                f"{anime['title']} — {current_ep['episode_number']}-qism" if anime
+                else f"{current_ep['episode_number']}-qism"
+            )
+            proc, stderr_tail, relay_mode = await episode_relay.start_relay_auto(
+                path, rtmp_url, overlay_text=overlay_text
+            )
             _live_relay.update({"proc": proc, "path": path, "episode_id": current_ep["id"]})
 
             mode_note = (
                 "tezkor rejim (stream-copy)" if relay_mode == "copy"
                 else "qayta kodlash rejimi (ultrafast, 720p)"
             )
+            control_rows = [[InlineKeyboardButton(text="⏹ To'xtatish", callback_data="live_stop_relay", style="danger")]]
+            if is_serial:
+                control_rows.insert(0, [InlineKeyboardButton(text="⏭ Keyingi qism", callback_data="live_skip_relay")])
             await status_msg.edit_text(
                 f"🔴 <b>{current_ep['episode_number']}-qism jonli efirga uzatilmoqda!</b> ({mode_note})\n\n"
                 f"Kanal video-chatini oching — bir necha soniyada video ko'rina boshlaydi."
                 + (f"\n\nℹ️ Bu serial — qism tugagach keyingisi avtomatik boshlanadi." if is_serial else ""),
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=control_rows)
             )
             await log_admin_action(admin_user, "Epizodni efirga qo'ydi", f"Episode ID: {current_ep['id']}")
 
@@ -3747,19 +3781,43 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 # keyingi qismga o'tilmaydi.
                 return
 
-            if returncode != 0:
+            skip_requested = _live_relay.get("skip_requested", False)
+            _live_relay["skip_requested"] = False
+
+            if not skip_requested and returncode != 0:
+                if retry_count < RETRY_LIMIT:
+                    retry_count += 1
+                    stderr = stderr_tail.get("tail", b"")
+                    logger.warning(
+                        f"[live relay] {current_ep['episode_number']}-qism xato bilan tugadi "
+                        f"(kod {returncode}), {retry_count}/{RETRY_LIMIT} qayta urinilmoqda. "
+                        f"Log: {stderr[-500:]}"
+                    )
+                    await status_msg.answer(
+                        f"⚠️ {current_ep['episode_number']}-qismda vaqtinchalik xato yuz berdi, "
+                        f"qayta urinilmoqda..."
+                    )
+                    await asyncio.sleep(2)
+                    continue  # xuddi shu qismni qayta yuklab, qayta uzatadi (RTMP sessiyasi
+                    # pastda, tsikl boshida, har bir urinish uchun bir xilda yangilanadi)
                 stderr = stderr_tail.get("tail", b"")
                 logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-3000:]}")
                 await status_msg.answer(
-                    f"❌ {current_ep['episode_number']}-qism uzatishda xato (kod: {returncode}).\n\n"
+                    f"❌ {current_ep['episode_number']}-qism uzatishda xato (kod: {returncode}), "
+                    f"qayta urinishlar ham tugadi.\n\n"
                     f"<code>{stderr[-500:].decode(errors='ignore')}</code>",
                     parse_mode="HTML"
                 )
                 _live_relay.update({"proc": None, "path": None, "episode_id": None})
                 return
 
+            retry_count = 0  # muvaffaqiyatli yoki qo'lda "keyingisi" bosilgan -> hisoblagich tozalanadi
+
             if not is_serial:
-                await status_msg.answer(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
+                if skip_requested:
+                    await status_msg.answer("ℹ️ Bu film — keyingi qism mavjud emas.")
+                else:
+                    await status_msg.answer(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
                 _live_relay.update({"proc": None, "path": None, "episode_id": None})
                 return
 
@@ -3769,15 +3827,17 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             )
             if not next_ep:
                 await status_msg.answer(
-                    f"✅ {current_ep['episode_number']}-qism uzatish tugadi. "
-                    f"Keyingi qism hali yuklanmagan, efir shu bilan yakunlandi."
+                    (f"⏭ {current_ep['episode_number']}-qism o'tkazib yuborildi. " if skip_requested
+                     else f"✅ {current_ep['episode_number']}-qism uzatish tugadi. ")
+                    + "Keyingi qism hali yuklanmagan, efir shu bilan yakunlandi."
                 )
                 _live_relay.update({"proc": None, "path": None, "episode_id": None})
                 return
 
             await status_msg.answer(
-                f"➡️ {current_ep['episode_number']}-qism tugadi, "
-                f"{next_ep['episode_number']}-qismga avtomatik o'tilmoqda..."
+                (f"⏭ {current_ep['episode_number']}-qism o'tkazib yuborildi, " if skip_requested
+                 else f"➡️ {current_ep['episode_number']}-qism tugadi, ")
+                + f"{next_ep['episode_number']}-qismga o'tilmoqda..."
             )
             current_ep = next_ep
     except Exception as e:
@@ -3805,6 +3865,19 @@ async def live_stop_relay(call: CallbackQuery):
     _live_relay.update({"proc": None, "path": None, "episode_id": None})
     await call.answer("⏹ Epizod uzatish to'xtatildi", show_alert=True)
     await call.message.answer("⏹ Epizod uzatish to'xtatildi.")
+
+@dp.callback_query(F.data == "live_skip_relay")
+async def live_skip_relay(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    proc = _live_relay.get("proc")
+    if not proc:
+        await call.answer("ℹ️ Hozir hech narsa uzatilmayapti", show_alert=True)
+        return
+    _live_relay["skip_requested"] = True
+    await episode_relay.stop_ffmpeg_relay(proc)
+    await log_admin_action(call.from_user, "Qismni o'tkazib yubordi", f"Episode ID: {_live_relay.get('episode_id')}")
+    await call.answer("⏭ Keyingi qismga o'tilmoqda...", show_alert=True)
 
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
