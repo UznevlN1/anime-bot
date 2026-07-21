@@ -17,17 +17,36 @@ Ishlash tartibi:
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
 import time
 
 logger = logging.getLogger(__name__)
 
-try:
-    import imageio_ffmpeg
-    FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
-except Exception as e:
-    logger.warning(f"imageio_ffmpeg topilmadi ({e}), tizimdagi 'ffmpeg' ishlatiladi.")
-    FFMPEG_PATH = "ffmpeg"
+# Avval TIZIM ffmpeg'ini qidiramiz (Dockerfile orqali apt-get bilan
+# o'rnatilgan). Bu imageio_ffmpeg'ning statik build'idan ustun turadi,
+# chunki statik build ba'zi konteyner muhitlarida (masalan Render.com)
+# SIGSEGV (-11) bilan qulab tushishi kuzatilgan — sabab hali aniq
+# emas, lekin tizim ffmpeg'i bunday muammo bermaydi. Agar tizim
+# ffmpeg topilmasa (masalan lokal Windows/macOS muhitida ishlab
+# chiqish paytida), imageio_ffmpeg'ga qaytamiz.
+_system_ffmpeg = shutil.which("ffmpeg")
+if _system_ffmpeg:
+    FFMPEG_PATH = _system_ffmpeg
+    logger.info(f"Tizim ffmpeg ishlatiladi: {FFMPEG_PATH}")
+else:
+    try:
+        import imageio_ffmpeg
+        FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+        logger.warning(
+            f"Tizim ffmpeg topilmadi, imageio_ffmpeg'ning statik build'i "
+            f"ishlatiladi ({FFMPEG_PATH}). Konteyner muhitida bu SIGSEGV "
+            f"berishi mumkin — Dockerfile orqali 'apt-get install ffmpeg' "
+            f"qilish tavsiya etiladi."
+        )
+    except Exception as e:
+        logger.warning(f"imageio_ffmpeg ham topilmadi ({e}), 'ffmpeg' nomi bilan ishga tushirishga urinamiz.")
+        FFMPEG_PATH = "ffmpeg"
 
 
 async def download_episode(pyro_client, message, progress_cb=None):
