@@ -3706,9 +3706,21 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         # urinib ko'riladi (RETRY_LIMIT) — kuchsiz serverlarda (masalan
         # Render bepul tarifi) vaqti-vaqti bilan yuzaga keladigan vaqtinchalik
         # nosozliklar (masalan RTMP ulanish uzilishi) uchun.
-        RETRY_LIMIT = 2
+        RETRY_LIMIT = 3
         retry_count = 0
         first_pass = True
+        transition_msg = None  # oxirgi "X-qism tugadi, Y-ga o'tilmoqda..." xabari — bir joyni
+        # egallab turishi uchun har safar yangisini yuborishdan oldin eskisi o'chiriladi.
+
+        async def _send_transition(text, parse_mode=None):
+            nonlocal transition_msg
+            if transition_msg is not None:
+                try:
+                    await transition_msg.delete()
+                except Exception:
+                    pass
+            transition_msg = await status_msg.answer(text, parse_mode=parse_mode)
+
         while True:
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
             media = msg.video or msg.document or msg.animation
@@ -3738,6 +3750,9 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 # qismdan tashqari) ffmpeg ishga tushishidan oldin YANGI RTMP url/key
                 # so'raymiz. Yangilab bo'lmasa, eski rtmp_url bilan davom etiladi.
                 try:
+                    await asyncio.sleep(2)  # oldingi RTMP ulanish serverda to'liq
+                    # yopilishi uchun qisqa pauza — aks holda Telegram yangi
+                    # ulanishni "Input/output error" bilan rad etishi kuzatildi.
                     url, key = await userbot_stream.start_rtmp(userbot, chan)
                     rtmp_url = episode_relay.build_rtmp_url(url, key)
                     logger.info(f"[live relay] RTMP sessiyasi yangilandi ({current_ep['episode_number']}-qism oldidan).")
@@ -3793,16 +3808,18 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                         f"(kod {returncode}), {retry_count}/{RETRY_LIMIT} qayta urinilmoqda. "
                         f"Log: {stderr[-500:]}"
                     )
-                    await status_msg.answer(
+                    await _send_transition(
                         f"⚠️ {current_ep['episode_number']}-qismda vaqtinchalik xato yuz berdi, "
                         f"qayta urinilmoqda..."
                     )
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(2 * retry_count)  # 1-urinish: 2s, 2-urinish: 4s,
+                    # 3-urinish: 6s — Telegram RTMP serveri tez-tez ulanishlardan keyin
+                    # ko'proq "sovish" vaqtini talab qilishi kuzatilgan.
                     continue  # xuddi shu qismni qayta yuklab, qayta uzatadi (RTMP sessiyasi
                     # pastda, tsikl boshida, har bir urinish uchun bir xilda yangilanadi)
                 stderr = stderr_tail.get("tail", b"")
                 logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-3000:]}")
-                await status_msg.answer(
+                await _send_transition(
                     f"❌ {current_ep['episode_number']}-qism uzatishda xato (kod: {returncode}), "
                     f"qayta urinishlar ham tugadi.\n\n"
                     f"<code>{stderr[-500:].decode(errors='ignore')}</code>",
@@ -3815,9 +3832,9 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
 
             if not is_serial:
                 if skip_requested:
-                    await status_msg.answer("ℹ️ Bu film — keyingi qism mavjud emas.")
+                    await _send_transition("ℹ️ Bu film — keyingi qism mavjud emas.")
                 else:
-                    await status_msg.answer(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
+                    await _send_transition(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
                 _live_relay.update({"proc": None, "path": None, "episode_id": None})
                 return
 
@@ -3826,7 +3843,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 (e for e in episodes if e["episode_number"] == current_ep["episode_number"] + 1), None
             )
             if not next_ep:
-                await status_msg.answer(
+                await _send_transition(
                     (f"⏭ {current_ep['episode_number']}-qism o'tkazib yuborildi. " if skip_requested
                      else f"✅ {current_ep['episode_number']}-qism uzatish tugadi. ")
                     + "Keyingi qism hali yuklanmagan, efir shu bilan yakunlandi."
@@ -3834,7 +3851,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 _live_relay.update({"proc": None, "path": None, "episode_id": None})
                 return
 
-            await status_msg.answer(
+            await _send_transition(
                 (f"⏭ {current_ep['episode_number']}-qism o'tkazib yuborildi, " if skip_requested
                  else f"➡️ {current_ep['episode_number']}-qism tugadi, ")
                 + f"{next_ep['episode_number']}-qismga o'tilmoqda..."
