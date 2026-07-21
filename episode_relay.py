@@ -72,7 +72,7 @@ def build_rtmp_url(url, key):
     return base + key
 
 
-def _build_relay_cmd(local_path, rtmp_url, reencode_video=True):
+def _build_relay_cmd(local_path, rtmp_url, reencode_video=True, fast_preset=False, scale_720p=False):
     """ffmpeg buyrug'ini quradi.
 
     reencode_video=False bo'lsa video "-c copy" bilan uzatiladi (tezkor, CPU
@@ -83,14 +83,38 @@ def _build_relay_cmd(local_path, rtmp_url, reencode_video=True):
     o'lchamli oqim uchun original SPS/extradata'ni to'g'ri yoza olmasligi.
     Yechim: video qayta kodlash (re-encode) — bu toza SPS/PPS bilan yangi
     extradata yaratadi va muxer qulamaydi.
+
+    fast_preset=True bo'lsa "ultrafast" preset ishlatiladi (CPU kuchsiz
+    serverlar, masalan Render bepul tarifi uchun — "veryfast" ham real
+    vaqtdan orqada qolib, efirni "qotirib" qo'yishi mumkin).
+
+    scale_720p=True bo'lsa video balandligi 720px dan oshmasligi uchun
+    pastga masshtablanadi (kattalashtirilmaydi) — CPU yukini yanada
+    kamaytiradi.
+
+    Har doim (reencode bo'lsa) "-g"/"-keyint_min" bilan har ~2 soniyada
+    (30fps'da 60 kadr) majburiy keyframe qo'yiladi — Telegram video-chat
+    RTMP qabul qiluvchisi buni kutadi; aks holda tarmoqda ozgina uzilish
+    bo'lganda ekran keyingi keyframegacha "qotib" qoladi. "-maxrate"/
+    "-bufsize" esa bitrate sakrashlarini cheklab, bufer to'lib "jamming"
+    bo'lib qolishining oldini oladi.
     """
-    video_codec = (
-        ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"]
-        if reencode_video else ["-c:v", "copy"]
-    )
+    if reencode_video:
+        preset = "ultrafast" if fast_preset else "veryfast"
+        maxrate, bufsize = ("2000k", "4000k") if scale_720p else ("3500k", "7000k")
+        video_codec = [
+            "-c:v", "libx264", "-preset", preset, "-pix_fmt", "yuv420p",
+            "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+            "-maxrate", maxrate, "-bufsize", bufsize,
+        ]
+        vf = ["-vf", "scale=-2:min(720\\,ih)"] if scale_720p else []
+    else:
+        video_codec = ["-c:v", "copy"]
+        vf = []
     return [
         FFMPEG_PATH, "-nostdin", "-loglevel", "error",
         "-re", "-i", local_path,
+        *vf,
         *video_codec,
         "-c:a", "aac", "-b:a", "128k", "-bsf:a", "aac_adtstoasc",
         "-avoid_negative_ts", "make_zero",
@@ -121,7 +145,7 @@ async def _drain_stderr(proc, tail_holder, max_tail=4000):
     tail_holder["tail"] = buf
 
 
-async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
+async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True, fast_preset=False, scale_720p=False):
     """ffmpeg jarayonini fon rejimida ishga tushiradi, subprocess obyektini qaytaradi.
 
     reencode_video=True (standart) — video qayta kodlanadi, CPU'ni ko'proq band
@@ -130,12 +154,18 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
     bo'lsa, tezroq ishlashi uchun reencode_video=False berib stream-copy
     rejimiga o'tishingiz mumkin.
 
+    fast_preset va scale_720p — qarang: _build_relay_cmd. Kuchsiz serverlarda
+    (masalan Render bepul tarifi) qotishlarni kamaytirish uchun ishlatiladi.
+
     Qaytaradi: (proc, stderr_tail_holder). stderr_tail_holder — jarayon
     tugagach ["tail"] kaliti orqali oxirgi log matnini o'z ichiga oladigan dict
     (proc.stderr endi to'g'ridan-to'g'ri o'qilmaydi, chunki uni fon vazifasi
     allaqachon uzluksiz iste'mol qilib turadi).
     """
-    cmd = _build_relay_cmd(local_path, rtmp_url, reencode_video=reencode_video)
+    cmd = _build_relay_cmd(
+        local_path, rtmp_url,
+        reencode_video=reencode_video, fast_preset=fast_preset, scale_720p=scale_720p,
+    )
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -144,6 +174,47 @@ async def start_ffmpeg_relay(local_path, rtmp_url, reencode_video=True):
     tail_holder = {"tail": b""}
     asyncio.create_task(_drain_stderr(proc, tail_holder))
     return proc, tail_holder
+
+
+async def start_relay_auto(local_path, rtmp_url, startup_check_secs=4):
+    """Kuchsiz CPU'li serverlar (masalan Render bepul tarifi) uchun avtomatik
+    rejim tanlovchi ishga tushirish funksiyasi.
+
+    1) Avval CPU deyarli ishlatmaydigan stream-copy ("-c copy") rejimida
+       urinadi — bu Render bepul tarifidagi "qotish" muammosining eng
+       keng tarqalgan sababi (real vaqt kodlash CPU'dan orqada qolishi)
+       uchun eng samarali yechim.
+    2) `startup_check_secs` soniya kutib turadi: agar shu vaqt ichida ffmpeg
+       xato kod bilan tezda tugasa (odatda "g'alati" o'lchamli video sababli
+       FLV muxer rad etganda yuz beradi), avtomatik ravishda qayta kodlash
+       (reencode, "ultrafast" preset + 720p'ga pasaytirish) rejimiga o'tadi.
+    3) Agar startup_check_secs ichida jarayon davom etayotgan bo'lsa —
+       demak copy rejimi ishladi, shu holicha davom ettiriladi.
+
+    Qaytaradi: (proc, stderr_tail_holder, used_mode) — used_mode "copy" yoki
+    "reencode".
+    """
+    proc, tail = await start_ffmpeg_relay(local_path, rtmp_url, reencode_video=False)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=startup_check_secs)
+    except asyncio.TimeoutError:
+        # startup_check_secs dan ko'proq ishlayapti -> copy rejimi barqaror ishlayapti
+        return proc, tail, "copy"
+
+    # Jarayon tezda tugadi
+    if proc.returncode == 0:
+        # Juda qisqa video muvaffaqiyatli tugagan bo'lishi mumkin
+        return proc, tail, "copy"
+
+    logger.warning(
+        f"[relay] stream-copy rejimi xato bilan tez tugadi (kod {proc.returncode}), "
+        f"reencode (ultrafast, 720p) rejimiga avtomatik o'tilmoqda. "
+        f"Log: {tail.get('tail', b'')[-500:]}"
+    )
+    proc, tail = await start_ffmpeg_relay(
+        local_path, rtmp_url, reencode_video=True, fast_preset=True, scale_720p=True,
+    )
+    return proc, tail, "reencode"
 
 
 async def stop_ffmpeg_relay(proc):
