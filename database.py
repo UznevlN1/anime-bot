@@ -281,6 +281,45 @@ def init_db():
         value TEXT
     )""")
 
+    # ===== JONLI EFIR TARIXI (har bir uzatilgan qism/film logi) =====
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS live_broadcast_log (
+        id SERIAL PRIMARY KEY,
+        anime_id INTEGER,
+        episode_id INTEGER,
+        episode_number INTEGER,
+        title TEXT,
+        started_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+        ended_at TEXT,
+        peak_viewers INTEGER,
+        status TEXT DEFAULT 'running'
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_live_log_started ON live_broadcast_log(started_at DESC)")
+
+    # ===== ANIME OBUNALARI (foydalanuvchi "🔔 Xabardor qil" bossa, shu anime
+    # bo'yicha yangi qism/jonli efir boshlanganda shaxsiy xabar oladi) =====
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS anime_subscriptions (
+        user_id BIGINT NOT NULL,
+        anime_id INTEGER NOT NULL,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+        PRIMARY KEY (user_id, anime_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_anime_subs_anime_id ON anime_subscriptions(anime_id)")
+
+    # ===== JONLI EFIR AVTOMATIK JADVALI (masalan har kuni soat 20:00 da
+    # tanlangan serialning navbatdagi qismini o'zi boshlaydi) =====
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS live_schedule (
+        id SERIAL PRIMARY KEY,
+        anime_id INTEGER NOT NULL,
+        hour INTEGER NOT NULL,
+        minute INTEGER NOT NULL,
+        enabled INTEGER DEFAULT 1,
+        last_run_date TEXT,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+
     # Premium to'lov so'rovlari (qo'lda tasdiqlash uchun)
     c.execute("""
     CREATE TABLE IF NOT EXISTS premium_payments (
@@ -1533,3 +1572,133 @@ def get_referral_stats(user_id):
     premium_count = c.fetchone()[0]
     put_conn(conn)
     return {"total": total, "premium_count": premium_count}
+
+# ===== JONLI EFIR TARIXI =====
+def log_live_start(anime_id, episode_id, episode_number, title):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO live_broadcast_log (anime_id, episode_id, episode_number, title) "
+        "VALUES (%s,%s,%s,%s) RETURNING id",
+        (anime_id, episode_id, episode_number, title)
+    )
+    log_id = c.fetchone()[0]
+    conn.commit()
+    put_conn(conn)
+    return log_id
+
+def log_live_end(log_id, status="finished", peak_viewers=None):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE live_broadcast_log SET ended_at=to_char(NOW(),'YYYY-MM-DD HH24:MI:SS'), "
+        "status=%s, peak_viewers=COALESCE(%s, peak_viewers) WHERE id=%s",
+        (status, peak_viewers, log_id)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def get_live_history(limit=20):
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute("SELECT * FROM live_broadcast_log ORDER BY id DESC LIMIT %s", (limit,))
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+def get_live_history_for_anime(anime_id, limit=500):
+    """get_live_history'dan farqli o'laroq, faqat shu anime uchun bo'lgan
+    yozuvlarni qaytaradi (boshqa anime'larning jonli efirlari orasiga
+    kirib qolib, so'nggi N ta natijadan chetda qolib ketmasligi uchun)."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        "SELECT * FROM live_broadcast_log WHERE anime_id=%s ORDER BY id DESC LIMIT %s",
+        (anime_id, limit)
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+# ===== ANIME OBUNALARI (shaxsiy eslatmalar) =====
+def toggle_anime_subscription(user_id, anime_id):
+    """Obunani yoqadi/o'chiradi. Yangi holatni (True=obuna bo'ldi) qaytaradi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM anime_subscriptions WHERE user_id=%s AND anime_id=%s", (user_id, anime_id))
+    exists = c.fetchone()
+    if exists:
+        c.execute("DELETE FROM anime_subscriptions WHERE user_id=%s AND anime_id=%s", (user_id, anime_id))
+        active = False
+    else:
+        c.execute(
+            "INSERT INTO anime_subscriptions (user_id, anime_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+            (user_id, anime_id)
+        )
+        active = True
+    conn.commit()
+    put_conn(conn)
+    return active
+
+def is_subscribed_to_anime(user_id, anime_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM anime_subscriptions WHERE user_id=%s AND anime_id=%s", (user_id, anime_id))
+    row = c.fetchone()
+    put_conn(conn)
+    return bool(row)
+
+def get_anime_subscribers(anime_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM anime_subscriptions WHERE anime_id=%s", (anime_id,))
+    ids = [r[0] for r in c.fetchall()]
+    put_conn(conn)
+    return ids
+
+def get_anime_subscriber_count(anime_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM anime_subscriptions WHERE anime_id=%s", (anime_id,))
+    count = c.fetchone()[0]
+    put_conn(conn)
+    return count
+
+# ===== JONLI EFIR AVTOMATIK JADVALI =====
+def add_live_schedule(anime_id, hour, minute):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO live_schedule (anime_id, hour, minute) VALUES (%s,%s,%s) RETURNING id",
+        (anime_id, hour, minute)
+    )
+    sched_id = c.fetchone()[0]
+    conn.commit()
+    put_conn(conn)
+    return sched_id
+
+def remove_live_schedule(schedule_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM live_schedule WHERE id=%s", (schedule_id,))
+    conn.commit()
+    put_conn(conn)
+
+def get_live_schedules():
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        "SELECT ls.*, a.title AS anime_title FROM live_schedule ls "
+        "LEFT JOIN animes a ON a.id = ls.anime_id ORDER BY ls.hour, ls.minute"
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+def mark_schedule_run(schedule_id, date_str):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE live_schedule SET last_run_date=%s WHERE id=%s", (date_str, schedule_id))
+    conn.commit()
+    put_conn(conn)
+

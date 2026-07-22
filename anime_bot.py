@@ -298,6 +298,10 @@ class LiveStreamState(StatesGroup):
 class LiveRelayState(StatesGroup):
     search_query = State()
 
+class LiveScheduleState(StatesGroup):
+    choose_anime = State()
+    waiting_time = State()
+
 async def get_announce_channel():
     """E'lon kanali admin panelida sozlanadi (settings jadvalida saqlanadi).
     Hali sozlanmagan bo'lsa, None qaytaradi — bu holda e'lon yuborilmaydi
@@ -338,9 +342,10 @@ async def announce_to_channel(anime, kind="anime", episode_number=None, episode_
             )
             payload = f"ep_{episode_id}"
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="▶️ Tomosha qilish", url=f"https://t.me/{BOT_USERNAME}?start={payload}")
-        ]])
+        kb_rows = [[InlineKeyboardButton(text="▶️ Tomosha qilish", url=f"https://t.me/{BOT_USERNAME}?start={payload}")]]
+        if await _subscriptions_enabled():
+            kb_rows.append([InlineKeyboardButton(text="🔔 Obuna bo'lish / bekor qilish", callback_data=f"subq_{anime['id']}")])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
         photo_id = anime.get("photo_id")
         if photo_id:
@@ -349,6 +354,53 @@ async def announce_to_channel(anime, kind="anime", episode_number=None, episode_
             await bot.send_message(channel, caption, reply_markup=kb, parse_mode="HTML")
     except Exception as e:
         logger.error(f"[announce_to_channel] e'lon yuborilmadi (kanal={channel}): {e}")
+
+
+async def _subscriptions_enabled():
+    """Admin '🔔 Obuna bo'lish' funksiyasini sozlamalardan yoqib/o'chira oladi.
+    Sozlama umuman kiritilmagan bo'lsa (birinchi marta ishga tushirilganda),
+    funksiya standart holatda YOQILGAN deb hisoblanadi."""
+    val = await asyncio.to_thread(db.get_setting, "subscriptions_enabled")
+    return val != "0"
+
+
+async def notify_anime_subscribers(anime_id, text, exclude_user_id=None):
+    """Shu anime uchun '🔔 Obuna bo'lish' tugmasini bosgan barcha
+    foydalanuvchilarga shaxsiy xabar yuboradi (masalan yangi qism yoki
+    jonli efir boshlanganda). Botni bloklagan foydalanuvchilar jimgina
+    o'tkazib yuboriladi."""
+    if not await _subscriptions_enabled():
+        return
+    user_ids = await asyncio.to_thread(db.get_anime_subscribers, anime_id)
+    for uid in user_ids:
+        if uid == exclude_user_id:
+            continue
+        try:
+            await bot.send_message(uid, text, parse_mode="HTML", disable_web_page_preview=True)
+        except TelegramForbiddenError:
+            pass
+        except Exception as e:
+            logger.warning(f"[subscribers] {uid} ga xabar yuborilmadi: {e}")
+        await asyncio.sleep(0.05)  # Telegram flood-limitiga tegib qolmaslik uchun
+
+
+@dp.callback_query(F.data.regexp(r"^subq_\d+$"))
+async def toggle_anime_subscription_cb(call: CallbackQuery):
+    if not await _subscriptions_enabled():
+        await call.answer("⚠️ Obuna funksiyasi hozircha admin tomonidan o'chirilgan.", show_alert=True)
+        return
+    anime_id = int(call.data.split("_")[1])
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    if not anime:
+        await call.answer("❌ Topilmadi", show_alert=True)
+        return
+    active = await asyncio.to_thread(db.toggle_anime_subscription, call.from_user.id, anime_id)
+    await call.answer(
+        f"🔔 \"{anime['title']}\" uchun obuna yoqildi! Yangi qism yoki jonli "
+        f"efir boshlansa, shaxsiy xabar beramiz." if active
+        else f"🔕 \"{anime['title']}\" uchun obuna bekor qilindi.",
+        show_alert=True
+    )
 
 
 # ===================== YORDAMCHI =====================
@@ -2279,14 +2331,62 @@ async def admin_announce_channel(call: CallbackQuery, state: FSMContext):
     await state.clear()
     current = await asyncio.to_thread(db.get_setting, "announce_channel_id")
     status = f"Joriy kanal: <code>{current}</code>" if current else "Hali sozlanmagan."
+    sub_enabled = await _subscriptions_enabled()
+    sub_status = "🟢 Yoqilgan" if sub_enabled else "🔴 O'chirilgan"
     await call.message.edit_text(
         f"📣 <b>E'lon kanali</b>\n\n"
         f"Yangi anime yoki yangi qism qo'shilganda avtomatik e'lon shu kanalga yuboriladi "
         f"(<b>STORAGE_CHANNEL emas</b> — u faqat xom video fayllar uchun).\n\n"
         f"{status}\n\n"
-        f"⚠️ Bot shu kanalda ADMIN bo'lishi shart, aks holda e'lon yuborilmaydi.",
+        f"⚠️ Bot shu kanalda ADMIN bo'lishi shart, aks holda e'lon yuborilmaydi.\n\n"
+        f"🔔 <b>\"Obuna bo'lish\" tugmasi:</b> {sub_status}\n"
+        f"(E'lon postlarida foydalanuvchilarga ko'rinadigan, yangi qism/jonli "
+        f"efir haqida shaxsiy xabar olish tugmasi)",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Kanalni belgilash/o'zgartirish", callback_data="admin_announce_channel_set", style="success")],
+            [InlineKeyboardButton(
+                text=("🔴 Obunani o'chirish" if sub_enabled else "🟢 Obunani yoqish"),
+                callback_data="admin_toggle_subscriptions",
+                style=("danger" if sub_enabled else "success")
+            )],
+            [InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "admin_toggle_subscriptions")
+async def admin_toggle_subscriptions(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    sub_enabled = await _subscriptions_enabled()
+    new_value = "0" if sub_enabled else "1"
+    await asyncio.to_thread(db.set_setting, "subscriptions_enabled", new_value)
+    await log_admin_action(
+        call.from_user, "Obuna funksiyasini o'zgartirdi",
+        "Yoqildi" if new_value == "1" else "O'chirildi"
+    )
+    await call.answer("🟢 Obuna funksiyasi yoqildi" if new_value == "1" else "🔴 Obuna funksiyasi o'chirildi", show_alert=True)
+
+    current = await asyncio.to_thread(db.get_setting, "announce_channel_id")
+    status = f"Joriy kanal: <code>{current}</code>" if current else "Hali sozlanmagan."
+    sub_enabled = new_value == "1"
+    sub_status = "🟢 Yoqilgan" if sub_enabled else "🔴 O'chirilgan"
+    await call.message.edit_text(
+        f"📣 <b>E'lon kanali</b>\n\n"
+        f"Yangi anime yoki yangi qism qo'shilganda avtomatik e'lon shu kanalga yuboriladi "
+        f"(<b>STORAGE_CHANNEL emas</b> — u faqat xom video fayllar uchun).\n\n"
+        f"{status}\n\n"
+        f"⚠️ Bot shu kanalda ADMIN bo'lishi shart, aks holda e'lon yuborilmaydi.\n\n"
+        f"🔔 <b>\"Obuna bo'lish\" tugmasi:</b> {sub_status}\n"
+        f"(E'lon postlarida foydalanuvchilarga ko'rinadigan, yangi qism/jonli "
+        f"efir haqida shaxsiy xabar olish tugmasi)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Kanalni belgilash/o'zgartirish", callback_data="admin_announce_channel_set", style="success")],
+            [InlineKeyboardButton(
+                text=("🔴 Obunani o'chirish" if sub_enabled else "🟢 Obunani yoqish"),
+                callback_data="admin_toggle_subscriptions",
+                style=("danger" if sub_enabled else "success")
+            )],
             [InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")],
         ]),
         parse_mode="HTML"
@@ -2566,6 +2666,11 @@ async def addepi_done(message: Message, state: FSMContext):
                 anime_row, kind="episode",
                 episode_number=data["next_ep"], episode_id=new_ep["id"]
             )
+            asyncio.create_task(notify_anime_subscribers(
+                data["episode_anime_id"],
+                f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!\n\n"
+                f"👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
+            ))
 
     await message.answer(
         f"✅ {len(data['episode_msg_ids'])} ta qism qoshildi!",
@@ -3433,6 +3538,20 @@ async def _live_status_text():
         )
         return "\n".join(lines), channel
     lines.append(f"Kanal: <code>{channel}</code>" if channel else "Kanal hali belgilanmagan.")
+    if channel and userbot:
+        try:
+            chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
+            info = await userbot_stream.get_call_info(userbot, chan)
+            if info["active"]:
+                viewers = (
+                    f" • 👁 {info['participants_count']} kishi tomosha qilmoqda"
+                    if info["participants_count"] is not None else ""
+                )
+                lines.append(f"\n🟢 Video-chat hozir FAOL{viewers}")
+            else:
+                lines.append("\n⚪️ Video-chat hozir yopiq")
+        except Exception as e:
+            logger.warning(f"[live status] holatni tekshirib bo'lmadi: {e}")
     return "\n".join(lines), channel
 
 def _live_stream_keyboard(channel):
@@ -3445,6 +3564,10 @@ def _live_stream_keyboard(channel):
         rows.append([InlineKeyboardButton(text="🎬 Epizodni efirga qo'yish", callback_data="live_pick_ep", style="primary")])
         if _live_relay["proc"] is not None:
             rows.append([InlineKeyboardButton(text="⏹ Epizod uzatishni to'xtatish", callback_data="live_stop_relay", style="danger")])
+    rows.append([
+        InlineKeyboardButton(text="📊 Tarix", callback_data="live_history_0", style="primary"),
+        InlineKeyboardButton(text="🕒 Avtomatik jadval", callback_data="live_schedule_menu", style="primary"),
+    ])
     rows.append([InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -3455,6 +3578,190 @@ async def admin_live_stream(call: CallbackQuery, state: FSMContext):
     await state.clear()
     text, channel = await _live_status_text()
     await call.message.edit_text(text, reply_markup=_live_stream_keyboard(channel), parse_mode="HTML")
+
+@dp.callback_query(F.data.regexp(r"^live_history_\d+$"))
+async def live_history(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    page = int(call.data.split("_")[2])
+    per_page = 10
+    rows = await asyncio.to_thread(db.get_live_history, (page + 1) * per_page + 1)
+    page_rows = rows[page * per_page: (page + 1) * per_page]
+    if not page_rows and page == 0:
+        await call.message.edit_text(
+            "📊 <b>Jonli efir tarixi</b>\n\nHali birorta yozuv yo'q.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_live_stream")]
+            ]),
+            parse_mode="HTML"
+        )
+        return
+    STATUS_ICON = {"running": "🔴", "finished": "✅", "error": "❌", "stopped": "⏹"}
+    lines = ["📊 <b>Jonli efir tarixi</b>\n"]
+    for r in page_rows:
+        icon = STATUS_ICON.get(r["status"], "•")
+        dur = ""
+        if r.get("started_at") and r.get("ended_at"):
+            try:
+                fmt = "%Y-%m-%d %H:%M:%S"
+                delta = datetime.strptime(r["ended_at"], fmt) - datetime.strptime(r["started_at"], fmt)
+                mins = int(delta.total_seconds() // 60)
+                dur = f" • {mins} daq"
+            except Exception:
+                pass
+        viewers = f" • 👁 {r['peak_viewers']}" if r.get("peak_viewers") else ""
+        title = r.get("title") or "Noma'lum"
+        ep_part = f" — {r['episode_number']}-qism" if r.get("episode_number") else ""
+        lines.append(f"{icon} <b>{title}</b>{ep_part}\n    {r.get('started_at', '')}{dur}{viewers}")
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"live_history_{page-1}"))
+    if len(rows) > (page + 1) * per_page:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"live_history_{page+1}"))
+    kb_rows = ([nav] if nav else []) + [[InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_live_stream")]]
+    await call.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows), parse_mode="HTML")
+
+# ---- JONLI EFIR AVTOMATIK JADVALI ----
+@dp.callback_query(F.data == "live_schedule_menu")
+async def live_schedule_menu(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.clear()
+    schedules = await asyncio.to_thread(db.get_live_schedules)
+    lines = ["🕒 <b>Avtomatik efir jadvali</b>\n"]
+    buttons = []
+    if not schedules:
+        lines.append("Hozircha jadval yo'q. Har kuni belgilangan vaqtda tanlangan "
+                      "serialning navbatdagi qismini avtomatik jonli efirga qo'yish uchun qo'shing.")
+    else:
+        for s in schedules:
+            status = "✅" if s["enabled"] else "⏸"
+            lines.append(f"{status} {s['hour']:02d}:{s['minute']:02d} — {s.get('anime_title') or ('#' + str(s['anime_id']))}")
+            buttons.append([InlineKeyboardButton(
+                text=f"🗑 {s['hour']:02d}:{s['minute']:02d} {s.get('anime_title') or ''}",
+                callback_data=f"livesched_del_{s['id']}"
+            )])
+    buttons.append([InlineKeyboardButton(text="➕ Yangi jadval qo'shish", callback_data="livesched_add", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_live_stream")])
+    await call.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+
+@dp.callback_query(F.data == "livesched_add")
+async def livesched_add(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    if not channel:
+        await call.answer("⚠️ Avval jonli efir kanalini belgilang", show_alert=True)
+        return
+    await call.message.edit_text(
+        "➕ Avtomatik jadval — serial/film tanlash usuli:",
+        reply_markup=search_method_keyboard("livesched")
+    )
+
+@dp.callback_query(F.data == "livesched_list")
+async def livesched_list(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    serials = await asyncio.to_thread(db.get_animes, "serial", 0)
+    films = await asyncio.to_thread(db.get_animes, "film", 0)
+    animes = serials + films
+    if not animes:
+        await call.answer("❌ Hech narsa topilmadi", show_alert=True)
+        return
+    buttons = []
+    for a in animes:
+        icon = "🎬" if a["media_type"] == "film" else "📺"
+        buttons.append([InlineKeyboardButton(text=f"{icon} {a['title']}", callback_data=f"livesched_sel_{a['id']}")])
+    buttons.append([InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="live_schedule_menu")])
+    await call.message.edit_text("Anime tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data == "livesched_search")
+async def livesched_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(LiveScheduleState.choose_anime)
+    await call.message.edit_text("🔍 Serial/film nomini yozing:")
+
+@dp.message(LiveScheduleState.choose_anime)
+async def livesched_search_result(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    await state.clear()
+    results = await asyncio.to_thread(db.search_anime, message.text.strip())
+    if not results:
+        await message.answer("❌ Topilmadi!")
+        return
+    buttons = [[InlineKeyboardButton(text=a["title"], callback_data=f"livesched_sel_{a['id']}")] for a in results]
+    await message.answer("Tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.startswith("livesched_sel_"))
+async def livesched_sel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    anime_id = int(call.data.split("_")[2])
+    await state.update_data(sched_anime_id=anime_id)
+    await state.set_state(LiveScheduleState.waiting_time)
+    await call.message.edit_text(
+        "🕒 Har kuni qaysi soatda avtomatik boshlansin? Vaqtni <b>SS:DD</b> "
+        "formatida yuboring (masalan <code>20:00</code>).\n\n"
+        "⚠️ Vaqt <b>server vaqti</b> bo'yicha ishlaydi (odatda UTC, agar boshqacha "
+        "sozlanmagan bo'lsa) — sizning telefoningiz vaqt zonasi bilan bir xil "
+        "bo'lmasligi mumkin.",
+        parse_mode="HTML"
+    )
+
+@dp.message(LiveScheduleState.waiting_time)
+async def livesched_time_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    m = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", text)
+    if not m:
+        await message.answer("❌ Noto'g'ri format. Masalan: <code>20:00</code>", parse_mode="HTML")
+        return
+    data = await state.get_data()
+    anime_id = data.get("sched_anime_id")
+    hour, minute = int(m.group(1)), int(m.group(2))
+    await asyncio.to_thread(db.add_live_schedule, anime_id, hour, minute)
+    await log_admin_action(message.from_user, "Avtomatik efir jadvali qo'shdi", f"Anime ID: {anime_id}, {hour:02d}:{minute:02d}")
+    await state.clear()
+    schedules = await asyncio.to_thread(db.get_live_schedules)
+    lines = ["✅ Jadval qo'shildi!\n", "🕒 <b>Avtomatik efir jadvali</b>\n"]
+    buttons = []
+    for s in schedules:
+        status = "✅" if s["enabled"] else "⏸"
+        lines.append(f"{status} {s['hour']:02d}:{s['minute']:02d} — {s.get('anime_title') or ('#' + str(s['anime_id']))}")
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {s['hour']:02d}:{s['minute']:02d} {s.get('anime_title') or ''}",
+            callback_data=f"livesched_del_{s['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="➕ Yangi jadval qo'shish", callback_data="livesched_add", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_live_stream")])
+    await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+
+@dp.callback_query(F.data.regexp(r"^livesched_del_\d+$"))
+async def livesched_del(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    sched_id = int(call.data.split("_")[2])
+    await asyncio.to_thread(db.remove_live_schedule, sched_id)
+    await log_admin_action(call.from_user, "Avtomatik efir jadvalini o'chirdi", f"Schedule ID: {sched_id}")
+    await call.answer("🗑 O'chirildi")
+    schedules = await asyncio.to_thread(db.get_live_schedules)
+    lines = ["🕒 <b>Avtomatik efir jadvali</b>\n"]
+    buttons = []
+    if not schedules:
+        lines.append("Hozircha jadval yo'q.")
+    for s in schedules:
+        status = "✅" if s["enabled"] else "⏸"
+        lines.append(f"{status} {s['hour']:02d}:{s['minute']:02d} — {s.get('anime_title') or ('#' + str(s['anime_id']))}")
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {s['hour']:02d}:{s['minute']:02d} {s.get('anime_title') or ''}",
+            callback_data=f"livesched_del_{s['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="➕ Yangi jadval qo'shish", callback_data="livesched_add", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_live_stream")])
+    await call.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
 
 @dp.callback_query(F.data == "live_set_channel")
 async def live_set_channel(call: CallbackQuery, state: FSMContext):
@@ -3635,6 +3942,86 @@ async def liveep_go(call: CallbackQuery, state: FSMContext):
     status_msg = await call.message.answer("⏳ Video tayyorlanmoqda, biroz kuting...")
     asyncio.create_task(_run_episode_relay(ep, channel, status_msg, call.from_user))
 
+
+class _ScheduledUser:
+    """log_admin_action funksiyasi kutgan minimal interfeys (id/username/full_name) —
+    avtomatik jadval orqali boshlangan efirlar uchun 'admin' o'rniga ishlatiladi."""
+    def __init__(self, user_id):
+        self.id = user_id
+        self.username = None
+        self.full_name = "Avtomatik jadval"
+
+
+async def _start_scheduled_live(anime_id, channel):
+    """Berilgan anime uchun tomoshabin ko'rmagan (ya'ni navbatdagi) qismni topib,
+    jonli efirga avtomatik qo'yadi. Film bo'lsa, hali umuman efirga qo'yilmagan
+    bo'lsagina boshlanadi (qayta-qayta boshlab yubormaslik uchun)."""
+    if _live_relay["proc"] is not None:
+        logger.info(f"[live schedule] anime {anime_id} — hozir boshqa uzatish faol, o'tkazib yuborildi.")
+        return False
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    episodes = await asyncio.to_thread(db.get_episodes, anime_id)
+    if not anime or not episodes:
+        logger.warning(f"[live schedule] anime {anime_id} yoki uning qismlari topilmadi.")
+        return False
+    is_serial = anime.get("media_type") == "serial"
+    ep = None
+    if is_serial:
+        history = await asyncio.to_thread(db.get_live_history_for_anime, anime_id)
+        watched_nums = {
+            h["episode_number"] for h in history if h.get("episode_number")
+        }
+        ep = next((e for e in sorted(episodes, key=lambda e: e["episode_number"])
+                   if e["episode_number"] not in watched_nums), None)
+        if not ep:
+            ep = episodes[0]  # barchasi ko'rsatilgan bo'lsa, boshidan qaytadan boshlanadi
+    else:
+        history = await asyncio.to_thread(db.get_live_history_for_anime, anime_id, 1)
+        already_aired = len(history) > 0
+        if already_aired:
+            logger.info(f"[live schedule] film {anime_id} allaqachon efirda ko'rsatilgan, qayta boshlanmadi.")
+            return False
+        ep = episodes[0]
+    channel_str = str(channel)
+    status_msg = await bot.send_message(
+        ADMIN_ID, f"🕒 Avtomatik jadval: <b>{anime['title']}</b> uchun efir boshlanmoqda...",
+        parse_mode="HTML"
+    )
+    asyncio.create_task(_run_episode_relay(ep, channel_str, status_msg, _ScheduledUser(ADMIN_ID)))
+    return True
+
+
+async def live_schedule_task():
+    """Har 60 soniyada jadvalni tekshiradi; server vaqti bo'yicha soat:daqiqa mos
+    kelgan va bugun hali ishga tushirilmagan yozuv topilsa, o'sha anime uchun
+    avtomatik efirni boshlaydi."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            if not USERBOT_ENABLED:
+                continue
+            channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+            if not channel:
+                continue
+            now = datetime.now()
+            today_str = now.strftime("%Y-%m-%d")
+            schedules = await asyncio.to_thread(db.get_live_schedules)
+            for s in schedules:
+                if not s.get("enabled"):
+                    continue
+                if s["hour"] != now.hour or s["minute"] != now.minute:
+                    continue
+                if s.get("last_run_date") == today_str:
+                    continue
+                await asyncio.to_thread(db.mark_schedule_run, s["id"], today_str)
+                try:
+                    await _start_scheduled_live(s["anime_id"], channel)
+                except Exception as e:
+                    logger.error(f"[live schedule] {s['anime_id']} uchun avtomatik efir xatosi: {e}")
+        except Exception as e:
+            logger.error(f"[live schedule task] kutilmagan xatolik: {e}")
+
+
 async def _warm_userbot_peer_cache(chat):
     """userbot (shaxsiy akkaunt) sessiyasi berilgan kanalni "tanishi" uchun kamida
     bitta yangi hodisani ko'rishi kerak — aks holda ID orqali murojaat qilganda
@@ -3668,6 +4055,8 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
     path = None
     current_ep = ep
     is_serial = False
+    log_id = None
+    watchdog_task = None
     try:
         if not STREAM_ENABLED or not pyro:
             await status_msg.edit_text("❌ Xatolik: onlayn striming (API_ID/API_HASH) sozlanmagan")
@@ -3719,11 +4108,59 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             except Exception:
                 pass
 
+        async def _end_live_call():
+            # Efir BUTUNLAY tugaganda (film tamom bo'ldi, serialning keyingi
+            # qismi topilmadi yoki tuzatib bo'lmas xato chiqdi) video-chatni
+            # ham yopamiz. Aks holda u Telegram'da "faol" bo'lib eskirgan
+            # (stale) holda qolib ketadi va keyingi safar yangi anime uchun
+            # efir boshlaganda RTMP url so'rovi rad etilishi mumkin (aynan
+            # shu sabab 2-3 ta anime ketma-ket ishlagach uzatish ishlamay
+            # qolishi kuzatilgan edi). Serial ichida qismdan-qismga o'tishda
+            # bu funksiya CHAQIRILMAYDI — chunki o'sha holatda video-chat
+            # ataylab ochiq qoldiriladi (tomoshabinlar qayta qo'shilmasin).
+            try:
+                await userbot_stream.stop_rtmp(userbot, chan)
+            except Exception as e:
+                logger.warning(f"[live relay] video-chatni yopishda xato: {e}")
+
+        async def _watch_call_health(admin_id):
+            # Efir davomida video-chat kutilmaganda yopilib qolsa (masalan
+            # Telegram tomonidan avtomatik tugatilsa), adminga darhol
+            # ogohlantirish yuboradi — aks holda hech kim bilmasdan efir
+            # "muallaqlik"da qolib ketishi mumkin.
+            await asyncio.sleep(20)
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    active = await userbot_stream.rtmp_status(userbot, chan)
+                except Exception:
+                    continue
+                if not active:
+                    logger.warning("[live relay] video-chat kutilmaganda yopilib qoldi.")
+                    try:
+                        await bot.send_message(
+                            admin_id,
+                            "⚠️ Diqqat: jonli efir video-chati kutilmaganda yopilib "
+                            "qoldi (Telegram tomonidan tugatilgan bo'lishi mumkin). "
+                            "Uzatishni tekshiring."
+                        )
+                    except Exception:
+                        pass
+                    return
+
+        session_first = True  # bu sessiyada birinchi qism hali e'lon qilinmagan
+        logged_ep_id = None
+
         while True:
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
             media = msg.video or msg.document or msg.animation
             if not media:
                 await status_msg.edit_text(f"❌ Xatolik: {current_ep['episode_number']}-qismda video topilmadi")
+                await _end_live_call()
+                _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
+                if log_id:
+                    await asyncio.to_thread(db.log_live_end, log_id, "error")
+                    log_id = None
                 return
 
             last_pct = {"v": -1}
@@ -3783,7 +4220,27 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             )
             await log_admin_action(admin_user, "Epizodni efirga qo'ydi", f"Episode ID: {current_ep['id']}")
 
+            if logged_ep_id != current_ep["id"]:
+                log_id = await asyncio.to_thread(
+                    db.log_live_start, current_ep["anime_id"], current_ep["id"],
+                    current_ep["episode_number"], anime["title"] if anime else None
+                )
+                logged_ep_id = current_ep["id"]
+
+            if watchdog_task is None or watchdog_task.done():
+                watchdog_task = asyncio.create_task(_watch_call_health(admin_user.id))
+
+            if session_first:
+                session_first = False
+                if anime:
+                    asyncio.create_task(notify_anime_subscribers(
+                        current_ep["anime_id"],
+                        f"🔴 <b>{anime['title']}</b> hozir jonli efirda! Kanalni oching."
+                    ))
+
             returncode = await proc.wait()
+            if watchdog_task:
+                watchdog_task.cancel()
             episode_relay.cleanup_file(path)
             path = None
 
@@ -3792,6 +4249,9 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 # "⏹ To'xtatish" tugmasi bosilgan — live_stop_relay o'zi xabar
                 # ko'rsatgan, bu yerda qo'shimcha hech narsa qilinmaydi va
                 # keyingi qismga o'tilmaydi.
+                if log_id:
+                    await asyncio.to_thread(db.log_live_end, log_id, "stopped")
+                    log_id = None
                 return
 
             skip_requested = _live_relay.get("skip_requested", False)
@@ -3823,7 +4283,11 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     f"<code>{stderr[-500:].decode(errors='ignore')}</code>",
                     parse_mode="HTML"
                 )
+                await _end_live_call()
                 _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
+                if log_id:
+                    await asyncio.to_thread(db.log_live_end, log_id, "error")
+                    log_id = None
                 return
 
             retry_count = 0  # muvaffaqiyatli yoki qo'lda "keyingisi" bosilgan -> hisoblagich tozalanadi
@@ -3833,7 +4297,11 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     await _send_transition("ℹ️ Bu film — keyingi qism mavjud emas.")
                 else:
                     await _send_transition(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
+                await _end_live_call()
                 _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
+                if log_id:
+                    await asyncio.to_thread(db.log_live_end, log_id, "finished")
+                    log_id = None
                 return
 
             episodes = await asyncio.to_thread(db.get_episodes, current_ep["anime_id"])
@@ -3846,7 +4314,11 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                      else f"✅ {current_ep['episode_number']}-qism uzatish tugadi. ")
                     + "Keyingi qism hali yuklanmagan, efir shu bilan yakunlandi."
                 )
+                await _end_live_call()
                 _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
+                if log_id:
+                    await asyncio.to_thread(db.log_live_end, log_id, "finished")
+                    log_id = None
                 return
 
             await _send_transition(
@@ -3854,6 +4326,9 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                  else f"➡️ {current_ep['episode_number']}-qism tugadi, ")
                 + f"{next_ep['episode_number']}-qismga o'tilmoqda..."
             )
+            if log_id:
+                await asyncio.to_thread(db.log_live_end, log_id, "finished")
+                log_id = None
             current_ep = next_ep
     except Exception as e:
         logger.error(f"[live relay] xatolik: {e}")
@@ -3862,6 +4337,17 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         except Exception:
             pass
     finally:
+        if watchdog_task and not watchdog_task.done():
+            watchdog_task.cancel()
+        if log_id:
+            # Agar yuqoridagi barcha yo'llar tugagach ham log yozuvi hali
+            # yopilmagan bo'lsa (kutilmagan xatolik yoki uzilish) — bu yerda
+            # xavfsizlik to'ri sifatida "error" holatida yopib qo'yamiz, aks
+            # holda yozuv abadiy "running" holatida osilib qolar edi.
+            try:
+                await asyncio.to_thread(db.log_live_end, log_id, "error")
+            except Exception:
+                pass
         episode_relay.cleanup_file(path)
         if _live_relay.get("path") == path:
             _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
@@ -3879,6 +4365,16 @@ async def live_stop_relay(call: CallbackQuery):
     await log_admin_action(call.from_user, "Epizod uzatishni to'xtatdi", f"Episode ID: {_live_relay.get('episode_id')}")
     status_msg = _live_relay.get("status_msg")
     _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
+    # Admin butun uzatishni to'xtatganda video-chatni ham yopamiz — aks
+    # holda u eskirgan (stale) holda ochiq qolib, keyingi anime uchun
+    # efir boshlashda muammo keltirib chiqarishi mumkin.
+    try:
+        channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+        if channel and USERBOT_ENABLED and userbot:
+            chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
+            await userbot_stream.stop_rtmp(userbot, chan)
+    except Exception as e:
+        logger.warning(f"[live relay] to'xtatishda video-chatni yopib bo'lmadi: {e}")
     await call.answer("⏹ Epizod uzatish to'xtatildi", show_alert=True)
     if status_msg:
         try:
@@ -5481,6 +5977,7 @@ async def main():
     asyncio.create_task(daily_report_task())
     asyncio.create_task(premium_maintenance_task())
     asyncio.create_task(db_keepalive_task())
+    asyncio.create_task(live_schedule_task())
     try:
         await dp.start_polling(
             bot,

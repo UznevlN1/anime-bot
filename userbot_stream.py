@@ -22,6 +22,7 @@ from pyrogram.raw.functions.phone import (
     CreateGroupCall,
     GetGroupCallStreamRtmpUrl,
     DiscardGroupCall,
+    GetGroupCall,
 )
 from pyrogram.raw.functions.channels import GetFullChannel
 from pyrogram.raw import types as raw_types
@@ -36,7 +37,13 @@ async def _existing_call(client, channel):
 
 async def start_rtmp(client, channel):
     """RTMP jonli efirni boshlaydi (kerak bo'lsa video-chat yaratadi) va
-    (url, key) juftligini qaytaradi — buni OBS/ffmpeg'ga kiritish kerak."""
+    (url, key) juftligini qaytaradi — buni OBS/ffmpeg'ga kiritish kerak.
+
+    Agar oldingi video-chat to'g'ri yopilmasdan "eskirgan" (stale) holda
+    qolib ketgan bo'lsa, Telegram RTMP url so'rovini xato bilan rad etishi
+    mumkin. Shu holat uchun: xato chiqsa, eski chaqiruv (agar topilsa)
+    tashlab yuboriladi (discard) va yangi video-chat yaratib bir marta
+    qayta urinib ko'riladi."""
     peer = await client.resolve_peer(channel)
     call = await _existing_call(client, channel)
     if call is None:
@@ -45,8 +52,23 @@ async def start_rtmp(client, channel):
             random_id=random.randrange(1, 2 ** 31 - 1),
             rtmp_stream=True,
         ))
-    result = await client.invoke(GetGroupCallStreamRtmpUrl(peer=peer, revoke=False))
-    return result.url, result.key
+    try:
+        result = await client.invoke(GetGroupCallStreamRtmpUrl(peer=peer, revoke=False))
+        return result.url, result.key
+    except Exception:
+        if call is not None:
+            try:
+                input_call = raw_types.InputGroupCall(id=call.id, access_hash=call.access_hash)
+                await client.invoke(DiscardGroupCall(call=input_call))
+            except Exception:
+                pass
+        await client.invoke(CreateGroupCall(
+            peer=peer,
+            random_id=random.randrange(1, 2 ** 31 - 1),
+            rtmp_stream=True,
+        ))
+        result = await client.invoke(GetGroupCallStreamRtmpUrl(peer=peer, revoke=False))
+        return result.url, result.key
 
 
 async def stop_rtmp(client, channel):
@@ -63,3 +85,23 @@ async def rtmp_status(client, channel):
     """Kanalda hozir faol video-chat bor-yo'qligini tekshiradi."""
     call = await _existing_call(client, channel)
     return call is not None
+
+
+async def get_call_info(client, channel):
+    """Kanaldagi video-chat haqida qisqa ma'lumot qaytaradi:
+    {"active": bool, "participants_count": int|None}.
+
+    MUHIM: channels.getFullChannel orqali olinadigan 'call' maydoni faqat
+    InputGroupCall (id + access_hash) — unda participants_count YO'Q. Haqiqiy
+    tomoshabinlar sonini olish uchun alohida phone.GetGroupCall so'rovi kerak."""
+    call = await _existing_call(client, channel)
+    if call is None:
+        return {"active": False, "participants_count": None}
+    count = None
+    try:
+        input_call = raw_types.InputGroupCall(id=call.id, access_hash=call.access_hash)
+        full_call = await client.invoke(GetGroupCall(call=input_call, limit=0))
+        count = getattr(full_call.call, "participants_count", None)
+    except Exception:
+        pass
+    return {"active": True, "participants_count": count}
