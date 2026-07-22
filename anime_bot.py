@@ -195,7 +195,7 @@ import episode_relay
 
 # Botda saqlangan epizodni RTMP orqali jonli efirga uzatish holati (faqat bitta
 # epizod bir vaqtning o'zida uzatilishi mumkin).
-_live_relay = {"proc": None, "path": None, "episode_id": None, "skip_requested": False, "status_msg": None}
+_live_relay = {"proc": None, "path": None, "episode_id": None, "skip_requested": False, "stop_requested": False, "status_msg": None}
 
 
 # ===================== STATES =====================
@@ -4071,6 +4071,10 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
     is_serial = False
     log_id = None
     watchdog_task = None
+    # Xavfsizlik: agar oldingi sessiyadan 'stop_requested' bayrog'i biror
+    # kutilmagan sabab bilan tozalanmay qolgan bo'lsa, yangi sessiya
+    # boshlanishi bilanoq o'zi to'xtab qolmasligi uchun bu yerda tozalanadi.
+    _live_relay["stop_requested"] = False
     try:
         if not STREAM_ENABLED or not pyro:
             await status_msg.edit_text("❌ Xatolik: onlayn striming (API_ID/API_HASH) sozlanmagan")
@@ -4162,10 +4166,35 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                         pass
                     return
 
+        async def _finish_stopped():
+            # "⏹ To'xtatish" bosilganda (istalgan bosqichda — hatto qayta
+            # urinish kutish/yuklab olish vaqtida ham) shu YAGONA joydan
+            # to'xtatiladi. Bayroq (_live_relay['stop_requested']) orqali
+            # ishlaydi, chunki proc/episode_id qiymatlariga tayanish
+            # (eskisi) qayta urinish oralig'ida "poyga holati" (race
+            # condition)ga olib kelib, efirni o'zi qayta yoqib yuborardi.
+            nonlocal log_id, watchdog_task
+            _live_relay["stop_requested"] = False
+            if watchdog_task and not watchdog_task.done():
+                watchdog_task.cancel()
+            await _end_live_call()
+            _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
+            if log_id:
+                await asyncio.to_thread(db.log_live_end, log_id, "stopped")
+                log_id = None
+            try:
+                await status_msg.edit_text("⏹ Epizod uzatish to'xtatildi.", reply_markup=None)
+            except Exception:
+                pass
+
         session_first = True  # bu sessiyada birinchi qism hali e'lon qilinmagan
         logged_ep_id = None
 
         while True:
+            if _live_relay.get("stop_requested"):
+                await _finish_stopped()
+                return
+
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
             media = msg.video or msg.document or msg.animation
             if not media:
@@ -4258,14 +4287,9 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             episode_relay.cleanup_file(path)
             path = None
 
-            was_manually_stopped = _live_relay.get("episode_id") != current_ep["id"]
+            was_manually_stopped = _live_relay.get("stop_requested", False)
             if was_manually_stopped:
-                # "⏹ To'xtatish" tugmasi bosilgan — live_stop_relay o'zi xabar
-                # ko'rsatgan, bu yerda qo'shimcha hech narsa qilinmaydi va
-                # keyingi qismga o'tilmaydi.
-                if log_id:
-                    await asyncio.to_thread(db.log_live_end, log_id, "stopped")
-                    log_id = None
+                await _finish_stopped()
                 return
 
             skip_requested = _live_relay.get("skip_requested", False)
@@ -4351,6 +4375,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         except Exception:
             pass
     finally:
+        _live_relay["stop_requested"] = False
         if watchdog_task and not watchdog_task.done():
             watchdog_task.cancel()
         if log_id:
@@ -4371,32 +4396,22 @@ async def live_stop_relay(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
     proc = _live_relay.get("proc")
-    if not proc:
+    if not proc and not _live_relay.get("episode_id"):
         await call.answer("ℹ️ Hozir hech narsa uzatilmayapti", show_alert=True)
         return
-    await episode_relay.stop_ffmpeg_relay(proc)
-    episode_relay.cleanup_file(_live_relay.get("path"))
+    # MUHIM: faqat joriy ffmpeg jarayonini o'ldirish yetarli emas — agar
+    # aynan shu payt qayta urinish (retry) kutish/yuklab olish bosqichida
+    # bo'lsa, 'proc' allaqachon o'lgan eski jarayonni ko'rsatib turadi va
+    # tsikl birozdan keyin YANGI jarayon boshlab, to'xtatish signalini
+    # "ustidan bosib" qo'yadi (efir o'zi qayta yonib ketadi). Shu sabab
+    # doimiy 'stop_requested' bayrog'i qo'yiladi — tsikl uni har bir
+    # tekshiruv nuqtasida (retry oldidan va navbatdagi qism boshlashdan
+    # oldin ham) ko'radi va albatta to'xtaydi.
+    _live_relay["stop_requested"] = True
+    if proc:
+        await episode_relay.stop_ffmpeg_relay(proc)
     await log_admin_action(call.from_user, "Epizod uzatishni to'xtatdi", f"Episode ID: {_live_relay.get('episode_id')}")
-    status_msg = _live_relay.get("status_msg")
-    _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
-    # Admin butun uzatishni to'xtatganda video-chatni ham yopamiz — aks
-    # holda u eskirgan (stale) holda ochiq qolib, keyingi anime uchun
-    # efir boshlashda muammo keltirib chiqarishi mumkin.
-    try:
-        channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
-        if channel and USERBOT_ENABLED and userbot:
-            chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
-            await userbot_stream.stop_rtmp(userbot, chan)
-    except Exception as e:
-        logger.warning(f"[live relay] to'xtatishda video-chatni yopib bo'lmadi: {e}")
-    await call.answer("⏹ Epizod uzatish to'xtatildi", show_alert=True)
-    if status_msg:
-        try:
-            await status_msg.edit_text("⏹ Epizod uzatish to'xtatildi.", reply_markup=None)
-            return
-        except Exception:
-            pass
-    await call.message.answer("⏹ Epizod uzatish to'xtatildi.")
+    await call.answer("⏹ Epizod uzatish to'xtatilmoqda...", show_alert=True)
 
 @dp.callback_query(F.data == "live_skip_relay")
 async def live_skip_relay(call: CallbackQuery):
