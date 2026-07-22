@@ -7,6 +7,7 @@ import re
 import time
 from urllib.parse import parse_qsl
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -46,6 +47,20 @@ if not BOT_TOKEN:
         "Render'da Environment > Add Environment Variable orqali BOT_TOKEN ni qoʻshing."
     )
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "5383321037"))
+# Avtomatik jonli efir jadvali (live_schedule) shu vaqt zonasi bo'yicha ishlaydi.
+# Standart: Toshkent (UTC+5). Boshqa shaharda bo'lsangiz, Render/hosting'da
+# SCHEDULE_TZ muhit o'zgaruvchisini o'zgartiring (masalan "Europe/Moscow",
+# "Asia/Samarkand" ham Asia/Tashkent bilan bir xil, "UTC" va h.k.).
+try:
+    SCHEDULE_TZ = ZoneInfo(os.environ.get("SCHEDULE_TZ", "Asia/Tashkent"))
+except Exception as _tz_err:
+    # tzdata paketi topilmasa (masalan Dockerfile yangilanmagan bo'lsa), butun
+    # bot ishga tushmay qolmasin — UTC'ga tushib, faqat ogohlantirish beramiz.
+    logging.getLogger(__name__).warning(
+        f"Vaqt zonasi topilmadi ({_tz_err}), UTC ishlatiladi. "
+        f"Dockerfile'da 'tzdata' paketi o'rnatilganini tekshiring."
+    )
+    SCHEDULE_TZ = ZoneInfo("UTC")
 STORAGE_CHANNEL = int(os.environ.get("STORAGE_CHANNEL", "-1002195410889"))
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://anime-bot-fd8r.onrender.com/webapp")
 
@@ -3704,9 +3719,7 @@ async def livesched_sel(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         "🕒 Har kuni qaysi soatda avtomatik boshlansin? Vaqtni <b>SS:DD</b> "
         "formatida yuboring (masalan <code>20:00</code>).\n\n"
-        "⚠️ Vaqt <b>server vaqti</b> bo'yicha ishlaydi (odatda UTC, agar boshqacha "
-        "sozlanmagan bo'lsa) — sizning telefoningiz vaqt zonasi bilan bir xil "
-        "bo'lmasligi mumkin.",
+        "ℹ️ Vaqt <b>Toshkent (UTC+5)</b> vaqt zonasi bo'yicha qabul qilinadi.",
         parse_mode="HTML"
     )
 
@@ -3992,7 +4005,8 @@ async def _start_scheduled_live(anime_id, channel):
 
 
 async def live_schedule_task():
-    """Har 60 soniyada jadvalni tekshiradi; server vaqti bo'yicha soat:daqiqa mos
+    """Har 60 soniyada jadvalni tekshiradi; SCHEDULE_TZ vaqt zonasi (standart:
+    Toshkent) bo'yicha soat:daqiqa mos
     kelgan va bugun hali ishga tushirilmagan yozuv topilsa, o'sha anime uchun
     avtomatik efirni boshlaydi."""
     while True:
@@ -4003,7 +4017,7 @@ async def live_schedule_task():
             channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
             if not channel:
                 continue
-            now = datetime.now()
+            now = datetime.now(SCHEDULE_TZ)
             today_str = now.strftime("%Y-%m-%d")
             schedules = await asyncio.to_thread(db.get_live_schedules)
             for s in schedules:

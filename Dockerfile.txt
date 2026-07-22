@@ -3,8 +3,10 @@ FROM python:3.11-slim
 # Tizim ffmpeg'ini o'rnatamiz — imageio_ffmpeg statik build'idagi
 # SIGSEGV (-11) muammosini oldini olish uchun. Tizim ffmpeg'i
 # konteyner muhitiga to'liq mos bo'ladi.
+# tzdata — Python'ning zoneinfo moduli "Asia/Tashkent" kabi vaqt zonalarini
+# topishi uchun kerak (python:3.11-slim'da standart o'rnatilmagan).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
