@@ -379,6 +379,18 @@ async def _subscriptions_enabled():
     return val != "0"
 
 
+async def _live_overlay_enabled():
+    """Jonli efirda video ustiga anime nomi/qism raqamini 'kuydirish'
+    (drawtext overlay) yoqilganmi. MUHIM: overlay yoqilgan bo'lsa, video
+    HAR DOIM qayta kodlanadi (reencode) — chunki drawtext '-c copy' bilan
+    ishlamaydi. Bu esa CPU'ni ko'p ishlatadi va kuchsiz serverlarda (masalan
+    Render bepul tarifi) videoning davriy 'qotib qolishi'ga sabab bo'lishi
+    mumkin. O'chirilsa, tezkor va deyarli CPU sarflamaydigan stream-copy
+    rejimi avtomatik urinib ko'riladi (episode_relay.start_relay_auto)."""
+    val = await asyncio.to_thread(db.get_setting, "live_overlay_enabled")
+    return val != "0"
+
+
 async def notify_anime_subscribers(anime_id, text, exclude_user_id=None):
     """Shu anime uchun '🔔 Obuna bo'lish' tugmasini bosgan barcha
     foydalanuvchilarga shaxsiy xabar yuboradi (masalan yangi qism yoki
@@ -3544,6 +3556,7 @@ async def set_profile_lock(call: CallbackQuery):
 # ---- JONLI EFIR (RTMP, kanal video-chatiga) ----
 async def _live_status_text():
     channel = await asyncio.to_thread(db.get_setting, "live_stream_channel_id")
+    overlay_enabled = await _live_overlay_enabled()
     lines = ["🔴 <b>Jonli efir (RTMP)</b>\n"]
     if not USERBOT_ENABLED:
         lines.append(
@@ -3551,8 +3564,13 @@ async def _live_status_text():
             "o'zgaruvchisi topilmadi — <code>generate_userbot_session.py</code> "
             "skriptini lokal kompyuteringizda ishga tushirib sessiya oling."
         )
-        return "\n".join(lines), channel
+        return "\n".join(lines), channel, overlay_enabled
     lines.append(f"Kanal: <code>{channel}</code>" if channel else "Kanal hali belgilanmagan.")
+    overlay_label = "🟢 Yoqilgan" if overlay_enabled else "🔴 O'chirilgan"
+    lines.append(
+        f"🖊 Overlay (nom/qism yozuvi): {overlay_label}"
+        + ("" if overlay_enabled else " — tezkor stream-copy rejimi ishlatiladi, qotish kamayadi")
+    )
     if channel and userbot:
         try:
             chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
@@ -3567,9 +3585,9 @@ async def _live_status_text():
                 lines.append("\n⚪️ Video-chat hozir yopiq")
         except Exception as e:
             logger.warning(f"[live status] holatni tekshirib bo'lmadi: {e}")
-    return "\n".join(lines), channel
+    return "\n".join(lines), channel, overlay_enabled
 
-def _live_stream_keyboard(channel):
+def _live_stream_keyboard(channel, overlay_enabled=True):
     rows = [[InlineKeyboardButton(text="✏️ Kanalni belgilash", callback_data="live_set_channel", style="primary")]]
     if USERBOT_ENABLED and channel:
         rows.append([
@@ -3583,6 +3601,11 @@ def _live_stream_keyboard(channel):
         InlineKeyboardButton(text="📊 Tarix", callback_data="live_history_0", style="primary"),
         InlineKeyboardButton(text="🕒 Avtomatik jadval", callback_data="live_schedule_menu", style="primary"),
     ])
+    rows.append([InlineKeyboardButton(
+        text=("🔴 Overlayni o'chirish (video qotsa shuni bosing)" if overlay_enabled else "🟢 Overlayni yoqish"),
+        callback_data="live_toggle_overlay",
+        style=("danger" if overlay_enabled else "success")
+    )])
     rows.append([InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -3591,8 +3614,27 @@ async def admin_live_stream(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
-    text, channel = await _live_status_text()
-    await call.message.edit_text(text, reply_markup=_live_stream_keyboard(channel), parse_mode="HTML")
+    text, channel, overlay_enabled = await _live_status_text()
+    await call.message.edit_text(text, reply_markup=_live_stream_keyboard(channel, overlay_enabled), parse_mode="HTML")
+
+@dp.callback_query(F.data == "live_toggle_overlay")
+async def live_toggle_overlay(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    enabled = await _live_overlay_enabled()
+    new_value = "0" if enabled else "1"
+    await asyncio.to_thread(db.set_setting, "live_overlay_enabled", new_value)
+    await log_admin_action(
+        call.from_user, "Jonli efir overlay'ini o'zgartirdi",
+        "Yoqildi" if new_value == "1" else "O'chirildi"
+    )
+    await call.answer(
+        "🟢 Overlay yoqildi (video har doim qayta kodlanadi)." if new_value == "1"
+        else "🔴 Overlay o'chirildi — endi tezkor stream-copy rejimi urinib ko'riladi.",
+        show_alert=True
+    )
+    text, channel, overlay_enabled = await _live_status_text()
+    await call.message.edit_text(text, reply_markup=_live_stream_keyboard(channel, overlay_enabled), parse_mode="HTML")
 
 @dp.callback_query(F.data.regexp(r"^live_history_\d+$"))
 async def live_history(call: CallbackQuery):
@@ -3626,7 +3668,10 @@ async def live_history(call: CallbackQuery):
                 pass
         viewers = f" • 👁 {r['peak_viewers']}" if r.get("peak_viewers") else ""
         title = r.get("title") or "Noma'lum"
-        ep_part = f" — {r['episode_number']}-qism" if r.get("episode_number") else ""
+        ep_part = (
+            f" — {r['episode_number']}-qism"
+            if r.get("episode_number") and r.get("media_type") != "film" else ""
+        )
         lines.append(f"{icon} <b>{title}</b>{ep_part}\n    {r.get('started_at', '')}{dur}{viewers}")
     nav = []
     if page > 0:
@@ -3803,8 +3848,8 @@ async def live_set_channel_save(message: Message, state: FSMContext):
     channel = int(value) if value.lstrip("-").isdigit() else (value if value.startswith("@") else f"@{value}")
     await asyncio.to_thread(db.set_setting, "live_stream_channel_id", str(channel))
     await state.clear()
-    text, saved_channel = await _live_status_text()
-    await message.answer(text, reply_markup=_live_stream_keyboard(saved_channel), parse_mode="HTML")
+    text, saved_channel, overlay_enabled = await _live_status_text()
+    await message.answer(text, reply_markup=_live_stream_keyboard(saved_channel, overlay_enabled), parse_mode="HTML")
 
 @dp.callback_query(F.data == "live_start")
 async def live_start(call: CallbackQuery):
@@ -3919,21 +3964,25 @@ async def liveep_sel(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
     anime_id = int(call.data.split("_")[2])
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     if not episodes:
         await call.answer("❌ Bu animeda epizod topilmadi", show_alert=True)
         return
+    is_film = bool(anime and anime.get("media_type") == "film")
     buttons = []
     row = []
     for ep in episodes:
-        row.append(InlineKeyboardButton(text=f"{ep['episode_number']}-qism", callback_data=f"liveep_go_{ep['id']}"))
+        label = "🎬 Film" if is_film else f"{ep['episode_number']}-qism"
+        row.append(InlineKeyboardButton(text=label, callback_data=f"liveep_go_{ep['id']}"))
         if len(row) == 3:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
-    await call.message.edit_text("Qismni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    prompt = "Efirga qo'yish uchun tasdiqlang:" if is_film else "Qismni tanlang:"
+    await call.message.edit_text(prompt, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @dp.callback_query(F.data.startswith("liveep_go_"))
 async def liveep_go(call: CallbackQuery, state: FSMContext):
@@ -4126,6 +4175,11 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             except Exception:
                 pass
 
+        def _ep_label():
+            # Film uchun "N-qism" emas, oddiy "Film" deb ko'rsatiladi — chunki
+            # filmda faqat bitta yozuv bor va "1-qism" chalkashtiradi.
+            return "Film" if not is_serial else f"{current_ep['episode_number']}-qism"
+
         async def _end_live_call():
             # Efir BUTUNLAY tugaganda (film tamom bo'ldi, serialning keyingi
             # qismi topilmadi yoki tuzatib bo'lmas xato chiqdi) video-chatni
@@ -4198,7 +4252,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
             media = msg.video or msg.document or msg.animation
             if not media:
-                await status_msg.edit_text(f"❌ Xatolik: {current_ep['episode_number']}-qismda video topilmadi")
+                await status_msg.edit_text(f"❌ Xatolik: {_ep_label()}da video topilmadi")
                 await _end_live_call()
                 _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
                 if log_id:
@@ -4212,7 +4266,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 if pct != last_pct["v"] and pct % 10 == 0:
                     last_pct["v"] = pct
                     try:
-                        await status_msg.edit_text(f"⏳ {current_ep['episode_number']}-qism yuklanmoqda: {pct}%")
+                        await status_msg.edit_text(f"⏳ {_ep_label()} yuklanmoqda: {pct}%")
                     except Exception:
                         pass
 
@@ -4233,15 +4287,17 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     # ulanishni "Input/output error" bilan rad etishi kuzatildi.
                     url, key = await userbot_stream.start_rtmp(userbot, chan)
                     rtmp_url = episode_relay.build_rtmp_url(url, key)
-                    logger.info(f"[live relay] RTMP sessiyasi yangilandi ({current_ep['episode_number']}-qism oldidan).")
+                    logger.info(f"[live relay] RTMP sessiyasi yangilandi ({_ep_label()} oldidan).")
                 except Exception as e:
                     logger.warning(f"[live relay] RTMP sessiyasini yangilab bo'lmadi, eskisi bilan davom etiladi: {e}")
             first_pass = False
 
-            overlay_text = (
-                f"{anime['title']} — {current_ep['episode_number']}-qism" if anime
-                else f"{current_ep['episode_number']}-qism"
-            )
+            overlay_text = None
+            if await _live_overlay_enabled():
+                overlay_text = (
+                    (f"{anime['title']} — {current_ep['episode_number']}-qism" if is_serial else anime['title'])
+                    if anime else _ep_label()
+                )
             proc, stderr_tail, relay_mode = await episode_relay.start_relay_auto(
                 path, rtmp_url, overlay_text=overlay_text
             )
@@ -4255,7 +4311,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
             if is_serial:
                 control_rows.insert(0, [InlineKeyboardButton(text="⏭ Keyingi qism", callback_data="live_skip_relay")])
             await status_msg.edit_text(
-                f"🔴 <b>{current_ep['episode_number']}-qism jonli efirga uzatilmoqda!</b> ({mode_note})\n\n"
+                f"🔴 <b>{_ep_label()} jonli efirga uzatilmoqda!</b> ({mode_note})\n\n"
                 f"Kanal video-chatini oching — bir necha soniyada video ko'rina boshlaydi."
                 + (f"\n\nℹ️ Bu serial — qism tugagach keyingisi avtomatik boshlanadi." if is_serial else ""),
                 parse_mode="HTML",
@@ -4300,12 +4356,12 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                     retry_count += 1
                     stderr = stderr_tail.get("tail", b"")
                     logger.warning(
-                        f"[live relay] {current_ep['episode_number']}-qism xato bilan tugadi "
+                        f"[live relay] {_ep_label()} xato bilan tugadi "
                         f"(kod {returncode}), {retry_count}/{RETRY_LIMIT} qayta urinilmoqda. "
                         f"Log: {stderr[-500:]}"
                     )
                     await _send_transition(
-                        f"⚠️ {current_ep['episode_number']}-qismda vaqtinchalik xato yuz berdi, "
+                        f"⚠️ {_ep_label()}da vaqtinchalik xato yuz berdi, "
                         f"qayta urinilmoqda..."
                     )
                     await asyncio.sleep(2 * retry_count)  # 1-urinish: 2s, 2-urinish: 4s,
@@ -4316,7 +4372,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 stderr = stderr_tail.get("tail", b"")
                 logger.error(f"[live relay] ffmpeg xato bilan tugadi ({returncode}): {stderr[-3000:]}")
                 await _send_transition(
-                    f"❌ {current_ep['episode_number']}-qism uzatishda xato (kod: {returncode}), "
+                    f"❌ {_ep_label()} uzatishda xato (kod: {returncode}), "
                     f"qayta urinishlar ham tugadi.\n\n"
                     f"<code>{stderr[-500:].decode(errors='ignore')}</code>",
                     parse_mode="HTML"
@@ -4334,7 +4390,7 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 if skip_requested:
                     await _send_transition("ℹ️ Bu film — keyingi qism mavjud emas.")
                 else:
-                    await _send_transition(f"✅ {current_ep['episode_number']}-qism uzatish tugadi.")
+                    await _send_transition(f"✅ {_ep_label()} uzatish tugadi.")
                 await _end_live_call()
                 _live_relay.update({"proc": None, "path": None, "episode_id": None, "status_msg": None})
                 if log_id:

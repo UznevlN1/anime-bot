@@ -1601,7 +1601,11 @@ def log_live_end(log_id, status="finished", peak_viewers=None):
 def get_live_history(limit=20):
     conn = get_conn()
     c = psycopg2.extras.RealDictCursor(conn)
-    c.execute("SELECT * FROM live_broadcast_log ORDER BY id DESC LIMIT %s", (limit,))
+    c.execute(
+        "SELECT l.*, a.media_type FROM live_broadcast_log l "
+        "LEFT JOIN animes a ON a.id = l.anime_id ORDER BY l.id DESC LIMIT %s",
+        (limit,)
+    )
     rows = [dict(r) for r in c.fetchall()]
     put_conn(conn)
     return rows
