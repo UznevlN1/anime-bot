@@ -4137,6 +4137,18 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
         if not USERBOT_ENABLED or not userbot:
             await status_msg.edit_text("❌ Xatolik: userbot (jonli efir) sozlanmagan")
             return
+        if not getattr(userbot, "is_connected", False):
+            # MUHIM: userbot MTProto ulanishi vaqtincha uzilib qolishi mumkin
+            # (tarmoq muammosi, server qayta ishga tushishi va h.k.). Bu holat
+            # oldin tekshirilmagani uchun 'Connection lost' xatosi bilan
+            # abadiy to'xtab qolardi — endi shu yerda avtomatik qayta ulanadi.
+            try:
+                await userbot.start()
+            except ConnectionError:
+                pass  # "Client is already started" — muammo emas
+            except Exception as e:
+                await status_msg.edit_text(f"❌ Xatolik: userbot ulanmadi ({e})")
+                return
 
         chan = int(channel) if str(channel).lstrip("-").isdigit() else channel
         try:
