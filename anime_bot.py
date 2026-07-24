@@ -5766,6 +5766,7 @@ async def start_web_server():
         )
 
     STREAM_CHUNK_SIZE = 1024 * 1024  # pyrogramning ichki chunk hajmi
+    STREAM_CHUNK_TIMEOUT = 20  # soniya — shuncha vaqt ichida Telegramdan keyingi parcha kelmasa, ulanish "osilib qolgan" deb hisoblanadi
 
     # Bir nechta foydalanuvchi bir vaqtda video ochib, hammasi birdek muvaffaqiyatsiz
     # bo'lsa (masalan qayta ishga tushgandan keyin), har biri alohida sinxronlash
@@ -5913,8 +5914,9 @@ async def start_web_server():
         await resp.prepare(request)
 
         sent = 0
-        max_retries = 4
+        max_retries = 6
         retries = 0
+        give_up = False
         try:
             while sent < length:
                 cur_offset_bytes = start + sent
@@ -5925,7 +5927,23 @@ async def start_web_server():
                     stream_client = _next_stream_client()
                     if not await _ensure_pyro_ready(stream_client):
                         raise RuntimeError("stream worker ishga tushmagan")
-                    async for chunk in stream_client.stream_media(msg, offset=offset_chunk):
+                    media_iter = stream_client.stream_media(msg, offset=offset_chunk)
+                    # MUHIM (qotib qolish muammosi shu yerda edi): oddiy `async for`
+                    # ishlatilganda, Telegram tomoni javob bermay qolsa (MTProto
+                    # ulanishi vaqtincha "osilib qolsa") bu yerda HECH QANDAY
+                    # xatolik chiqmasdan abadiy kutib turilar edi — shuning uchun
+                    # pastdagi `except`/qayta urinish kodi umuman ishga tushmas,
+                    # foydalanuvchi esa internet yaxshi bo'lsa ham brauzerda
+                    # "Yuklanmoqda..." abadiy aylanib qolganini ko'rar edi. Endi
+                    # har bir keyingi parcha timeout bilan kutiladi: agar
+                    # STREAM_CHUNK_TIMEOUT ichida kelmasa, bu oddiy uzilish kabi
+                    # quyidagi `except Exception` bloki tomonidan ushlanadi va
+                    # avtomatik ravishda boshqa klient bilan qayta ulanadi.
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(media_iter.__anext__(), timeout=STREAM_CHUNK_TIMEOUT)
+                        except StopAsyncIteration:
+                            break
                         if first_piece and cut:
                             chunk = chunk[cut:]
                             first_piece = False
@@ -5944,15 +5962,31 @@ async def start_web_server():
                     raise  # bular foydalanuvchi tomonidan yopilgani uchun qayta urinishning hojati yoʻq
                 except Exception as e:
                     retries += 1
-                    if retries > max_retries or sent >= length:
-                        logger.error(f"[stream] uzatishda uzilish, qayta urinishlar tugadi: {e}")
+                    if sent >= length:
                         break
+                    if retries > max_retries:
+                        logger.error(f"[stream] uzatishda uzilish, qayta urinishlar tugadi: {e}")
+                        give_up = True
+                        break
+                    backoff = min(0.5 * retries, 3)
                     logger.warning(f"[stream] uzilish ({e}), {cur_offset_bytes} baytdan qayta ulanilmoqda ({retries}/{max_retries})...")
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(backoff)
         except (ConnectionResetError, asyncio.CancelledError):
             pass
         except Exception as e:
             logger.error(f"[stream] kutilmagan xato: {e}")
+        if give_up:
+            # Javobni Content-Length'da va'da qilingandan kamroq bayt bilan "tinch"
+            # tugatish o'rniga ulanishni ataylab keskin uzamiz. Aks holda ba'zi
+            # brauzer/WebView'lar (jumladan Telegram ichidagi) buni xato deb
+            # tanimay, pleerni abadiy "yuklanmoqda" holatida qoldirib qo'yishi
+            # mumkin edi. Ulanish keskin uzilganda video elementining `error`
+            # hodisasi ishga tushadi va frontend buni avtomatik qayta urinish
+            # bilan to'g'ri qayta tiklaydi (openPlayer/pv error handler'iga qarang).
+            try:
+                request.transport.close()
+            except Exception:
+                pass
         return resp
 
     app = web.Application()
