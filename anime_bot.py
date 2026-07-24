@@ -4001,7 +4001,13 @@ async def liveep_go(call: CallbackQuery, state: FSMContext):
         await call.answer("⚠️ Avval jonli efir kanalini belgilang", show_alert=True)
         return
     await call.answer("⏳ Boshlanmoqda...")
-    status_msg = await call.message.answer("⏳ Video tayyorlanmoqda, biroz kuting...")
+    # Eski "Efirga qo'yish uchun tasdiqlang" / "Qismni tanlang" xabarini
+    # (tugmalari bilan) alohida qoldirmasdan, aynan o'sha xabar tahrirlanadi va
+    # butun jarayon davomida (tayyorlanmoqda -> yuklanmoqda -> efirga
+    # uzatilmoqda) shu YAGONA xabar yangilanib boradi — eski tugmalar
+    # ishlatib bo'lingandan keyin ham chatda "osilib" qolmasligi uchun.
+    await call.message.edit_text("⏳ Video tayyorlanmoqda, biroz kuting...", reply_markup=None)
+    status_msg = call.message
     asyncio.create_task(_run_episode_relay(ep, channel, status_msg, call.from_user))
 
 
@@ -4263,6 +4269,11 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
 
             msg = await pyro.get_messages(STORAGE_CHANNEL, current_ep["channel_message_id"])
             media = msg.video or msg.document or msg.animation
+            # Tugash vaqtini hisoblash uchun video uzunligi (soniyada). Fayl
+            # "document" sifatida kelgan bo'lsa (kamdan-kam, video metama'lumoti
+            # bo'lmasa) bu None bo'lishi mumkin — bunday holda tugash vaqti
+            # ko'rsatilmaydi (pastda tekshiriladi).
+            duration_secs = getattr(media, "duration", None)
             if not media:
                 await status_msg.edit_text(f"❌ Xatolik: {_ep_label()}da video topilmadi")
                 await _end_live_call()
@@ -4319,12 +4330,22 @@ async def _run_episode_relay(ep, channel, status_msg, admin_user):
                 "tezkor rejim (stream-copy)" if relay_mode == "copy"
                 else "qayta kodlash rejimi (ultrafast, 720p)"
             )
+            # Boshlanish vaqti va (video uzunligi ma'lum bo'lsa) taxminiy tugash
+            # vaqti — admin va tomoshabinlar efir qachon tugashini oldindan
+            # bilishi uchun. Taxminiy, chunki ffmpeg tayyorlanish/RTMP handshake
+            # bir necha soniya vaqt olishi mumkin.
+            stream_start_dt = datetime.now(SCHEDULE_TZ)
+            time_info = f"\n\n🕒 Boshlandi: {stream_start_dt.strftime('%H:%M')}"
+            if duration_secs:
+                finish_dt = stream_start_dt + timedelta(seconds=duration_secs)
+                time_info += f" — tugashi taxminan: {finish_dt.strftime('%H:%M')}"
             control_rows = [[InlineKeyboardButton(text="⏹ To'xtatish", callback_data="live_stop_relay", style="danger")]]
             if is_serial:
                 control_rows.insert(0, [InlineKeyboardButton(text="⏭ Keyingi qism", callback_data="live_skip_relay")])
             await status_msg.edit_text(
                 f"🔴 <b>{_ep_label()} jonli efirga uzatilmoqda!</b> ({mode_note})\n\n"
                 f"Kanal video-chatini oching — bir necha soniyada video ko'rina boshlaydi."
+                + time_info
                 + (f"\n\nℹ️ Bu serial — qism tugagach keyingisi avtomatik boshlanadi." if is_serial else ""),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=control_rows)
