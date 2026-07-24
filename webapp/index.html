@@ -1638,6 +1638,7 @@ async function openPlayer(epId,title,ctx){
 }
 function closePlayer(){
   if(pvLastEpId&&pv.currentTime)pvSavePosition(pvLastEpId,pv.currentTime,true);
+  pvClearStallTimer();
   pnoHide();
   pv.pause();
   pv.removeAttribute('src');
@@ -1741,33 +1742,56 @@ document.getElementById('playerFsBtn').addEventListener('click',async()=>{
   }catch(e){}
 });
 pv.addEventListener('contextmenu',e=>e.preventDefault());
-pv.addEventListener('waiting',()=>{pvLoading.classList.add('active');});
+let pvRetryCount=0;
+let pvLastEpId=null,pvLastTitle=null;
+let pvStallTimer=null;
+const PV_STALL_TIMEOUT_MS=20000; // shuncha vaqt "Yuklanmoqda..." holatida qotib qolsa, pleer avtomatik qayta ulanadi
+function pvClearStallTimer(){
+  if(pvStallTimer){clearTimeout(pvStallTimer);pvStallTimer=null;}
+}
+function pvArmStallTimer(){
+  pvClearStallTimer();
+  pvStallTimer=setTimeout(()=>{
+    if(!document.getElementById('playerView').classList.contains('active'))return;
+    if(pv.paused||!pvLoading.classList.contains('active'))return; // faqat haqiqatan ham qotib qolganda
+    pvReconnect();
+  },PV_STALL_TIMEOUT_MS);
+}
+// Ulanish serverdan aniq "error" bilan uzilsa ham, yoki hech qanday xato
+// chiqmasdan shunchaki "Yuklanmoqda..." holatida qotib qolsa ham (stall) —
+// ikkalasi ham shu bitta joydan, umumiy 2 martalik qayta urinish limiti
+// bilan tiklanadi.
+function pvReconnect(){
+  pvClearStallTimer();
+  if(!pvLastEpId)return closePlayer();
+  if(pvRetryCount>=2){
+    closePlayer();
+    tg?.showAlert?tg.showAlert("❌ Videoni yuklab bo'lmadi. Birozdan so'ng qayta urinib ko'ring."):alert("❌ Videoni yuklab bo'lmadi.");
+    return;
+  }
+  pvRetryCount++;
+  const resumeAt=pv.currentTime||0;
+  pvLoading.classList.add('active');
+  pvLoadingText.textContent='Yuklanmoqda...';
+  pv.src=`/stream/${pvLastEpId}?${initDataQS()}`;
+  pv.addEventListener('loadedmetadata',function onceResume(){
+    pv.currentTime=resumeAt;
+    pv.play().catch(()=>{});
+    pv.removeEventListener('loadedmetadata',onceResume);
+  });
+}
+pv.addEventListener('waiting',()=>{pvLoading.classList.add('active');pvArmStallTimer();});
 pv.addEventListener('progress',()=>{
   if(!pv.duration||!isFinite(pv.duration)||!pv.buffered.length)return;
   const buffEnd=pv.buffered.end(pv.buffered.length-1);
   const pct=Math.min(100,Math.round((buffEnd/pv.duration)*100));
   if(pvLoading.classList.contains('active'))pvLoadingText.textContent=`Yuklanmoqda... ${pct}%`;
 });
-pv.addEventListener('playing',()=>pvLoading.classList.remove('active'));
-pv.addEventListener('canplay',()=>pvLoading.classList.remove('active'));
-let pvRetryCount=0;
-let pvLastEpId=null,pvLastTitle=null;
+pv.addEventListener('playing',()=>{pvLoading.classList.remove('active');pvClearStallTimer();});
+pv.addEventListener('canplay',()=>{pvLoading.classList.remove('active');pvClearStallTimer();});
 pv.addEventListener('error',()=>{
   if(!document.getElementById('playerView').classList.contains('active'))return;
-  if(pvRetryCount<2 && pvLastEpId){
-    pvRetryCount++;
-    const resumeAt=pv.currentTime||0;
-    pvLoading.classList.add('active');
-    pv.src=`/stream/${pvLastEpId}?${initDataQS()}`;
-    pv.addEventListener('loadedmetadata',function onceResume(){
-      pv.currentTime=resumeAt;
-      pv.play().catch(()=>{});
-      pv.removeEventListener('loadedmetadata',onceResume);
-    });
-    return;
-  }
-  closePlayer();
-  tg?.showAlert?tg.showAlert("❌ Videoni yuklab bo'lmadi. Birozdan so'ng qayta urinib ko'ring."):alert("❌ Videoni yuklab bo'lmadi.");
+  pvReconnect();
 });
 
 
