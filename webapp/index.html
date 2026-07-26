@@ -55,7 +55,7 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 }
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 10px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:calc(16px + var(--tg-content-safe-area-inset-top,0px) + var(--tg-safe-area-inset-top,0px)) 18px 10px;}
 .brand{display:flex;align-items:center;gap:10px;}
 .brand-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--purple2),var(--purple));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;box-shadow:0 3px 12px var(--glow);}
 .brand-name{font-size:15px;font-weight:800;letter-spacing:.3px;}
@@ -145,8 +145,8 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .detail-hero{position:relative;height:340px;background:#111;}
 .detail-hero img{width:100%;height:100%;object-fit:cover;}
 .detail-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,15,0) 40%,var(--bg) 96%);}
-.detail-back{position:absolute;top:16px;left:16px;width:44px;height:44px;border-radius:50%;background:rgba(15,17,13,.72);backdrop-filter:blur(8px);border:1px solid rgba(245,197,66,.35);color:var(--gold);font-size:19px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.35);}
-.detail-fav{position:absolute;top:16px;right:16px;width:44px;height:44px;border-radius:50%;background:rgba(15,17,13,.72);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.35);}
+.detail-back{position:absolute;top:calc(16px + var(--tg-content-safe-area-inset-top,0px) + var(--tg-safe-area-inset-top,0px));left:16px;width:44px;height:44px;border-radius:50%;background:rgba(15,17,13,.72);backdrop-filter:blur(8px);border:1px solid rgba(245,197,66,.35);color:var(--gold);font-size:19px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.35);}
+.detail-fav{position:absolute;top:calc(16px + var(--tg-content-safe-area-inset-top,0px) + var(--tg-safe-area-inset-top,0px));right:16px;width:44px;height:44px;border-radius:50%;background:rgba(15,17,13,.72);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.35);}
 .detail-fav.active{color:#ff5c7a;}
 .detail-body{padding:0 18px;margin-top:-56px;position:relative;z-index:1;}
 .detail-title{font-size:22px;font-weight:800;margin-bottom:6px;}
@@ -174,7 +174,7 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 /* Toʻliq ekran video pleer */
 .player-view{position:fixed;inset:0;background:#000;z-index:60;display:none;flex-direction:column;}
 .player-view.active{display:flex;}
-.player-topbar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:16px;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,.75) 0%,rgba(0,0,0,.35) 60%,transparent 100%);transition:opacity .25s;}
+.player-topbar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:calc(16px + var(--tg-content-safe-area-inset-top,0px) + var(--tg-safe-area-inset-top,0px)) 16px 16px;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,.75) 0%,rgba(0,0,0,.35) 60%,transparent 100%);transition:opacity .25s;}
 .player-topbar.hidden{opacity:0;pointer-events:none;}
 .player-topbar button{background:rgba(255,255,255,.14);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);color:#fff;width:38px;height:38px;border-radius:12px;font-size:16px;flex:none;transition:background .15s;}
 .player-topbar button:active{background:rgba(255,255,255,.28);}
@@ -839,6 +839,23 @@ tg?.ready(); tg?.expand();
 tg?.requestFullscreen?.();
 tg?.setHeaderColor?.('#0a0a0f');
 tg?.setBackgroundColor?.('#0a0a0f');
+
+/* Fullscreen rejimida Telegram o'zining "Yopish", yig'ish (chevron) va
+   menyu (⋮) tugmalarini kontent USTIDAN suzuvchi qatlam sifatida chizadi.
+   Shu tugmalar egallagan balandlikni bilmasak, bizning topbar/orqaga
+   tugmalarimiz ular bilan bir joyga tushib, "g'alati" ko'rinish beradi.
+   Shu sabab Telegram bergan safe-area qiymatlarini o'zimiz CSS
+   o'zgaruvchilariga yozib, kerakli joylarga bo'sh joy qo'shamiz. */
+function applyTgSafeArea(){
+  const root=document.documentElement.style;
+  const sa=tg?.safeAreaInset||{};
+  const csa=tg?.contentSafeAreaInset||{};
+  root.setProperty('--tg-safe-area-inset-top',(sa.top||0)+'px');
+  root.setProperty('--tg-content-safe-area-inset-top',(csa.top||0)+'px');
+}
+applyTgSafeArea();
+tg?.onEvent?.('safeAreaChanged',applyTgSafeArea);
+tg?.onEvent?.('contentSafeAreaChanged',applyTgSafeArea);
 // Sahifa boshidagi gorizontal qatorlarda (Yangi qo'shilganlar/Mashhur) svayp
 // ishlamasligi — Telegram klienti mini-ilovani "pastga tortib yopish" gestini
 // aniqlash uchun teginishlarni ushlab qolishidan kelib chiqadi, bu gorizontal
