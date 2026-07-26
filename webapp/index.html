@@ -836,6 +836,9 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 <script>
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
+tg?.requestFullscreen?.();
+tg?.setHeaderColor?.('#0a0a0f');
+tg?.setBackgroundColor?.('#0a0a0f');
 // Sahifa boshidagi gorizontal qatorlarda (Yangi qo'shilganlar/Mashhur) svayp
 // ishlamasligi — Telegram klienti mini-ilovani "pastga tortib yopish" gestini
 // aniqlash uchun teginishlarni ushlab qolishidan kelib chiqadi, bu gorizontal
