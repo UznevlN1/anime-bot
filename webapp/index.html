@@ -397,9 +397,60 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .tab-icon{font-size:16px;width:31px;height:31px;border-radius:11px;display:flex;align-items:center;justify-content:center;transition:all .2s ease;}
 .tab.active{color:#fff;background:rgba(255,255,255,.06);}
 .tab.active .tab-icon{background:linear-gradient(135deg,var(--purple2),var(--purple));box-shadow:0 4px 14px var(--glow);transform:translateY(-1px);}
+
+/* Splash / boot screen */
+#splashScreen{position:fixed;inset:0;z-index:9999;background:radial-gradient(circle at 50% 30%,#12140f 0%,#0a0a0f 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;transition:opacity .5s ease;overflow:hidden;}
+#splashScreen.fade-out{opacity:0;pointer-events:none;}
+.splash-spark{position:absolute;width:3px;height:3px;border-radius:50%;background:var(--purple2);box-shadow:0 0 8px 2px var(--glow);opacity:.6;animation:splash-float 6s ease-in-out infinite;}
+@keyframes splash-float{0%,100%{transform:translateY(0);opacity:.2;}50%{transform:translateY(-18px);opacity:.8;}}
+.splash-logo-wrap{position:relative;width:150px;height:150px;display:flex;align-items:center;justify-content:center;margin-bottom:22px;}
+.splash-ring{position:absolute;inset:0;border-radius:50%;border:5px solid transparent;border-top-color:var(--purple2);border-right-color:var(--purple2);border-bottom-color:var(--purple);animation:splash-spin 2.4s linear infinite;}
+@keyframes splash-spin{to{transform:rotate(360deg);}}
+.splash-logo-inner{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 50% 35%,#2a5c34 0%,#0e1a10 75%);overflow:hidden;display:flex;align-items:flex-end;justify-content:center;}
+.splash-logo-inner svg{width:100%;height:100%;}
+.splash-title{font-size:30px;font-weight:900;letter-spacing:.5px;color:var(--text);text-align:center;}
+.splash-title span{color:var(--purple2);}
+.splash-subtitle{font-size:12px;letter-spacing:5px;color:var(--text-dim);margin-top:6px;margin-bottom:36px;font-weight:600;}
+.splash-dots{display:grid;grid-template-columns:repeat(2,34px);grid-template-rows:repeat(2,34px);gap:10px;margin-bottom:26px;}
+.splash-dot{width:34px;height:34px;border-radius:9px;background:var(--bg-card2);transition:background .25s ease;}
+.splash-dot.on{background:linear-gradient(135deg,var(--purple2),var(--purple));box-shadow:0 3px 12px var(--glow);}
+.splash-status{font-size:13px;font-weight:800;letter-spacing:2px;color:var(--text);margin-bottom:4px;}
+.splash-status-sub{font-size:12px;color:var(--text-dim);margin-bottom:22px;}
+.splash-bar-wrap{width:min(260px,70vw);display:flex;flex-direction:column;align-items:center;gap:10px;}
+.splash-bar-track{width:100%;height:4px;border-radius:4px;background:var(--border);overflow:hidden;}
+.splash-bar-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--purple2),var(--purple));border-radius:4px;transition:width .3s ease;}
+.splash-bar-pct{font-size:13px;font-weight:700;color:var(--purple2);}
 </style>
 </head>
 <body>
+
+<div id="splashScreen">
+  <div class="splash-logo-wrap">
+    <div class="splash-ring"></div>
+    <div class="splash-logo-inner">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMax slice">
+        <rect x="60" y="55" width="4" height="26" fill="#0c1a10"/>
+        <rect x="52" y="60" width="20" height="4" fill="#0c1a10"/>
+        <polygon points="15,80 30,45 45,80" fill="#0c1a10"/>
+        <path d="M35 78 Q40 40 48 30 Q52 22 58 26 Q54 34 56 40 Q64 36 66 44 Q60 46 58 50 L60 80 Z" fill="#0c1a10"/>
+      </svg>
+    </div>
+  </div>
+  <div class="splash-title">ANIFILM<span> UZ</span></div>
+  <div class="splash-subtitle">WEB APP</div>
+  <div class="splash-dots">
+    <div class="splash-dot" id="sDot0"></div>
+    <div class="splash-dot" id="sDot1"></div>
+    <div class="splash-dot" id="sDot2"></div>
+    <div class="splash-dot" id="sDot3"></div>
+  </div>
+  <div class="splash-status">YUKLANMOQDA...</div>
+  <div class="splash-status-sub">Iltimos kuting</div>
+  <div class="splash-bar-wrap">
+    <div class="splash-bar-track"><div class="splash-bar-fill" id="splashBarFill"></div></div>
+    <div class="splash-bar-pct" id="splashBarPct">0%</div>
+  </div>
+</div>
 
 <main id="view-home" class="view active">
   <div class="pull-indicator" id="pullIndicator">🔄 Yangilash uchun qoʻyib yuboring</div>
@@ -2003,9 +2054,50 @@ function showHomeError(){
   </div>`;
   document.getElementById('retryBtn').addEventListener('click',init);
 }
+/* ---------- splash screen ---------- */
+const Splash=(function(){
+  const el=document.getElementById('splashScreen');
+  const fill=document.getElementById('splashBarFill');
+  const pct=document.getElementById('splashBarPct');
+  const dots=[0,1,2,3].map(i=>document.getElementById('sDot'+i));
+  let dotIdx=0,dotTimer=null,progress=0,progressTimer=null,hidden=false;
+  function cycleDots(){
+    dots.forEach(d=>d.classList.remove('on'));
+    dots[dotIdx].classList.add('on');
+    dotIdx=(dotIdx+1)%dots.length;
+  }
+  function setProgress(p){
+    progress=Math.max(progress,Math.min(p,100));
+    fill.style.width=progress+'%';
+    pct.textContent=Math.round(progress)+'%';
+  }
+  function start(){
+    setProgress(6);
+    dotTimer=setInterval(cycleDots,380);
+    cycleDots();
+    // ease toward 88% while real data loads, never reaching 100 on its own
+    progressTimer=setInterval(()=>{
+      if(progress<88)setProgress(progress+(88-progress)*0.12+1);
+    },220);
+  }
+  function finish(){
+    if(hidden)return;
+    hidden=true;
+    clearInterval(dotTimer);
+    clearInterval(progressTimer);
+    setProgress(100);
+    setTimeout(()=>{
+      el.classList.add('fade-out');
+      setTimeout(()=>{el.style.display='none';},520);
+    },260);
+  }
+  return {start,finish};
+})();
+Splash.start();
+
 async function init(){
   const ok=await checkAccess();
-  if(!ok)return;
+  if(!ok){Splash.finish();return;}
   skeletonHome();
   try{
     const [animes,banners,categories]=await Promise.all([
@@ -2019,6 +2111,7 @@ async function init(){
   }catch(e){
     showHomeError();
   }
+  Splash.finish();
 }
 
 /* ---------- pull to refresh ---------- */
