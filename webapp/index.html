@@ -403,11 +403,11 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 #splashScreen.fade-out{opacity:0;pointer-events:none;}
 .splash-spark{position:absolute;width:3px;height:3px;border-radius:50%;background:var(--purple2);box-shadow:0 0 8px 2px var(--glow);opacity:.6;animation:splash-float 6s ease-in-out infinite;}
 @keyframes splash-float{0%,100%{transform:translateY(0);opacity:.2;}50%{transform:translateY(-18px);opacity:.8;}}
-.splash-logo-wrap{position:relative;width:150px;height:150px;display:flex;align-items:center;justify-content:center;margin-bottom:22px;}
-.splash-ring{position:absolute;inset:0;border-radius:50%;border:5px solid transparent;border-top-color:var(--purple2);border-right-color:var(--purple2);border-bottom-color:var(--purple);animation:splash-spin 2.4s linear infinite;}
-@keyframes splash-spin{to{transform:rotate(360deg);}}
-.splash-logo-inner{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 50% 35%,#2a5c34 0%,#0e1a10 75%);overflow:hidden;display:flex;align-items:flex-end;justify-content:center;}
-.splash-logo-inner svg{width:100%;height:100%;}
+.splash-logo-wrap{position:relative;width:160px;height:160px;display:flex;align-items:center;justify-content:center;margin-bottom:22px;}
+.splash-logo-inner{position:absolute;inset:14px;border-radius:50%;overflow:hidden;}
+.splash-logo-inner svg{width:100%;height:100%;display:block;}
+.splash-ensoRing{animation:splash-glow 2.6s ease-in-out infinite;transform-origin:100px 100px;}
+@keyframes splash-glow{0%,100%{opacity:.85;}50%{opacity:1;}}
 .splash-title{font-size:30px;font-weight:900;letter-spacing:.5px;color:var(--text);text-align:center;}
 .splash-title span{color:var(--purple2);}
 .splash-subtitle{font-size:12px;letter-spacing:5px;color:var(--text-dim);margin-top:6px;margin-bottom:36px;font-weight:600;}
@@ -426,13 +426,65 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 
 <div id="splashScreen">
   <div class="splash-logo-wrap">
-    <div class="splash-ring"></div>
+    <svg class="splash-ensoRing" viewBox="0 0 200 200" width="160" height="160" style="position:absolute;inset:0;">
+      <defs>
+        <linearGradient id="ensoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#4ade80"/>
+          <stop offset="100%" stop-color="#15a862"/>
+        </linearGradient>
+      </defs>
+      <circle cx="100" cy="100" r="88" fill="none" stroke="url(#ensoGrad)" stroke-width="7"
+        stroke-linecap="round" stroke-dasharray="475 78" stroke-dashoffset="-40"/>
+    </svg>
     <div class="splash-logo-inner">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMax slice">
-        <rect x="60" y="55" width="4" height="26" fill="#0c1a10"/>
-        <rect x="52" y="60" width="20" height="4" fill="#0c1a10"/>
-        <polygon points="15,80 30,45 45,80" fill="#0c1a10"/>
-        <path d="M35 78 Q40 40 48 30 Q52 22 58 26 Q54 34 56 40 Q64 36 66 44 Q60 46 58 50 L60 80 Z" fill="#0c1a10"/>
+      <svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <radialGradient id="bgGrad" cx="45%" cy="35%" r="70%">
+            <stop offset="0%" stop-color="#2f6b3c"/>
+            <stop offset="60%" stop-color="#123018"/>
+            <stop offset="100%" stop-color="#0a1c0d"/>
+          </radialGradient>
+        </defs>
+        <rect x="0" y="0" width="200" height="200" fill="url(#bgGrad)"/>
+        <!-- distant bush / foliage, left -->
+        <ellipse cx="42" cy="128" rx="30" ry="16" fill="#0d2612" opacity=".8"/>
+        <ellipse cx="60" cy="118" rx="20" ry="13" fill="#0d2612" opacity=".8"/>
+        <!-- pagoda, right side -->
+        <g fill="#08150a">
+          <polygon points="140,150 172,150 168,140 144,140"/>
+          <rect x="150" y="140" width="12" height="14"/>
+          <polygon points="136,140 176,140 170,128 142,128"/>
+          <rect x="152" y="128" width="8" height="12"/>
+          <polygon points="139,128 173,128 168,117 144,117"/>
+          <rect x="153" y="117" width="6" height="11"/>
+          <polygon points="145,117 167,117 163,109 149,109"/>
+          <line x1="156" y1="109" x2="156" y2="98" stroke="#08150a" stroke-width="2.5"/>
+        </g>
+        <!-- torii gate, front left -->
+        <g fill="#08150a">
+          <rect x="52" y="150" width="6" height="30"/>
+          <rect x="96" y="150" width="6" height="30"/>
+          <rect x="46" y="146" width="66" height="6" rx="1"/>
+          <rect x="50" y="156" width="58" height="4"/>
+        </g>
+        <!-- character silhouette -->
+        <g fill="#060f07">
+          <path d="M78 180
+                   C76 158 78 140 84 128
+                   C80 122 79 112 84 104
+                   C82 96 85 86 92 80
+                   C90 74 93 66 100 62
+                   C99 56 103 49 110 47
+                   C112 43 117 41 121 44
+                   C119 49 121 53 125 55
+                   C130 52 135 55 135 61
+                   C131 63 129 68 131 73
+                   C136 74 138 80 134 84
+                   C138 88 137 95 131 97
+                   C133 104 130 111 123 113
+                   C126 121 123 130 115 132
+                   C118 145 116 160 118 180 Z"/>
+        </g>
       </svg>
     </div>
   </div>
