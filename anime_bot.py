@@ -3215,20 +3215,59 @@ def _ffprobe_duration(path):
     except Exception:
         return None
 
-def _analyze_loudness(path):
+async def _analyze_loudness(path, total_duration=None, progress_cb=None):
     """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
-    balandligi (RMS, dB) darajasini o'lchaydi. Natija: [(vaqt_soniya, rms_db), ...]"""
+    balandligi (RMS, dB) darajasini o'lchaydi. Natija: [(vaqt_soniya, rms_db), ...]
+    `total_duration` va `progress_cb(pct)` berilsa, ffmpeg'ning o'z `-progress`
+    chiqishidan foydalanib, tahlil davomida foizni (0-100) real vaqtda xabar qiladi
+    — aks holda jarayon tugagunicha ekranda hech narsa yangilanmaydi."""
     n_samples = _CLIP_SAMPLE_RATE * _CLIP_WINDOW_SEC
     cmd = [
         "ffmpeg", "-i", path,
         "-af", f"aresample={_CLIP_SAMPLE_RATE},asetnsamples=n={n_samples},"
                f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+        "-progress", "pipe:2", "-nostats", "-loglevel", "error",
         "-f", "null", "-"
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_chunks = []
+
+    async def _read_stdout():
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            stdout_chunks.append(chunk)
+
+    async def _read_stderr():
+        last_pct = -1
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            if not (progress_cb and total_duration):
+                continue
+            text = line.decode(errors="ignore").strip()
+            if text.startswith("out_time_us=") or text.startswith("out_time_ms="):
+                try:
+                    us = int(text.split("=", 1)[1])
+                    pct = max(0, min(100, int(us / 1_000_000 / total_duration * 100)))
+                except Exception:
+                    continue
+                if pct != last_pct:
+                    last_pct = pct
+                    await progress_cb(pct)
+
+    await asyncio.gather(_read_stdout(), _read_stderr(), proc.wait())
+
     frames = []
     pts_time = None
-    for line in proc.stdout.splitlines():
+    output = b"".join(stdout_chunks).decode(errors="ignore")
+    for line in output.splitlines():
         m_pts = re.search(r"pts_time:([\d.]+)", line)
         if m_pts:
             pts_time = float(m_pts.group(1))
@@ -3393,10 +3432,19 @@ async def _find_highlight_start(path, target_duration, total_duration, progress_
     `progress_cb(text, force=False)` — AI ishlayaptimi, muvaffaqiyatsizmi yoki
     umuman o'chirilganmi — bu holatlar aniq ajratib xabar qilinadi, shunda admin
     jarayon "qotib qolmaganini", balki AI haqiqatan ishlayotganini ko'radi."""
+    def _make_loudness_pct_cb():
+        """pct-only chaqiruvni progress_cb(text, force) formatiga o'giradi,
+        shunda RMS tahlili davomida ham foiz bar ekranda tirik yangilanadi."""
+        if not progress_cb:
+            return None
+        async def _cb(pct):
+            await progress_cb(f"🔊 Ovoz balandligi tahlili...\n\n{_progress_bar(pct)} {pct}%")
+        return _cb
+
     if not ANTHROPIC_API_KEY:
         if progress_cb:
             await progress_cb("🔇 AI o'chirilgan (ANTHROPIC_API_KEY yo'q) — ovoz balandligi tahlili ishlatilmoqda...", True)
-        frames = await asyncio.to_thread(_analyze_loudness, path)
+        frames = await _analyze_loudness(path, total_duration, progress_cb=_make_loudness_pct_cb())
         start = (
             _pick_best_window(frames, target_duration, total_duration)
             if frames else max(0, (total_duration - target_duration) / 2)
@@ -3412,7 +3460,7 @@ async def _find_highlight_start(path, target_duration, total_duration, progress_
         return ai_start, "🤖 AI tahlili"
     if progress_cb:
         await progress_cb("⚠️ AI javob bermadi — ovoz balandligi (RMS) tahliliga o'tilmoqda...", True)
-    frames = await asyncio.to_thread(_analyze_loudness, path)
+    frames = await _analyze_loudness(path, total_duration, progress_cb=_make_loudness_pct_cb())
     start = (
         _pick_best_window(frames, target_duration, total_duration)
         if frames else max(0, (total_duration - target_duration) / 2)
