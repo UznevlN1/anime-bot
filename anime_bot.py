@@ -47,13 +47,27 @@ if not BOT_TOKEN:
         "BOT_TOKEN environment variable topilmadi! "
         "Render'da Environment > Add Environment Variable orqali BOT_TOKEN ni qoʻshing."
     )
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "5383321037"))
+ADMIN_ID_raw = os.environ.get("ADMIN_ID")
+if not ADMIN_ID_raw:
+    raise RuntimeError(
+        "ADMIN_ID environment variable topilmadi! "
+        "Render'da Environment > Add Environment Variable orqali o'zingizning "
+        "Telegram ID'ingizni ADMIN_ID sifatida qo'shing (masalan @userinfobot orqali oling)."
+    )
+ADMIN_ID = int(ADMIN_ID_raw)
 # /debug endpointi faqat shu tokenni bilgan kishi uchun ochiq (masalan
 # ?token=... orqali). Agar o'rnatilmagan bo'lsa, endpoint butunlay o'chirilgan
 # hisoblanadi — hech kim (hatto tasodifan URL topgan kishi ham) server fayl
 # tuzilishini ko'ra olmaydi.
 DEBUG_TOKEN = os.environ.get("DEBUG_TOKEN")
-STORAGE_CHANNEL = int(os.environ.get("STORAGE_CHANNEL", "-1002195410889"))
+STORAGE_CHANNEL_raw = os.environ.get("STORAGE_CHANNEL")
+if not STORAGE_CHANNEL_raw:
+    raise RuntimeError(
+        "STORAGE_CHANNEL environment variable topilmadi! "
+        "Videolar saqlanadigan xom kanal ID'sini (masalan -100xxxxxxxxxx) "
+        "STORAGE_CHANNEL sifatida qo'shing."
+    )
+STORAGE_CHANNEL = int(STORAGE_CHANNEL_raw)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://anime-bot-fd8r.onrender.com/webapp")
 
 # Onlayn video striming uchun (my.telegram.org dan olinadi)
