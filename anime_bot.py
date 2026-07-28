@@ -18,7 +18,7 @@ from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, KICK
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from aiohttp import web
 import aiohttp
@@ -46,6 +46,11 @@ if not BOT_TOKEN:
         "Render'da Environment > Add Environment Variable orqali BOT_TOKEN ni qoʻshing."
     )
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "5383321037"))
+# /debug endpointi faqat shu tokenni bilgan kishi uchun ochiq (masalan
+# ?token=... orqali). Agar o'rnatilmagan bo'lsa, endpoint butunlay o'chirilgan
+# hisoblanadi — hech kim (hatto tasodifan URL topgan kishi ham) server fayl
+# tuzilishini ko'ra olmaydi.
+DEBUG_TOKEN = os.environ.get("DEBUG_TOKEN")
 STORAGE_CHANNEL = int(os.environ.get("STORAGE_CHANNEL", "-1002195410889"))
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://anime-bot-fd8r.onrender.com/webapp")
 
@@ -1574,6 +1579,35 @@ def admin_anime_list_keyboard(animes, page, total, prefix):
         buttons.append(nav)
     buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# ===================== /HELP =====================
+@dp.message(Command("help"))
+async def help_handler(message: Message):
+    support_url = await asyncio.to_thread(db.get_setting, "profile_support_url")
+    text = (
+        "🆘 <b>Yordam — botdan qanday foydalanish kerak</b>\n\n"
+        "🔍 <b>Qidiruv</b> — anime nomini yozib qidiring\n\n"
+        "🎬 <b>Anime Film</b> / 📺 <b>Anime Serial</b> — turlari bo'yicha roʻyxatni koʻring\n\n"
+        "🎲 <b>Random</b> — tasodifiy anime tavsiya qiladi\n\n"
+        "🎌 <b>«Animelarni koʻrish»</b> tugmasi mini-ilovani ochadi. U yerda:\n"
+        "   • Barcha animelar va kategoriyalar\n"
+        "   • ❤️ Sevimlilar — yoqqan animelaringizni saqlang\n"
+        "   • 🕒 Tomosha tarixi — qaysi joyida toʻxtaganingiz eslab qolinadi\n"
+        "   • 💬 Har bir anime ostiga izoh qoldirish\n"
+        "   • 👤 Profil — statistika, obunalar va hisob sozlamalari\n\n"
+        "🔔 <b>«Xabardor qil»</b> — anime sahifasida bosilsa, shu animega yangi "
+        "qism yoki jonli efir qoʻshilganda sizga shaxsiy xabar keladi\n\n"
+        "💎 <b>Premium</b> — reklamasiz tomosha, oldindan chiqqan qismlar va "
+        "premium-only kontentga kirish imkonini beradi. Doʻstingizni referal "
+        "havolangiz orqali taklif qilsangiz, u roʻyxatdan oʻtganda sizga "
+        "bonus kunlar qoʻshiladi (Premium boʻlimida havolangizni topasiz).\n\n"
+        "⚙️ <b>Buyruqlar:</b>\n"
+        "/start — botni qayta ishga tushirish / bosh menu\n"
+        "/help — shu yordam xabari\n"
+    )
+    if support_url:
+        text += f"\n❓ Savol yoki muammo boʻlsa: {support_url}"
+    await message.answer(text, parse_mode="HTML")
 
 # ===================== /START =====================
 @dp.message(CommandStart())
@@ -3177,6 +3211,10 @@ async def admin_activity_log(call: CallbackQuery):
     await call.message.edit_text(text, reply_markup=admin_back(), parse_mode="HTML")
 
 # ---- XABAR YUBORISH ----
+# Telegram Bot API'ning umumiy flood-limitidan (~30 xabar/soniya) xavfsiz
+# pastroq tezlik — broadcast paytida FLOOD_WAIT xatolariga uchramaslik uchun.
+BROADCAST_DELAY = 0.05  # ~20 xabar/soniya
+
 @dp.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
@@ -3257,19 +3295,32 @@ async def bc_send(call: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text=data["bc_button_text"], url=data["bc_button_link"])]
         ])
     for user_id in users:
-        try:
-            await bot.copy_message(
-                user_id,
-                data["bc_chat_id"],
-                data["bc_message_id"],
-                reply_markup=kb
-            )
-            sent += 1
-        except TelegramForbiddenError:
-            await asyncio.to_thread(db.set_user_inactive, user_id)
-            failed += 1
-        except Exception:
-            failed += 1
+        # FLOOD_WAIT bo'lsa (Telegram vaqtincha to'xtatsa), bir marta kutib
+        # qayta uriniladi — avval bu holat oddiy "failed" deb hisoblanardi va
+        # xabar shu foydalanuvchiga umuman yetib bormasdi.
+        for attempt in range(2):
+            try:
+                await bot.copy_message(
+                    user_id,
+                    data["bc_chat_id"],
+                    data["bc_message_id"],
+                    reply_markup=kb
+                )
+                sent += 1
+                break
+            except TelegramForbiddenError:
+                await asyncio.to_thread(db.set_user_inactive, user_id)
+                failed += 1
+                break
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception:
+                failed += 1
+                break
+        # Har xabardan keyin qisqa pauza — Telegramning flood-limitiga
+        # (~30 xabar/soniya) uchramaslik uchun.
+        await asyncio.sleep(BROADCAST_DELAY)
     await call.message.edit_text(
         f"📨 Yuborildi!\n✅ {sent} ta\n❌ {failed} ta",
         reply_markup=admin_back()
@@ -3785,27 +3836,64 @@ async def admin_help(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(
-        "📖 <b>Admin Qollanma</b>\n\n"
-        "➕ <b>Anime qoshish:</b>\n"
-        "Rasm → Nom → Yil → Davlat → Janr → Malumot → "
-        "Tur (film/serial) → Videolarni yuboring → "
-        "/done yozing → Kanalga saqlanadi\n\n"
-        "➕ <b>Davom qoshish:</b>\n"
-        "Royxat yoki nom → Serial tanlang → "
-        "Videolar yuboring → /done\n\n"
-        "✏️ <b>Tahrirlash:</b>\n"
-        "Royxat yoki nom → Maydon tanlang → Yangi qiymat\n\n"
-        "🗑 <b>Ochirish:</b>\n"
-        "Royxat yoki nom → Tasdiqlang\n\n"
-        "📨 <b>Xabar:</b>\n"
-        "Oddiy — matn/rasm/video\n"
-        "Inline — xabar + tugma + link\n\n"
-        "📢 <b>Kanal formati:</b>\n"
-        "@kanalnom | Kanal nomi\n\n"
-        "🔧 <b>Texnik ishlar:</b>\n"
-        "Yoqilsa foydalanuvchilar kira olmaydi\n\n"
-        "🔒 <b>Kontent himoyasi:</b>\n"
-        "Yoqilsa video forward/save bloklanadi",
+        "📖 <b>Admin Qoʻllanma</b>\n\n"
+
+        "📚 <b>Kontent boshqaruvi</b>\n"
+        "➕ Anime qoʻshish: Rasm → Nom → Yil → Davlat → Janr → Malumot → "
+        "Til → Tur (film/serial) → Videolarni yuboring → /done\n"
+        "➕ Davom (qism) qoʻshish: Roʻyxat yoki nom → Serial tanlang → "
+        "Videolar yuboring → /done\n"
+        "✏️ Tahrirlash: Roʻyxat yoki nom → Maydon tanlang → Yangi qiymat\n"
+        "🗑 Oʻchirish: Roʻyxat yoki nom → Tasdiqlang\n"
+        "🖼 Bannerlar: Webapp bosh sahifasidagi reklama suratlarini "
+        "qoʻshish/oʻchirish\n\n"
+
+        "👥 <b>Foydalanuvchilar</b>\n"
+        "🔍 ID yoki @username orqali foydalanuvchini topish, maʼlumotlarini koʻrish\n"
+        "🚫 Bloklash / blokdan chiqarish\n"
+        "👑 Admin qoʻshish — <i>faqat asosiy admin (ADMIN_ID)</i> yangi qoʻshimcha "
+        "admin qoʻsha oladi; qoʻshimcha adminlar bu huquqqa ega emas\n"
+        "🗑 Admin oʻchirish — qoʻshimcha adminlar roʻyxatidan olib tashlash\n"
+        "📜 Admin faoliyati — barcha adminlarning oxirgi harakatlari logi\n\n"
+
+        "📊 <b>Statistika</b>\n"
+        "📊 Umumiy statistika — foydalanuvchilar (jami/faol/bloklangan/bugun/"
+        "hafta/oy), animelar soni, eng koʻp koʻrilgan 5 ta anime\n"
+        "📅 Hisobot — bugungi yangi foydalanuvchilar, tark etganlar, yangi "
+        "animelar, umumiy koʻrishlar\n\n"
+
+        "📨 <b>Muloqot</b>\n"
+        "📨 Xabar yuborish — barcha faol foydalanuvchilarga: Oddiy (matn/rasm/"
+        "video) yoki Inline (xabar + tugma + link)\n"
+        "💬 Izohlar — foydalanuvchilarning anime ostidagi izohlarini koʻrish "
+        "va oʻchirish\n"
+        "📢 Sponsor baner — webapp'da koʻrsatiladigan reklama banerini sozlash\n\n"
+
+        "⚙️ <b>Sozlamalar</b>\n"
+        "📢 Kanallar — majburiy obuna kanallari roʻyxati (qoʻshish/oʻchirish)\n"
+        "🔗 Havolalar — webapp Profil boʻlimidagi kanal va qoʻllab-quvvatlash "
+        "havolalarini sozlash\n"
+        "🔒 Kontent himoyasi — yoqilsa, yuborilgan videolarni forward/saqlab "
+        "olish bloklanadi\n"
+        "🚫 Soʻz filtri — taqiqlangan soʻzlar roʻyxati (izohlarda avtomatik "
+        "filtrlanadi)\n"
+        "🔧 Texnik ishlar — yoqilsa, oddiy foydalanuvchilar botga kira olmaydi "
+        "(adminlar bundan mustasno)\n"
+        "👤 Profil boʻlimi (bepul) — Premium boʻlmagan foydalanuvchilar uchun "
+        "webapp Profil boʻlimini vaqtincha yopish (Premium sotishni "
+        "ragʻbatlantirish kampaniyasi uchun)\n"
+        "📣 Eʼlon kanali — yangi anime/qism qoʻshilganda avtomatik eʼlon "
+        "yuboriladigan kanal\n\n"
+
+        "💎 <b>Premium</b>\n"
+        "Tariflar va narxlarni (1 oy/3 oy/1 yil) hamda toʻlov kartasini sozlash\n"
+        "Foydalanuvchilardan kelgan toʻlov soʻrovlarini (skrinshot bilan) "
+        "koʻrib, tasdiqlash yoki rad etish\n"
+        "🎁 Istalgan foydalanuvchiga toʻgʻridan-toʻgʻri (toʻlovsiz) Premium "
+        "sovgʻa qilish\n\n"
+
+        "ℹ️ Foydalanuvchilar uchun /help buyrugʻi ham mavjud — botdan qanday "
+        "foydalanish boʻyicha qisqa qoʻllanma.",
         reply_markup=admin_back(),
         parse_mode="HTML"
     )
@@ -4675,6 +4763,12 @@ async def webapp_save_position(request):
     return web.json_response({"ok": True})
 
 async def debug_path(request):
+    # XAVFSIZLIK: bu diagnostika endpointi ilgari hech kim tekshirmasdan
+    # ochiq edi — istalgan kishi server fayl tuzilishini ko'rishi mumkin edi.
+    # Endi faqat DEBUG_TOKEN muhit o'zgaruvchisi o'rnatilgan bo'lsa va
+    # so'rovda to'g'ri ?token=... berilgan bo'lsagina javob qaytaradi.
+    if not DEBUG_TOKEN or request.query.get("token") != DEBUG_TOKEN:
+        return web.Response(status=404)
     import os
     base_dir = os.path.dirname(os.path.abspath(__file__))
     webapp_dir = os.path.join(base_dir, "webapp")
@@ -4714,11 +4808,21 @@ async def start_web_server():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     webapp_dir = os.path.join(base_dir, "webapp")
 
+    webapp_dir_real = os.path.realpath(webapp_dir)
+
     async def serve_webapp_file(request):
         filename = request.match_info["filename"]
         filepath = os.path.join(webapp_dir, filename)
-        if not os.path.exists(filepath):
+        # XAVFSIZLIK: filename URL'dan to'g'ridan-to'g'ri kelgani uchun
+        # (masalan "..%2f..%2fdatabase.py" kabi) webapp_dir'dan tashqariga
+        # chiqishga urinishi mumkin edi. Haqiqiy (realpath) yo'l webapp_dir
+        # ichida qolishini tekshiramiz — aks holda rad etamiz.
+        real_filepath = os.path.realpath(filepath)
+        if real_filepath != webapp_dir_real and not real_filepath.startswith(webapp_dir_real + os.sep):
+            return web.Response(text="Ruxsat yoq", status=403)
+        if not os.path.isfile(real_filepath):
             return web.Response(text="Topilmadi", status=404)
+        filepath = real_filepath
         mime, _ = mimetypes.guess_type(filepath)
         with open(filepath, "rb") as f:
             content = f.read()
@@ -5045,6 +5149,14 @@ async def main():
         BOT_USERNAME = me.username
     except Exception as e:
         logger.error(f"Bot username olinmadi: {e}")
+    try:
+        from aiogram.types import BotCommand
+        await bot.set_my_commands([
+            BotCommand(command="start", description="🏠 Bosh menu"),
+            BotCommand(command="help", description="🆘 Yordam — qanday foydalanish kerak"),
+        ])
+    except Exception as e:
+        logger.warning(f"Bot buyruqlari (/-menyu) ornatilmadi: {e}")
     if STREAM_ENABLED:
         async def _warm_peer_cache(client, label):
             # Pyrogram (MTProto) botning a'zo bo'lgan kanalni "tanishi" uchun kamida bitta
