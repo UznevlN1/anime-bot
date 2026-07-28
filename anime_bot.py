@@ -1,9 +1,11 @@
 import asyncio
+import base64
 import hashlib
 import hmac
 import logging
 import math
 import re
+import subprocess
 import time
 from urllib.parse import parse_qsl
 from datetime import datetime, timedelta
@@ -11,7 +13,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ChatMemberUpdated, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
-    WebAppInfo
+    WebAppInfo, FSInputFile
 )
 import json
 from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, KICKED
@@ -177,6 +179,10 @@ class AddEpisode(StatesGroup):
     choose_method = State()
     choose_anime = State()
     videos = State()
+
+class ClipVideo(StatesGroup):
+    search_query = State()
+    waiting_video = State()
 
 class EditAnime(StatesGroup):
     choose_method = State()
@@ -1399,6 +1405,7 @@ def admin_cat_content_episodes_keyboard():
             InlineKeyboardButton(text="➕ Davom qo'shish", callback_data="admin_add_episode", style="success"),
             InlineKeyboardButton(text="✏️ Qismlarni tahrirlash", callback_data="admin_episodes", style="primary"),
         ],
+        [InlineKeyboardButton(text="✂️ Qiziqarli joy kesish", callback_data="clip_start", style="success")],
         [InlineKeyboardButton(text="🔙 Kontent boshqaruvi", callback_data="admin_cat_content")],
     ])
 
@@ -2543,6 +2550,10 @@ async def add_done(message: Message, state: FSMContext):
         await asyncio.to_thread(db.add_episode, anime_id, i, msg_id)
     await state.clear()
 
+    # Reklama klipi — 1-qismdan avtomatik yaratiladi (fonda, javobni bloklamaydi)
+    if AUTO_CLIP_ENABLED and data["video_ids"]:
+        asyncio.create_task(_auto_generate_highlight_clip(message, data["video_ids"][0]))
+
     # Kanalga e'lon — "Tomosha qilish" tugmasi bosilsa foydalanuvchi botga o'tib,
     # birinchi qism avtomatik yuboriladi
     anime_row = await asyncio.to_thread(db.get_anime, anime_id)
@@ -2645,6 +2656,11 @@ async def addepi_done(message: Message, state: FSMContext):
     for i, msg_id in enumerate(data["episode_msg_ids"]):
         await asyncio.to_thread(db.add_episode, data["episode_anime_id"], data["next_ep"] + i, msg_id)
     await state.clear()
+
+    # Reklama klipi — shu safar yuklangan birinchi (eng yangi) qismdan avtomatik
+    # yaratiladi (fonda, javobni bloklamaydi)
+    if AUTO_CLIP_ENABLED and data["episode_msg_ids"]:
+        asyncio.create_task(_auto_generate_highlight_clip(message, data["episode_msg_ids"][0]))
 
     # Kanalga e'lon — yangi qo'shilgan birinchi qismga yo'naltiruvchi tugma bilan
     anime_row = await asyncio.to_thread(db.get_anime, data["episode_anime_id"])
@@ -3136,6 +3152,606 @@ async def epact_new_video(message: Message, state: FSMContext):
     await asyncio.to_thread(db.update_episode, data["edit_ep_id"], sent.message_id)
     await state.clear()
     await message.answer("✅ Qism yangilandi!", reply_markup=admin_keyboard())
+
+# ===================== QIZIQARLI JOY KESISH (AUTO-HIGHLIGHT) =====================
+# Ovoz balandligi (RMS) tahliliga asoslanib videoning eng "qiziqarli" (energiyaga
+# eng boy — jang/kulgi/musiqa avjida odatda ovoz balandroq bo'ladi) qismini avtomatik
+# topib, 15/30 soniyalik klip qilib kesib beradi. Chinakam video-tushunish (nima
+# tasvirlanganini "ko'rish") emas — bu audio energiyasiga asoslangan amaliy evristika,
+# lekin jang/kulgi/musiqiy avj kabi joylarni yetarlicha yaxshi topadi.
+#
+# MUHIM: bu funksiya ishlashi uchun serverda `ffmpeg` va `ffprobe` o'rnatilgan bo'lishi
+# SHART (Render'da standart Python image'ida ular yo'q — Aptfile yoki Dockerfile orqali
+# qo'shish kerak bo'ladi, aks holda quyidagi funksiyalar xato beradi).
+
+CLIP_TMP_DIR = "/tmp/anime_clips"
+_CLIP_WINDOW_SEC = 5     # tahlil oynasi — video shu uzunlikdagi bo'laklarga bo'linadi
+_CLIP_SAMPLE_RATE = 44100
+
+# Yangi qism yuklanganda klip avtomatik yaratilishi kerakmi (admin buyruq bermasdan).
+# O'chirish uchun Environment'da AUTO_CLIP_ENABLED=0 qiling.
+AUTO_CLIP_ENABLED = os.environ.get("AUTO_CLIP_ENABLED", "1") == "1"
+AUTO_CLIP_DURATION = int(os.environ.get("AUTO_CLIP_DURATION", "30"))
+
+def _ffprobe_duration(path):
+    """Video faylining umumiy davomiyligini (soniyalarda) qaytaradi."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
+        capture_output=True, text=True
+    )
+    try:
+        return float(out.stdout.strip())
+    except Exception:
+        return None
+
+def _analyze_loudness(path):
+    """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
+    balandligi (RMS, dB) darajasini o'lchaydi. Natija: [(vaqt_soniya, rms_db), ...]"""
+    n_samples = _CLIP_SAMPLE_RATE * _CLIP_WINDOW_SEC
+    cmd = [
+        "ffmpeg", "-i", path,
+        "-af", f"aresample={_CLIP_SAMPLE_RATE},asetnsamples=n={n_samples},"
+               f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+        "-f", "null", "-"
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    frames = []
+    pts_time = None
+    for line in proc.stdout.splitlines():
+        m_pts = re.search(r"pts_time:([\d.]+)", line)
+        if m_pts:
+            pts_time = float(m_pts.group(1))
+            continue
+        m_rms = re.search(r"RMS_level=(-?[\d.]+|-inf)", line)
+        if m_rms and pts_time is not None:
+            val = m_rms.group(1)
+            rms = -120.0 if val == "-inf" else float(val)
+            frames.append((pts_time, rms))
+            pts_time = None
+    return frames
+
+def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05):
+    """RMS ro'yxatidan `target_duration` soniyalik eng "baland ovozli" (energiyaga
+    boy) uzluksiz oraliqni topadi. Intro/outro/kredit qismlarini chetlab o'tish uchun
+    boshi va oxiridan ozgina joy (~5%) hisobga olinmaydi."""
+    n_windows = max(1, round(target_duration / _CLIP_WINDOW_SEC))
+    edge_margin = max(0, total_duration * edge_margin_ratio)
+    usable = [(t, r) for (t, r) in frames if edge_margin <= t <= max(edge_margin, total_duration - edge_margin)]
+    if len(usable) < n_windows:
+        usable = frames
+    if not usable:
+        return max(0, (total_duration - target_duration) / 2)
+    # dB logarifmik shkala — to'g'ri qo'shish uchun chiziqli energiyaga o'giramiz
+    energies = [10 ** (r / 10.0) for (_, r) in usable]
+    best_idx, best_sum = 0, -1.0
+    for i in range(0, len(usable) - n_windows + 1):
+        s = sum(energies[i:i + n_windows])
+        if s > best_sum:
+            best_sum = s
+            best_idx = i
+    start_time = usable[best_idx][0]
+    return min(start_time, max(0, total_duration - target_duration))
+
+
+# ---- AI (VISION) ORQALI ENG QIZIQARLI JOYNI TOPISH ----
+# Yuqoridagi ovoz-balandligi (RMS) usuli faqat audio energiyasiga qaraydi — u nima
+# tasvirlanayotganini bilmaydi. Bu yerda Claude'ning vision qobiliyatidan foydalanib,
+# videodan bir nechta nomzod lahza (kadr) olinadi va Claude'dan ENG jonli/qiziqarli
+# lahzani (jang, kulgi, drama cho'qqisi va h.k.) tanlashi so'raladi.
+#
+# ISHLASHI UCHUN: serverga ANTHROPIC_API_KEY environment o'zgaruvchisi kerak
+# (https://console.anthropic.com dan olinadi). O'rnatilmagan yoki so'rov muvaffaqiyatsiz
+# bo'lsa, bot xato bermaydi — avtomatik ravishda pastdagi ovoz-balandligi usuliga qaytadi.
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+_AI_VISION_MODEL = "claude-haiku-4-5-20251001"  # vision uchun tez va arzon model
+_AI_CANDIDATE_COUNT = 8  # tahlil qilinadigan namunaviy kadrlar soni (ko'p bo'lsa — xarajat oshadi)
+
+def _extract_frame(path, timestamp, out_path):
+    """Videoning bitta lahzasidan kichik JPEG kadr oladi (xarajat/tokenni tejash
+    uchun kichraytirilgan o'lchamda — 480px kengida)."""
+    subprocess.run([
+        "ffmpeg", "-y", "-ss", str(max(0, timestamp)), "-i", path,
+        "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4",
+        out_path, "-loglevel", "error"
+    ], check=True)
+
+def _candidate_start_times(target_duration, total_duration, edge_margin_ratio=0.05):
+    """Klip boshlanishi mumkin bo'lgan nomzod vaqtlarni video bo'ylab bir tekis
+    taqsimlab qaytaradi (intro/outro chetlab o'tiladi, xuddi RMS usulidagi kabi)."""
+    edge_margin = total_duration * edge_margin_ratio
+    lo = edge_margin
+    hi = max(lo, total_duration - edge_margin - target_duration)
+    if hi <= lo:
+        return [max(0, (total_duration - target_duration) / 2)]
+    n = min(_AI_CANDIDATE_COUNT, max(3, int((hi - lo) // max(5, target_duration))))
+    if n <= 1:
+        return [lo]
+    step = (hi - lo) / (n - 1)
+    return [lo + i * step for i in range(n)]
+
+async def _ai_pick_best_window(path, target_duration, total_duration):
+    """Nomzod lahzalardan kadr oladi, Claude'ga (vision) yuboradi va eng
+    qiziqarlisini tanlashini so'raydi. Muvaffaqiyatsiz bo'lsa (API kaliti yo'q,
+    tarmoq xatosi, formatlanmagan javob va h.k.) None qaytaradi — bu holda
+    chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    candidates = _candidate_start_times(target_duration, total_duration)
+    tmp_dir = os.path.join(CLIP_TMP_DIR, f"frames_{int(time.time() * 1000)}")
+    try:
+        await asyncio.to_thread(os.makedirs, tmp_dir, exist_ok=True)
+        content = [{
+            "type": "text",
+            "text": (
+                f"Quyida bitta anime epizodidan {len(candidates)} ta turli lahzada olingan "
+                f"kadrlar bor, har biri raqamlangan (1 dan {len(candidates)} gacha). Ijtimoiy "
+                f"tarmoq (Instagram Reels/Stories) uchun qisqa reklama klipi shu lahzalardan "
+                f"BIRIDAN boshlanadi — shuning uchun eng \"qiziqarli\"/jonli ko'ringan kadrni "
+                f"tanla. Jang, kulgili moment, kuchli hissiyot yoki chiroyli vizual sahnalarga "
+                f"ustunlik ber. FAQAT quyidagi JSON formatida javob ber, boshqa hech qanday "
+                f"matn (izoh, tushuntirish) yozma: {{\"index\": <raqam>}}"
+            )
+        }]
+        for i, ts in enumerate(candidates, 1):
+            frame_path = os.path.join(tmp_dir, f"f{i}.jpg")
+            await asyncio.to_thread(_extract_frame, path, ts, frame_path)
+            if not os.path.exists(frame_path):
+                continue
+            with open(frame_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            content.append({"type": "text", "text": f"Kadr #{i}:"})
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
+            })
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": _AI_VISION_MODEL,
+                    "max_tokens": 100,
+                    "messages": [{"role": "user", "content": content}],
+                },
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                data = await resp.json()
+
+        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        m = re.search(r'"index"\s*:\s*(\d+)', text)
+        if not m:
+            logger.error(f"[ai-highlight] javobni ajratib bo'lmadi: {text[:200]}")
+            return None
+        idx = int(m.group(1)) - 1
+        if 0 <= idx < len(candidates):
+            return candidates[idx]
+        return None
+    except Exception as e:
+        logger.error(f"[ai-highlight] xato: {e}")
+        return None
+    finally:
+        try:
+            if os.path.exists(tmp_dir):
+                for fn in os.listdir(tmp_dir):
+                    os.remove(os.path.join(tmp_dir, fn))
+                os.rmdir(tmp_dir)
+        except Exception:
+            pass
+
+async def _find_highlight_start(path, target_duration, total_duration):
+    """Avval AI (vision) usulini sinaydi; muvaffaqiyatsiz bo'lsa yoki
+    ANTHROPIC_API_KEY o'rnatilmagan bo'lsa, ovoz-balandligi evristikasiga qaytadi.
+    Qaytaradi: (start_soniya, usul_nomi — status xabarida ko'rsatish uchun)."""
+    ai_start = await _ai_pick_best_window(path, target_duration, total_duration)
+    if ai_start is not None:
+        return ai_start, "🤖 AI tahlili"
+    frames = await asyncio.to_thread(_analyze_loudness, path)
+    start = (
+        _pick_best_window(frames, target_duration, total_duration)
+        if frames else max(0, (total_duration - target_duration) / 2)
+    )
+    return start, "🔊 ovoz tahlili"
+
+
+# ---- SUV BELGISI (WATERMARK) ----
+WATERMARK_LINE1 = "Telegram: @anifilm_bot"
+WATERMARK_LINE2 = "Instagram: @anifilm_bot"
+_WATERMARK_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+]
+
+def _find_watermark_font():
+    """Server'da mavjud shrift faylini topadi. Hech biri topilmasa None qaytaradi —
+    bu holda ffmpeg fontconfig orqali standart shriftni ishlatishga urinadi (agar
+    fontconfig o'rnatilmagan bo'lsa, drawtext xato beradi — shu sabab serverga
+    `fonts-dejavu-core` paketini o'rnatish tavsiya etiladi, pastdagi izohga qarang)."""
+    for p in _WATERMARK_FONT_CANDIDATES:
+        if os.path.exists(p):
+            return p
+    return None
+
+def _drawtext_filter(text, font_path, fontsize, y_expr):
+    escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    font_part = f"fontfile={font_path}:" if font_path else ""
+    return (
+        f"drawtext={font_part}text='{escaped}':fontcolor=white:fontsize={fontsize}:"
+        f"box=1:boxcolor=black@0.5:boxborderw={max(4, fontsize // 4)}:"
+        f"x=(w-text_w)/2:y={y_expr}"
+    )
+
+async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None):
+    """`cmd` (ffmpeg buyrug'i, ro'yxat) ni -progress pipe:1 bilan ishga tushiradi.
+    ffmpeg joriy pozitsiyasini out_time_ms sifatida chiqarib turadi (bu maydon nomi
+    chalg'ituvchi — aslida MIKROsoniya, ffmpeg'ning eski moslik uchun saqlab
+    qolingan xatosi). Shundan foizni hisoblab on_progress(percent) callback'iga
+    (sync yoki async bo'lishi mumkin) uzatib boradi."""
+    full_cmd = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
+    proc = await asyncio.create_subprocess_exec(
+        *full_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    last_pct = -1
+    error_tail = []
+    async for raw in proc.stdout:
+        line = raw.decode(errors="ignore").strip()
+        if not line:
+            continue
+        if line.startswith("out_time_ms="):
+            try:
+                out_us = int(line.split("=", 1)[1])
+                pct = max(0, min(99, int((out_us / 1_000_000) / max(0.1, total_seconds) * 100)))
+                if pct != last_pct:
+                    last_pct = pct
+                    if on_progress:
+                        result = on_progress(pct)
+                        if asyncio.iscoroutine(result):
+                            await result
+            except (ValueError, IndexError):
+                pass
+        elif "=" not in line:
+            error_tail.append(line)
+            del error_tail[:-10]
+    ret = await proc.wait()
+    if ret != 0:
+        raise RuntimeError("ffmpeg xato bilan tugadi: " + " / ".join(error_tail[-3:]))
+    if on_progress:
+        result = on_progress(100)
+        if asyncio.iscoroutine(result):
+            await result
+
+async def _render_horizontal(path, start, duration, out_path, font_path, progress_cb=None):
+    """16:9 (1280x720) format — kerak bo'lsa qora chiziqlar (pad) bilan aniq 16:9
+    ga keltiriladi, ustiga suv belgisi qo'yiladi."""
+    fs = 28
+    vf = (
+        "scale=1280:720:force_original_aspect_ratio=decrease,"
+        "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,"
+        + _drawtext_filter(WATERMARK_LINE1, font_path, fs, f"h-th-{fs+36}") + ","
+        + _drawtext_filter(WATERMARK_LINE2, font_path, fs, f"h-th-{fs}")
+    )
+    cmd = [
+        "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+        out_path, "-loglevel", "error"
+    ]
+    await _run_ffmpeg_progress(cmd, duration, progress_cb)
+
+def _has_audio_stream(path):
+    """Faylda audio trek bor-yo'qligini tekshiradi (ba'zi kutilmagan hollarda,
+    masalan buzilgan/ovozsiz video yuborilsa, xato bermasligi uchun)."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=index", "-of", "csv=p=0", path],
+        capture_output=True, text=True
+    )
+    return bool(out.stdout.strip())
+
+async def _render_vertical(path, start, duration, out_path, font_path, has_audio=True, progress_cb=None):
+    """9:16 (1080x1920, Instagram Stories/Reels) format — butun kadr saqlanadi:
+    fon sifatida xiralashtirilgan (blur) kattalashtirilgan nusxa, markazda esa
+    original video to'liq ko'rinishda, ustiga suv belgisi qo'yiladi."""
+    fs = 34
+    filter_complex = (
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,gblur=sigma=20[bg];"
+        "[0:v]scale=1080:-2[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,"
+        + _drawtext_filter(WATERMARK_LINE1, font_path, fs, f"h-th-{fs+56}") + ","
+        + _drawtext_filter(WATERMARK_LINE2, font_path, fs, f"h-th-{fs+6}")
+        + "[outv]"
+    )
+    cmd = [
+        "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
+        "-filter_complex", filter_complex, "-map", "[outv]"
+    ]
+    if has_audio:
+        cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "128k"]
+    cmd += [
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-movflags", "+faststart", out_path, "-loglevel", "error"
+    ]
+    await _run_ffmpeg_progress(cmd, duration, progress_cb)
+
+async def _get_channel_message_for_clip(channel_msg_id):
+    """STORAGE_CHANNEL'dagi xabarni Pyrogram orqali oladi. Birinchi urinish
+    muvaffaqiyatsiz bo'lsa (masalan peer keshi bo'sh bo'lsa), sinxronlash signali
+    yuborib qayta uriniladi — xuddi onlayn striming funksiyasidagidek."""
+    if not STREAM_ENABLED or not pyro:
+        raise RuntimeError(
+            "Bu funksiya uchun API_ID/API_HASH sozlanmagan (onlayn striming o'chirilgan). "
+            "Render Environment'ga API_ID va API_HASH qo'shing."
+        )
+    try:
+        return await pyro.get_messages(STORAGE_CHANNEL, channel_msg_id)
+    except Exception:
+        try:
+            sync_msg = await bot.send_message(STORAGE_CHANNEL, "🔄")
+            await asyncio.sleep(2)
+            try:
+                await sync_msg.delete()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return await pyro.get_messages(STORAGE_CHANNEL, channel_msg_id)
+
+async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status_message):
+    """Video yuklab olinadi -> eng qiziqarli joy topiladi -> suv belgisi bilan
+    16:9 va 9:16 formatlarda kesiladi -> ikkalasi ham adminga yuboriladi.
+    Butun jarayon davomida BITTA xabar tahrirlanib, foiz (%) va o'tgan/qolgan
+    vaqt shu yerda ko'rsatib boriladi (haddan tashqari tez-tez tahrirlab,
+    Telegram flood-limitiga tegib qolmaslik uchun ~2 soniyada bir marta)."""
+    await asyncio.to_thread(os.makedirs, CLIP_TMP_DIR, exist_ok=True)
+    ts = int(time.time() * 1000)
+    src_path = os.path.join(CLIP_TMP_DIR, f"src_{channel_msg_id}_{ts}.mp4")
+    out_h_path = os.path.join(CLIP_TMP_DIR, f"clip16x9_{channel_msg_id}_{ts}.mp4")
+    out_v_path = os.path.join(CLIP_TMP_DIR, f"clip9x16_{channel_msg_id}_{ts}.mp4")
+
+    pipeline_start = time.monotonic()
+    progress_msg = await status_message.answer("⏳ Boshlanmoqda...")
+    _edit_state = {"t": 0.0, "text": ""}
+
+    async def set_progress(text, force=False):
+        """progress_msg'ni tahrirlaydi. `force=False` bo'lsa, matn o'zgarmagan yoki
+        oxirgi tahrirdan 2 soniya o'tmagan bo'lsa — o'tkazib yuboriladi (flood-limit)."""
+        now = time.monotonic()
+        if not force and (text == _edit_state["text"] or now - _edit_state["t"] < 2.0):
+            return
+        _edit_state["t"] = now
+        _edit_state["text"] = text
+        try:
+            await progress_msg.edit_text(text)
+        except Exception:
+            pass  # masalan "message is not modified" — bemalol e'tiborsiz qoldiriladi
+
+    def make_stage_cb(label):
+        async def cb(pct):
+            elapsed = int(time.monotonic() - pipeline_start)
+            await set_progress(f"✂️ {label}: {pct}% — jami o'tgan vaqt: {elapsed}s")
+        return cb
+
+    try:
+        msg = await _get_channel_message_for_clip(channel_msg_id)
+        media = msg.video or msg.document or msg.animation
+        if not media:
+            await set_progress("❌ Bu xabarda video topilmadi.", force=True)
+            await status_message.answer("❌ Bu xabarda video topilmadi.", reply_markup=admin_keyboard())
+            return
+
+        async def dl_progress(current, total):
+            elapsed = time.monotonic() - pipeline_start
+            pct = int(current / total * 100) if total else 0
+            speed = current / elapsed if elapsed > 0.5 else 0
+            remain = int((total - current) / speed) if speed > 0 else None
+            cur_mb, tot_mb = current / 1_048_576, (total or 0) / 1_048_576
+            remain_txt = f" — qoldi ~{remain}s" if remain is not None else ""
+            speed_txt = f" — {speed / 1_048_576:.1f} MB/s" if speed > 0 else ""
+            await set_progress(f"⬇️ Yuklab olinmoqda: {pct}% ({cur_mb:.1f}/{tot_mb:.1f} MB){speed_txt}{remain_txt}")
+
+        await set_progress("⬇️ Yuklab olinmoqda: 0%", force=True)
+        client = _next_stream_client() if _stream_clients else pyro
+        await client.download_media(msg, file_name=src_path, progress=dl_progress)
+
+        total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
+        if not total_dur or total_dur <= 0:
+            await set_progress("❌ Video davomiyligini aniqlab bo'lmadi (fayl buzilgan bo'lishi mumkin).", force=True)
+            await status_message.answer("❌ Video davomiyligini aniqlab bo'lmadi.", reply_markup=admin_keyboard())
+            return
+
+        if total_dur <= duration:
+            start, clip_len, method = 0.0, total_dur, None
+        else:
+            await set_progress("🔎 Qiziqarli joy qidirilmoqda (AI tahlil qilmoqda)...", force=True)
+            start, method = await _find_highlight_start(src_path, duration, total_dur)
+            clip_len = float(duration)
+
+        font_path = await asyncio.to_thread(_find_watermark_font)
+        has_audio = await asyncio.to_thread(_has_audio_stream, src_path)
+
+        await set_progress("✂️ 16:9 tayyorlanmoqda: 0%", force=True)
+        await _render_horizontal(src_path, start, clip_len, out_h_path, font_path,
+                                  progress_cb=make_stage_cb("16:9 tayyorlanmoqda"))
+
+        await set_progress("✂️ 9:16 tayyorlanmoqda: 0%", force=True)
+        await _render_vertical(src_path, start, clip_len, out_v_path, font_path, has_audio,
+                                progress_cb=make_stage_cb("9:16 tayyorlanmoqda"))
+
+        mm, ss = int(start // 60), int(start % 60)
+        method_line = f" ({method})" if method else ""
+        total_elapsed = int(time.monotonic() - pipeline_start)
+        base_caption = f"✂️ Qiziqarli joy{method_line} — {mm}:{ss:02d} dan {int(clip_len)} soniya"
+        await set_progress(f"✅ Tayyor! (jami {total_elapsed}s ketdi)", force=True)
+        await bot.send_video(admin_chat_id, FSInputFile(out_h_path), caption=f"{base_caption}\n📐 16:9")
+        await bot.send_video(admin_chat_id, FSInputFile(out_v_path), caption=f"{base_caption}\n📱 9:16 (Stories/Reels)")
+        await status_message.answer("✅ Tayyor!", reply_markup=admin_keyboard())
+    except Exception:
+        await set_progress("❌ Xatolik yuz berdi.", force=True)
+        raise
+    finally:
+        for p in (src_path, out_h_path, out_v_path):
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+
+async def _auto_generate_highlight_clip(message, channel_msg_id):
+    """Yangi yuklangan qism uchun klipni FONDA (background) yaratadi — admin
+    /done javobini kutmaydi, tayyor bo'lgach natija o'sha adminga yuboriladi.
+    process_highlight_clip statusni message.answer(...) orqali shu chatga yozadi."""
+    try:
+        await message.answer("🎬 Fonda avtomatik reklama klipi tayyorlanmoqda...")
+        await process_highlight_clip(message.from_user.id, channel_msg_id, AUTO_CLIP_DURATION, message)
+    except Exception as e:
+        logger.error(f"[auto-clip] xato: {e}")
+        try:
+            await message.answer(f"⚠️ Avtomatik klip yaratishda xatolik: {e}")
+        except Exception:
+            pass
+
+def _clip_duration_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="15 soniya", callback_data="clipdur_15"),
+            InlineKeyboardButton(text="30 soniya", callback_data="clipdur_30"),
+        ],
+        [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+    ])
+
+@dp.callback_query(F.data == "clip_start")
+async def clip_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.clear()
+    await call.message.edit_text(
+        "✂️ <b>Qiziqarli video kesish</b>\n\n"
+        "Bot videoning eng \"qiziqarli\" (ovozi eng baland/energiyaga boy — jang, "
+        "kulgi, musiqa avji kabi) joyini avtomatik topib, 15 yoki 30 soniyalik klip "
+        "qilib sizga yuboradi.\n\n"
+        "Video qayerdan olinsin?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📂 Bazadagi epizod", callback_data="clip_source_db")],
+            [InlineKeyboardButton(text="📤 Video yuborish", callback_data="clip_source_upload")],
+            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "clip_source_db")
+async def clip_source_db(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.message.edit_text("🎬 Anime/filmni tanlash usuli:", reply_markup=search_method_keyboard("clipa"))
+
+@dp.callback_query(F.data == "clipa_list")
+async def clipa_list(call: CallbackQuery, state: FSMContext):
+    animes = await asyncio.to_thread(db.get_animes, None, 0)
+    total = await asyncio.to_thread(db.get_anime_count)
+    if not animes:
+        await call.answer("📺 Hozircha kontent yo'q!", show_alert=True)
+        return
+    await call.message.edit_text(
+        "Anime/filmni tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, 0, total, "clipa_sel")
+    )
+
+@dp.callback_query(F.data == "clipa_search")
+async def clipa_search(call: CallbackQuery, state: FSMContext):
+    await state.set_state(ClipVideo.search_query)
+    await call.message.edit_text("🔍 Nomini yozing:")
+
+@dp.message(ClipVideo.search_query)
+async def clipa_search_result(message: Message, state: FSMContext):
+    results = await asyncio.to_thread(db.search_anime, message.text.strip())
+    if not results:
+        await message.answer("❌ Topilmadi!")
+        return
+    await state.clear()
+    buttons = [[InlineKeyboardButton(text=a["title"], callback_data=f"clipa_sel_{a['id']}")] for a in results]
+    await message.answer("Tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.startswith("clipa_sel_page_"))
+async def clipa_sel_page(call: CallbackQuery, state: FSMContext):
+    page = int(call.data.split("_")[-1])
+    animes = await asyncio.to_thread(db.get_animes, None, page)
+    total = await asyncio.to_thread(db.get_anime_count)
+    await call.message.edit_text(
+        "Anime/filmni tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, page, total, "clipa_sel")
+    )
+
+@dp.callback_query(F.data.regexp(r"^clipa_sel_(\d+)$"))
+async def clipa_sel(call: CallbackQuery, state: FSMContext):
+    anime_id = int(call.data.split("_")[-1])
+    episodes = await asyncio.to_thread(db.get_episodes, anime_id)
+    if not episodes:
+        await call.answer("❌ Bu anime uchun hali video yuklanmagan!", show_alert=True)
+        return
+    buttons = []
+    row = []
+    for ep in episodes:
+        row.append(InlineKeyboardButton(text=f"{ep['episode_number']}-qism", callback_data=f"clipep_{ep['id']}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
+    await call.message.edit_text("Qismni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.regexp(r"^clipep_(\d+)$"))
+async def clipep_selected(call: CallbackQuery, state: FSMContext):
+    ep_id = int(call.data.split("_")[1])
+    ep = await asyncio.to_thread(db.get_episode, ep_id)
+    if not ep:
+        await call.answer("❌ Topilmadi!", show_alert=True)
+        return
+    await state.update_data(clip_channel_msg_id=ep["channel_message_id"])
+    await call.message.edit_text("⏱ Klip davomiyligini tanlang:", reply_markup=_clip_duration_keyboard())
+
+@dp.callback_query(F.data == "clip_source_upload")
+async def clip_source_upload(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(ClipVideo.waiting_video)
+    await call.message.edit_text("🎬 Kesish uchun videoni yuboring:")
+
+@dp.message(ClipVideo.waiting_video, F.video)
+async def clip_upload_video(message: Message, state: FSMContext):
+    sent = await bot.forward_message(STORAGE_CHANNEL, message.chat.id, message.message_id)
+    await state.update_data(clip_channel_msg_id=sent.message_id)
+    await state.set_state(None)
+    await message.answer("⏱ Klip davomiyligini tanlang:", reply_markup=_clip_duration_keyboard())
+
+@dp.callback_query(F.data.regexp(r"^clipdur_(15|30)$"))
+async def clipdur_selected(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    duration = int(call.data.split("_")[1])
+    data = await state.get_data()
+    channel_msg_id = data.get("clip_channel_msg_id")
+    if not channel_msg_id:
+        await call.answer("❌ Video topilmadi, qaytadan boshlang.", show_alert=True)
+        return
+    await state.clear()
+    await call.message.edit_text("⏳ Boshlanmoqda...")
+    try:
+        await process_highlight_clip(call.from_user.id, channel_msg_id, duration, call.message)
+    except Exception as e:
+        logger.error(f"[clip] xato: {e}")
+        await call.message.answer(f"❌ Xatolik yuz berdi: {e}", reply_markup=admin_keyboard())
 
 # ---- STATISTIKA ----
 @dp.callback_query(F.data == "admin_stats")
