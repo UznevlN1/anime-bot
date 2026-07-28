@@ -1472,6 +1472,9 @@ def admin_cat_settings_keyboard():
             InlineKeyboardButton(text="🔧 Texnik ishlar", callback_data="admin_maintenance", style="danger"),
         ],
         [
+            InlineKeyboardButton(text="🎬 Avtomatik klip", callback_data="admin_autoclip", style="primary"),
+        ],
+        [
             InlineKeyboardButton(text="👤 Profil bo'limi (bepul)", callback_data="admin_profile_lock", style="danger"),
         ],
         [InlineKeyboardButton(text="📣 E'lon kanali", callback_data="admin_announce_channel", style="primary")],
@@ -2565,7 +2568,7 @@ async def add_done(message: Message, state: FSMContext):
     await state.clear()
 
     # Reklama klipi — 1-qismdan avtomatik yaratiladi (fonda, javobni bloklamaydi)
-    if AUTO_CLIP_ENABLED and data["video_ids"]:
+    if await is_auto_clip_enabled() and data["video_ids"]:
         asyncio.create_task(_auto_generate_highlight_clip(message, data["video_ids"][0]))
 
     # Kanalga e'lon — "Tomosha qilish" tugmasi bosilsa foydalanuvchi botga o'tib,
@@ -2673,7 +2676,7 @@ async def addepi_done(message: Message, state: FSMContext):
 
     # Reklama klipi — shu safar yuklangan birinchi (eng yangi) qismdan avtomatik
     # yaratiladi (fonda, javobni bloklamaydi)
-    if AUTO_CLIP_ENABLED and data["episode_msg_ids"]:
+    if await is_auto_clip_enabled() and data["episode_msg_ids"]:
         asyncio.create_task(_auto_generate_highlight_clip(message, data["episode_msg_ids"][0]))
 
     # Kanalga e'lon — yangi qo'shilgan birinchi qismga yo'naltiruvchi tugma bilan
@@ -3189,6 +3192,16 @@ _CLIP_SAMPLE_RATE = 44100
 # O'chirish uchun Environment'da AUTO_CLIP_ENABLED=0 qiling.
 AUTO_CLIP_ENABLED = os.environ.get("AUTO_CLIP_ENABLED", "1") == "1"
 AUTO_CLIP_DURATION = int(os.environ.get("AUTO_CLIP_DURATION", "30"))
+
+async def is_auto_clip_enabled():
+    """Avtomatik klip yoqilganmi — DB'dagi 'auto_clip_enabled' sozlamasi asosiy
+    manba (admin panel orqali o'zgartiriladi). Agar DB'da hali sozlanmagan
+    bo'lsa (birinchi marta), Environment o'zgaruvchisi (AUTO_CLIP_ENABLED)
+    standart qiymat sifatida ishlatiladi."""
+    val = await asyncio.to_thread(db.get_setting, "auto_clip_enabled")
+    if val is None:
+        return AUTO_CLIP_ENABLED
+    return val == "1"
 
 def _ffprobe_duration(path):
     """Video faylining umumiy davomiyligini (soniyalarda) qaytaradi."""
@@ -4295,6 +4308,37 @@ async def set_content(call: CallbackQuery):
     await asyncio.to_thread(db.set_setting, "content_protect", value)
     await call.answer("✅ Saqlandi!", show_alert=True)
     await admin_content(call)
+
+@dp.callback_query(F.data == "admin_autoclip")
+async def admin_autoclip(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    enabled = await is_auto_clip_enabled()
+    status = "✅ Yoqiq" if enabled else "❌ O'chirilgan"
+    await call.message.edit_text(
+        "🎬 <b>Avtomatik reklama klipi</b>\n\n"
+        "Yangi qism/film yuklab, <code>/done</code> yozilgach, bot fonda "
+        "o'zi \"eng qiziqarli joy\" klipini (16:9 va 9:16) tayyorlab, "
+        "adminga yuborishi kerakmi?\n\n"
+        f"Holat: {status}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Yoqish", callback_data="autoclip_on"),
+                InlineKeyboardButton(text="❌ Ochirish", callback_data="autoclip_off"),
+            ],
+            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.in_(["autoclip_on", "autoclip_off"]))
+async def set_autoclip(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    value = "1" if call.data == "autoclip_on" else "0"
+    await asyncio.to_thread(db.set_setting, "auto_clip_enabled", value)
+    await call.answer("✅ Saqlandi!", show_alert=True)
+    await admin_autoclip(call)
 
 # ---- WEBAPP HAVOLALARI (Kanal / Support) ----
 async def _links_text():
