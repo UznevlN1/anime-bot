@@ -5884,9 +5884,10 @@ async def start_web_server():
     app.router.add_get("/stream/{episode_id}", webapp_stream)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info("Web server ishga tushdi!")
+    logger.info(f"Web server ishga tushdi! (port: {port})")
 
 # ===================== WEBAPP HANDLER =====================
 @dp.message(F.web_app_data)
