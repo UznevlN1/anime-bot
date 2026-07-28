@@ -3179,6 +3179,9 @@ async def epact_new_video(message: Message, state: FSMContext):
 # qo'shish kerak bo'ladi, aks holda quyidagi funksiyalar xato beradi).
 
 CLIP_TMP_DIR = "/tmp/anime_clips"
+# job_id -> asyncio.Task — hozir ishlayotgan klip jarayonlari, "Bekor qilish"
+# tugmasi bosilganda mos Task topilib .cancel() qilinishi uchun.
+_clip_jobs = {}
 _CLIP_WINDOW_SEC = 5     # tahlil oynasi — video shu uzunlikdagi bo'laklarga bo'linadi
 _CLIP_SAMPLE_RATE = 44100
 
@@ -3285,11 +3288,13 @@ def _candidate_start_times(target_duration, total_duration, edge_margin_ratio=0.
     step = (hi - lo) / (n - 1)
     return [lo + i * step for i in range(n)]
 
-async def _ai_pick_best_window(path, target_duration, total_duration):
+async def _ai_pick_best_window(path, target_duration, total_duration, progress_cb=None):
     """Nomzod lahzalardan kadr oladi, Claude'ga (vision) yuboradi va eng
     qiziqarlisini tanlashini so'raydi. Muvaffaqiyatsiz bo'lsa (API kaliti yo'q,
     tarmoq xatosi, formatlanmagan javob va h.k.) None qaytaradi — bu holda
-    chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi."""
+    chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi.
+    `progress_cb(text, force=False)` — agar berilsa, kadr olish va AI so'rovi
+    bosqichlarida chaqiriladi (jarayon "qotib qolgandek" ko'rinmasligi uchun)."""
     if not ANTHROPIC_API_KEY:
         return None
     candidates = _candidate_start_times(target_duration, total_duration)
@@ -3311,6 +3316,12 @@ async def _ai_pick_best_window(path, target_duration, total_duration):
         for i, ts in enumerate(candidates, 1):
             frame_path = os.path.join(tmp_dir, f"f{i}.jpg")
             await asyncio.to_thread(_extract_frame, path, ts, frame_path)
+            if progress_cb:
+                pct = int(i / len(candidates) * 100)
+                await progress_cb(
+                    f"🤖 AI ishlamoqda: kadrlar tayyorlanmoqda\n\n"
+                    f"{_progress_bar(pct)} {i}/{len(candidates)}"
+                )
             if not os.path.exists(frame_path):
                 continue
             with open(frame_path, "rb") as f:
@@ -3320,6 +3331,9 @@ async def _ai_pick_best_window(path, target_duration, total_duration):
                 "type": "image",
                 "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
             })
+
+        if progress_cb:
+            await progress_cb(f"🤖 AI ishlamoqda: {len(candidates)} ta kadr yuborildi, javob kutilmoqda...", True)
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -3359,13 +3373,32 @@ async def _ai_pick_best_window(path, target_duration, total_duration):
         except Exception:
             pass
 
-async def _find_highlight_start(path, target_duration, total_duration):
+async def _find_highlight_start(path, target_duration, total_duration, progress_cb=None):
     """Avval AI (vision) usulini sinaydi; muvaffaqiyatsiz bo'lsa yoki
     ANTHROPIC_API_KEY o'rnatilmagan bo'lsa, ovoz-balandligi evristikasiga qaytadi.
-    Qaytaradi: (start_soniya, usul_nomi — status xabarida ko'rsatish uchun)."""
-    ai_start = await _ai_pick_best_window(path, target_duration, total_duration)
+    Qaytaradi: (start_soniya, usul_nomi — status xabarida ko'rsatish uchun).
+    `progress_cb(text, force=False)` — AI ishlayaptimi, muvaffaqiyatsizmi yoki
+    umuman o'chirilganmi — bu holatlar aniq ajratib xabar qilinadi, shunda admin
+    jarayon "qotib qolmaganini", balki AI haqiqatan ishlayotganini ko'radi."""
+    if not ANTHROPIC_API_KEY:
+        if progress_cb:
+            await progress_cb("🔇 AI o'chirilgan (ANTHROPIC_API_KEY yo'q) — ovoz balandligi tahlili ishlatilmoqda...", True)
+        frames = await asyncio.to_thread(_analyze_loudness, path)
+        start = (
+            _pick_best_window(frames, target_duration, total_duration)
+            if frames else max(0, (total_duration - target_duration) / 2)
+        )
+        return start, "🔊 ovoz tahlili"
+
+    if progress_cb:
+        await progress_cb("🤖 AI ishlamoqda: kadrlar tanlanmoqda...", True)
+    ai_start = await _ai_pick_best_window(path, target_duration, total_duration, progress_cb=progress_cb)
     if ai_start is not None:
+        if progress_cb:
+            await progress_cb("✅ AI tanladi — klip tayyorlanmoqda...", True)
         return ai_start, "🤖 AI tahlili"
+    if progress_cb:
+        await progress_cb("⚠️ AI javob bermadi — ovoz balandligi (RMS) tahliliga o'tilmoqda...", True)
     frames = await asyncio.to_thread(_analyze_loudness, path)
     start = (
         _pick_best_window(frames, target_duration, total_duration)
@@ -3416,26 +3449,34 @@ async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None):
     )
     last_pct = -1
     error_tail = []
-    async for raw in proc.stdout:
-        line = raw.decode(errors="ignore").strip()
-        if not line:
-            continue
-        if line.startswith("out_time_ms="):
-            try:
-                out_us = int(line.split("=", 1)[1])
-                pct = max(0, min(99, int((out_us / 1_000_000) / max(0.1, total_seconds) * 100)))
-                if pct != last_pct:
-                    last_pct = pct
-                    if on_progress:
-                        result = on_progress(pct)
-                        if asyncio.iscoroutine(result):
-                            await result
-            except (ValueError, IndexError):
-                pass
-        elif "=" not in line:
-            error_tail.append(line)
-            del error_tail[:-10]
-    ret = await proc.wait()
+    try:
+        async for raw in proc.stdout:
+            line = raw.decode(errors="ignore").strip()
+            if not line:
+                continue
+            if line.startswith("out_time_ms="):
+                try:
+                    out_us = int(line.split("=", 1)[1])
+                    pct = max(0, min(99, int((out_us / 1_000_000) / max(0.1, total_seconds) * 100)))
+                    if pct != last_pct:
+                        last_pct = pct
+                        if on_progress:
+                            result = on_progress(pct)
+                            if asyncio.iscoroutine(result):
+                                await result
+                except (ValueError, IndexError):
+                    pass
+            elif "=" not in line:
+                error_tail.append(line)
+                del error_tail[:-10]
+        ret = await proc.wait()
+    except asyncio.CancelledError:
+        # Bekor qilindi — orfan (egasiz) ffmpeg jarayoni serverda ishlab
+        # qolib ketmasligi uchun majburan o'chiramiz.
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
     if ret != 0:
         raise RuntimeError("ffmpeg xato bilan tugadi: " + " / ".join(error_tail[-3:]))
     if on_progress:
@@ -3521,6 +3562,16 @@ async def _get_channel_message_for_clip(channel_msg_id):
             pass
         return await pyro.get_messages(STORAGE_CHANNEL, channel_msg_id)
 
+def _progress_bar(pct, width=10):
+    """0-100 foizni ▰/▱ dan iborat vizual progress-barga aylantiradi."""
+    filled = max(0, min(width, int(round(pct / 100 * width))))
+    return "▰" * filled + "▱" * (width - filled)
+
+def _fmt_mmss(seconds):
+    """Soniyani MM:SS formatiga o'giradi."""
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
 async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status_message):
     """Video yuklab olinadi -> eng qiziqarli joy topiladi -> suv belgisi bilan
     16:9 va 9:16 formatlarda kesiladi -> ikkalasi ham adminga yuboriladi.
@@ -3534,86 +3585,124 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
     out_v_path = os.path.join(CLIP_TMP_DIR, f"clip9x16_{channel_msg_id}_{ts}.mp4")
 
     pipeline_start = time.monotonic()
-    progress_msg = await status_message.answer("⏳ Boshlanmoqda...")
+    job_id = f"{status_message.chat.id}_{int(pipeline_start * 1000)}"
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"clipcancel_{job_id}")]
+    ])
+    progress_msg = await status_message.answer("⏳ Boshlanmoqda...", reply_markup=cancel_kb)
+    _clip_jobs[job_id] = asyncio.current_task()
     _edit_state = {"t": 0.0, "text": ""}
 
-    async def set_progress(text, force=False):
+    async def set_progress(text, force=False, show_cancel=True):
         """progress_msg'ni tahrirlaydi. `force=False` bo'lsa, matn o'zgarmagan yoki
-        oxirgi tahrirdan 2 soniya o'tmagan bo'lsa — o'tkazib yuboriladi (flood-limit)."""
+        oxirgi tahrirdan 2 soniya o'tmagan bo'lsa — o'tkazib yuboriladi (flood-limit).
+        `show_cancel=False` — jarayon tugagach (muvaffaqiyatli/xato/bekor qilingan)
+        "Bekor qilish" tugmasini xabardan olib tashlash uchun."""
         now = time.monotonic()
         if not force and (text == _edit_state["text"] or now - _edit_state["t"] < 2.0):
             return
         _edit_state["t"] = now
         _edit_state["text"] = text
         try:
-            await progress_msg.edit_text(text)
+            await progress_msg.edit_text(text, reply_markup=cancel_kb if show_cancel else None)
         except Exception:
             pass  # masalan "message is not modified" — bemalol e'tiborsiz qoldiriladi
+
+    def _stage_progress_text(label, pct, elapsed):
+        return (
+            f"✂️ {label} tayyorlanmoqda...\n\n"
+            f"{_progress_bar(pct)} {pct}%\n\n"
+            f"📊 Progress : {pct}%\n"
+            f"⏱ O'tdi     : {_fmt_mmss(elapsed)}"
+        )
 
     def make_stage_cb(label):
         async def cb(pct):
             elapsed = int(time.monotonic() - pipeline_start)
-            await set_progress(f"✂️ {label}: {pct}% — jami o'tgan vaqt: {elapsed}s")
+            await set_progress(_stage_progress_text(label, pct, elapsed))
         return cb
 
     try:
         msg = await _get_channel_message_for_clip(channel_msg_id)
         media = msg.video or msg.document or msg.animation
         if not media:
-            await set_progress("❌ Bu xabarda video topilmadi.", force=True)
+            await set_progress("❌ Bu xabarda video topilmadi.", force=True, show_cancel=False)
             await status_message.answer("❌ Bu xabarda video topilmadi.", reply_markup=admin_keyboard())
             return
 
-        async def dl_progress(current, total):
-            elapsed = time.monotonic() - pipeline_start
+        def _dl_progress_text(current, total, elapsed):
             pct = int(current / total * 100) if total else 0
             speed = current / elapsed if elapsed > 0.5 else 0
-            remain = int((total - current) / speed) if speed > 0 else None
+            remain = (total - current) / speed if speed > 0 else None
             cur_mb, tot_mb = current / 1_048_576, (total or 0) / 1_048_576
-            remain_txt = f" — qoldi ~{remain}s" if remain is not None else ""
-            speed_txt = f" — {speed / 1_048_576:.1f} MB/s" if speed > 0 else ""
-            await set_progress(f"⬇️ Yuklab olinmoqda: {pct}% ({cur_mb:.1f}/{tot_mb:.1f} MB){speed_txt}{remain_txt}")
+            remain_mb = max(0.0, tot_mb - cur_mb)
+            speed_txt = f"{speed / 1_048_576:.1f} MB/s" if speed > 0 else "—"
+            remain_txt = _fmt_mmss(remain) if remain is not None else "—"
+            return (
+                "📥 Yuklanmoqda...\n\n"
+                f"{_progress_bar(pct)} {pct}%\n\n"
+                f"📊 Progress : {pct}%\n"
+                f"⚡ Tezlik   : {speed_txt}\n"
+                f"⏱ O'tdi     : {_fmt_mmss(elapsed)}\n"
+                f"⏳ Qoldi    : {remain_txt}\n"
+                f"💾 Qoldi    : {remain_mb:.1f} MB\n"
+                f"📦 Jami     : {tot_mb:.1f} MB"
+            )
 
-        await set_progress("⬇️ Yuklab olinmoqda: 0%", force=True)
+        async def dl_progress(current, total):
+            elapsed = time.monotonic() - pipeline_start
+            await set_progress(_dl_progress_text(current, total, elapsed))
+
+        await set_progress("📥 Yuklanmoqda...", force=True)
         client = _next_stream_client() if _stream_clients else pyro
         await client.download_media(msg, file_name=src_path, progress=dl_progress)
 
         total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
         if not total_dur or total_dur <= 0:
-            await set_progress("❌ Video davomiyligini aniqlab bo'lmadi (fayl buzilgan bo'lishi mumkin).", force=True)
+            await set_progress("❌ Video davomiyligini aniqlab bo'lmadi (fayl buzilgan bo'lishi mumkin).", force=True, show_cancel=False)
             await status_message.answer("❌ Video davomiyligini aniqlab bo'lmadi.", reply_markup=admin_keyboard())
             return
 
         if total_dur <= duration:
             start, clip_len, method = 0.0, total_dur, None
         else:
-            await set_progress("🔎 Qiziqarli joy qidirilmoqda (AI tahlil qilmoqda)...", force=True)
-            start, method = await _find_highlight_start(src_path, duration, total_dur)
+            async def _highlight_progress(text, force=False):
+                elapsed = int(time.monotonic() - pipeline_start)
+                await set_progress(f"{text} — jami o'tgan vaqt: {elapsed}s", force=force)
+
+            await _highlight_progress("🔎 Qiziqarli joy qidirilmoqda...", force=True)
+            start, method = await _find_highlight_start(
+                src_path, duration, total_dur, progress_cb=_highlight_progress
+            )
             clip_len = float(duration)
 
         font_path = await asyncio.to_thread(_find_watermark_font)
         has_audio = await asyncio.to_thread(_has_audio_stream, src_path)
 
-        await set_progress("✂️ 16:9 tayyorlanmoqda: 0%", force=True)
+        await set_progress(_stage_progress_text("16:9", 0, int(time.monotonic() - pipeline_start)), force=True)
         await _render_horizontal(src_path, start, clip_len, out_h_path, font_path,
-                                  progress_cb=make_stage_cb("16:9 tayyorlanmoqda"))
+                                  progress_cb=make_stage_cb("16:9"))
 
-        await set_progress("✂️ 9:16 tayyorlanmoqda: 0%", force=True)
+        await set_progress(_stage_progress_text("9:16", 0, int(time.monotonic() - pipeline_start)), force=True)
         await _render_vertical(src_path, start, clip_len, out_v_path, font_path, has_audio,
-                                progress_cb=make_stage_cb("9:16 tayyorlanmoqda"))
+                                progress_cb=make_stage_cb("9:16"))
 
         mm, ss = int(start // 60), int(start % 60)
         method_line = f" ({method})" if method else ""
         total_elapsed = int(time.monotonic() - pipeline_start)
         base_caption = f"✂️ Qiziqarli joy{method_line} — {mm}:{ss:02d} dan {int(clip_len)} soniya"
-        await set_progress(f"✅ Tayyor! (jami {total_elapsed}s ketdi)", force=True)
+        await set_progress(f"✅ Tayyor! (jami {total_elapsed}s ketdi)", force=True, show_cancel=False)
         await bot.send_video(admin_chat_id, FSInputFile(out_h_path), caption=f"{base_caption}\n📐 16:9")
         await bot.send_video(admin_chat_id, FSInputFile(out_v_path), caption=f"{base_caption}\n📱 9:16 (Stories/Reels)")
         await status_message.answer("✅ Tayyor!", reply_markup=admin_keyboard())
+    except asyncio.CancelledError:
+        await set_progress("❌ Bekor qilindi.", force=True, show_cancel=False)
+        raise
     except Exception:
-        await set_progress("❌ Xatolik yuz berdi.", force=True)
+        await set_progress("❌ Xatolik yuz berdi.", force=True, show_cancel=False)
         raise
     finally:
+        _clip_jobs.pop(job_id, None)
         for p in (src_path, out_h_path, out_v_path):
             try:
                 if os.path.exists(p):
@@ -3763,9 +3852,27 @@ async def clipdur_selected(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("⏳ Boshlanmoqda...")
     try:
         await process_highlight_clip(call.from_user.id, channel_msg_id, duration, call.message)
+    except asyncio.CancelledError:
+        pass  # foydalanuvchi "❌ Bekor qilish" tugmasini bosgan — bu holat kutilgan
     except Exception as e:
         logger.error(f"[clip] xato: {e}")
         await call.message.answer(f"❌ Xatolik yuz berdi: {e}", reply_markup=admin_keyboard())
+
+@dp.callback_query(F.data.startswith("clipcancel_"))
+async def clip_cancel_handler(call: CallbackQuery):
+    """Klip yaratish jarayonidagi "❌ Bekor qilish" tugmasi. Mos job_id bo'yicha
+    ishlayotgan Task topilib .cancel() qilinadi — bu process_highlight_clip
+    ichida joriy await nuqtasida (yuklab olish yoki ffmpeg) CancelledError
+    sifatida ko'tariladi va u yerda tozalab, xabarni yangilaydi."""
+    if not await is_admin_user(call.from_user.id):
+        return
+    job_id = call.data[len("clipcancel_"):]
+    task = _clip_jobs.get(job_id)
+    if task and not task.done():
+        task.cancel()
+        await call.answer("Bekor qilinmoqda...")
+    else:
+        await call.answer("Bu jarayon allaqachon tugagan.", show_alert=True)
 
 # ---- STATISTIKA ----
 @dp.callback_query(F.data == "admin_stats")
