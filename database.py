@@ -113,6 +113,8 @@ def init_db():
     c.execute("ALTER TABLE animes ADD COLUMN IF NOT EXISTS total_episodes INTEGER")
     # Anime butunlay (barcha qismlari) doimiy Premium-only qilib belgilanishi mumkin
     c.execute("ALTER TABLE animes ADD COLUMN IF NOT EXISTS is_premium_only INTEGER DEFAULT 0")
+    # Anime holati: 'ongoing' (davom etmoqda) yoki 'finished' (tugagan)
+    c.execute("ALTER TABLE animes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ongoing'")
 
     # Bannerlar (webapp bosh sahifasidagi reklama/eʼlon suratlari)
     c.execute("""
@@ -719,12 +721,12 @@ def get_daily_stats():
     }
 
 # ===== ANIMLAR =====
-def add_anime(title, year, country, genre, description, language, photo_id, media_type, total_episodes=None):
+def add_anime(title, year, country, genre, description, language, photo_id, media_type, total_episodes=None, status="ongoing"):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("""INSERT INTO animes (title, year, country, genre, description, language, photo_id, media_type, total_episodes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (title, year, country, genre, description, language, photo_id, media_type, total_episodes))
+    c.execute("""INSERT INTO animes (title, year, country, genre, description, language, photo_id, media_type, total_episodes, status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (title, year, country, genre, description, language, photo_id, media_type, total_episodes, status))
     anime_id = c.fetchone()[0]
     conn.commit()
     put_conn(conn)
@@ -852,7 +854,7 @@ def delete_anime(anime_id):
 ALLOWED_ANIME_FIELDS = {
     "title", "year", "country", "genre",
     "description", "language", "photo_id", "media_type", "category",
-    "total_episodes",
+    "total_episodes", "status",
 }
 
 def update_anime(anime_id, field, value):

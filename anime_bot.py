@@ -200,6 +200,7 @@ class AddAnime(StatesGroup):
     language = State()
     media_type = State()
     total_episodes = State()
+    status = State()
     videos = State()
 
 class AddEpisode(StatesGroup):
@@ -1492,19 +1493,24 @@ def episodes_keyboard(episodes, anime_id, page=0, highlight_id=None):
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga qaytish", callback_data=f"backcard_{anime_id}", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+ANIME_STATUS_LABELS = {
+    "ongoing": "🟢 Davom etmoqda",
+    "finished": "✅ Tugagan",
+}
+
 def anime_card_text(anime):
-    icon = "🎬" if anime.get("media_type") == "film" else "📺"
     title = anime['title']
-    border = "━" * max(len(title) + 2, 14)
+    status_text = ANIME_STATUS_LABELS.get(anime.get("status") or "ongoing", ANIME_STATUS_LABELS["ongoing"])
     return (
-        f"╭{border}╮\n"
-        f"   {icon} {title}\n"
-        f"╰{border}╯\n\n"
-        f"📅 Chiqqan yil ➤ {anime['year']}\n"
-        f"🌍 Davlat ➤ {anime['country']}\n"
-        f"🎭 Janr ➤ {anime['genre']}\n"
-        f"🌐 Til ➤ {anime.get('language', 'Nomalum')}\n"
-        f"🆔 ID ➤ #{anime['id']}\n\n"
+        "╭━━━━━━━━━━━━━━━━━━╮\n"
+        "      🎬 ANIME\n"
+        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"🍿 {title}\n\n"
+        f"📅 Yil     ➤ {anime['year']}\n"
+        f"🌍 Davlat  ➤ {anime['country']}\n"
+        f"🎭 Janr    ➤ {anime['genre']}\n"
+        f"🌐 Til     ➤ {anime.get('language', 'Nomalum')}\n"
+        f"📊 Holat   ➤ {status_text}\n\n"
         f"📖 Qisqacha:\n{anime['description']}"
     )
 
@@ -2395,6 +2401,12 @@ async def add_language(message: Message, state: FSMContext):
         ])
     )
 
+def _status_choice_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🟢 Davom etmoqda", callback_data="addstatus_ongoing")],
+        [InlineKeyboardButton(text="✅ Tugagan", callback_data="addstatus_finished")],
+    ])
+
 @dp.callback_query(F.data.in_(["set_type_film", "set_type_serial"]))
 async def set_type(call: CallbackQuery, state: FSMContext):
     media_type = "film" if call.data == "set_type_film" else "serial"
@@ -2406,14 +2418,14 @@ async def set_type(call: CallbackQuery, state: FSMContext):
         )
     else:
         await state.update_data(total_episodes=None)
-        await state.set_state(AddAnime.videos)
-        await call.message.edit_text("🎬 Videolarni yuboring. Tugagach /done yozing:")
+        await state.set_state(AddAnime.status)
+        await call.message.edit_text("📊 Holatini tanlang:", reply_markup=_status_choice_keyboard())
 
 @dp.message(AddAnime.total_episodes, Command("skip"))
 async def add_total_episodes_skip(message: Message, state: FSMContext):
     await state.update_data(total_episodes=None)
-    await state.set_state(AddAnime.videos)
-    await message.answer("🎬 Videolarni yuboring. Tugagach /done yozing:")
+    await state.set_state(AddAnime.status)
+    await message.answer("📊 Holatini tanlang:", reply_markup=_status_choice_keyboard())
 
 @dp.message(AddAnime.total_episodes)
 async def add_total_episodes(message: Message, state: FSMContext):
@@ -2425,8 +2437,15 @@ async def add_total_episodes(message: Message, state: FSMContext):
         await message.answer("❌ Iltimos, musbat butun son kiriting (masalan: 24) yoki /skip yozing.")
         return
     await state.update_data(total_episodes=total)
+    await state.set_state(AddAnime.status)
+    await message.answer("📊 Holatini tanlang:", reply_markup=_status_choice_keyboard())
+
+@dp.callback_query(AddAnime.status, F.data.in_(["addstatus_ongoing", "addstatus_finished"]))
+async def add_status(call: CallbackQuery, state: FSMContext):
+    status = call.data.replace("addstatus_", "")
+    await state.update_data(status=status)
     await state.set_state(AddAnime.videos)
-    await message.answer("🎬 Videolarni yuboring. Tugagach /done yozing:")
+    await call.message.edit_text("🎬 Videolarni yuboring. Tugagach /done yozing:")
 
 @dp.message(AddAnime.videos, F.video)
 async def add_video(message: Message, state: FSMContext):
@@ -2445,7 +2464,7 @@ async def add_done(message: Message, state: FSMContext):
         return
     anime_id = await asyncio.to_thread(db.add_anime, data["title"], data["year"], data["country"],
         data["genre"], data["description"], data.get("language", "Nomalum"), data["photo_id"], data["media_type"],
-        data.get("total_episodes"))
+        data.get("total_episodes"), data.get("status", "ongoing"))
     for i, msg_id in enumerate(data["video_ids"], 1):
         await asyncio.to_thread(db.add_episode, anime_id, i, msg_id)
     await state.clear()
@@ -2707,6 +2726,7 @@ async def editsel(call: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="🏷 Kategoriya", callback_data="efield_category")],
             [InlineKeyboardButton(text="📝 Malumot", callback_data="efield_description")],
             [InlineKeyboardButton(text="🔢 Jami qism soni", callback_data="efield_total_episodes")],
+            [InlineKeyboardButton(text="📊 Holat", callback_data="efield_status")],
             [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
         ])
     )
@@ -2715,8 +2735,31 @@ async def editsel(call: CallbackQuery, state: FSMContext):
 async def edit_field(call: CallbackQuery, state: FSMContext):
     field = call.data.replace("efield_", "")
     await state.update_data(edit_field=field)
+    if field == "status":
+        await call.message.edit_text(
+            "📊 Holatni tanlang:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🟢 Davom etmoqda", callback_data="setstatus_ongoing")],
+                [InlineKeyboardButton(text="✅ Tugagan", callback_data="setstatus_finished")],
+                [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+            ])
+        )
+        return
     await state.set_state(EditAnime.new_value)
     await call.message.edit_text("✏️ Yangi qiymatni yozing:")
+
+@dp.callback_query(F.data.startswith("setstatus_"))
+async def set_anime_status(call: CallbackQuery, state: FSMContext):
+    status = call.data.replace("setstatus_", "")
+    data = await state.get_data()
+    anime_id = data.get("edit_anime_id")
+    if not anime_id:
+        await call.answer("❌ Xatolik: anime tanlanmagan.", show_alert=True)
+        return
+    await asyncio.to_thread(db.update_anime, anime_id, "status", status)
+    await state.clear()
+    await log_admin_action(call.from_user, "Animeni tahrirladi", f"maydon: status, anime_id: {anime_id}")
+    await call.message.edit_text("✅ Yangilandi!")
 
 @dp.message(EditAnime.new_value)
 async def edit_value(message: Message, state: FSMContext):
