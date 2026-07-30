@@ -1502,10 +1502,7 @@ def anime_card_text(anime):
     title = anime['title']
     status_text = ANIME_STATUS_LABELS.get(anime.get("status") or "ongoing", ANIME_STATUS_LABELS["ongoing"])
     return (
-        "╭━━━━━━━━━━━━━━━━━━╮\n"
-        "      🎬 ANIME\n"
-        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"🍿 {title}\n\n"
+        f"🎬 {title}\n\n"
         f"📅 Yil     ➤ {anime['year']}\n"
         f"🌍 Davlat  ➤ {anime['country']}\n"
         f"🎭 Janr    ➤ {anime['genre']}\n"
@@ -2287,6 +2284,15 @@ async def random_handler(call: CallbackQuery):
     await send_anime_card(call.message.chat.id, anime)
 
 # ===================== /ADMIN =====================
+@dp.message(Command("fixstatus"))
+async def fixstatus_handler(message: Message):
+    """Bir martalik tuzatish: barcha animelarni 'Tugagan' holatiga o'tkazadi."""
+    if not await is_admin_user(message.from_user.id):
+        await message.answer("❌ Ruxsat yoq!")
+        return
+    updated = await asyncio.to_thread(db.finish_all_animes)
+    await message.answer(f"✅ {updated} ta anime 'Tugagan' holatiga o'tkazildi.")
+
 @dp.message(Command("admin"))
 async def admin_handler(message: Message):
     if not await is_admin_user(message.from_user.id):
