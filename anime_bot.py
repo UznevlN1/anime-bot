@@ -283,63 +283,6 @@ class VersionState(StatesGroup):
     version = State()
     changes = State()
 
-class AnnounceChannelState(StatesGroup):
-    waiting = State()
-
-async def get_announce_channel():
-    """E'lon kanali admin panelida sozlanadi (settings jadvalida saqlanadi).
-    Hali sozlanmagan bo'lsa, None qaytaradi — bu holda e'lon yuborilmaydi
-    va admin panelda sozlash kerakligi haqida eslatma chiqadi."""
-    val = await asyncio.to_thread(db.get_setting, "announce_channel_id")
-    if not val:
-        return None
-    val = val.strip()
-    # Kanal ID raqam bo'lishi mumkin ("-100123456789") yoki username ("@Kanal")
-    if val.lstrip("-").isdigit():
-        return int(val)
-    return val if val.startswith("@") else f"@{val}"
-
-async def announce_to_channel(anime, kind="anime", episode_number=None, episode_id=None):
-    """Yangi anime yoki yangi qism qo'shilganda admin belgilagan E'LON KANALIGA
-    post qiladi (STORAGE_CHANNEL emas — u xom video fayllar uchun). Kanal admin
-    panel → ⚙️ Sozlamalar → 📢 E'lon kanali orqali belgilanadi.
-    Tugma bosilsa foydalanuvchi botga o'tadi va deep-link orqali (anime_<id> yoki
-    ep_<episode_id>) tegishli video avtomatik yuboriladi (start_handler'dagi mantiq bo'yicha)."""
-    channel = await get_announce_channel()
-    if not channel:
-        logger.warning("[announce_to_channel] E'lon kanali sozlanmagan (admin panel → Sozlamalar → E'lon kanali) — post yuborilmadi.")
-        return
-    try:
-        if kind == "anime":
-            caption = (
-                f"🆕 <b>Yangi anime qo'shildi!</b>\n\n"
-                f"📌 <b>{anime['title']}</b>\n"
-                f"📅 {anime.get('year', '')}  •  🎭 {anime.get('genre', '')}\n"
-                f"🆔 Kod: <code>{anime['id']}</code>"
-            )
-            payload = f"anime_{anime['id']}"
-        else:
-            caption = (
-                f"🎬 <b>Yangi qism chiqdi!</b>\n\n"
-                f"📌 <b>{anime['title']}</b> — {episode_number}-qism\n"
-                f"🆔 Kod: <code>{anime['id']}</code>"
-            )
-            payload = f"ep_{episode_id}"
-
-        kb_rows = [[InlineKeyboardButton(text="▶️ Tomosha qilish", url=f"https://t.me/{BOT_USERNAME}?start={payload}")]]
-        if await _subscriptions_enabled():
-            kb_rows.append([InlineKeyboardButton(text="🔔 Obuna bo'lish / bekor qilish", callback_data=f"subq_{anime['id']}")])
-        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
-
-        photo_id = anime.get("photo_id")
-        if photo_id:
-            await bot.send_photo(channel, photo_id, caption=caption, reply_markup=kb, parse_mode="HTML")
-        else:
-            await bot.send_message(channel, caption, reply_markup=kb, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"[announce_to_channel] e'lon yuborilmadi (kanal={channel}): {e}")
-
-
 async def _subscriptions_enabled():
     """Admin '🔔 Obuna bo'lish' funksiyasini sozlamalardan yoqib/o'chira oladi.
     Sozlama umuman kiritilmagan bo'lsa (birinchi marta ishga tushirilganda),
@@ -1479,7 +1422,6 @@ def admin_cat_settings_keyboard():
         [
             InlineKeyboardButton(text="👤 Profil bo'limi (bepul)", callback_data="admin_profile_lock", style="danger"),
         ],
-        [InlineKeyboardButton(text="📣 E'lon kanali", callback_data="admin_announce_channel", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -2340,122 +2282,6 @@ async def admin_cat_settings(call: CallbackQuery):
         return
     await call.message.edit_text("⚙️ <b>Sozlamalar</b>", reply_markup=admin_cat_settings_keyboard(), parse_mode="HTML")
 
-@dp.callback_query(F.data == "admin_announce_channel")
-async def admin_announce_channel(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
-        return
-    await state.clear()
-    current = await asyncio.to_thread(db.get_setting, "announce_channel_id")
-    status = f"Joriy kanal: <code>{current}</code>" if current else "Hali sozlanmagan."
-    sub_enabled = await _subscriptions_enabled()
-    sub_status = "🟢 Yoqilgan" if sub_enabled else "🔴 O'chirilgan"
-    await call.message.edit_text(
-        f"📣 <b>E'lon kanali</b>\n\n"
-        f"Yangi anime yoki yangi qism qo'shilganda avtomatik e'lon shu kanalga yuboriladi "
-        f"(<b>STORAGE_CHANNEL emas</b> — u faqat xom video fayllar uchun).\n\n"
-        f"{status}\n\n"
-        f"⚠️ Bot shu kanalda ADMIN bo'lishi shart, aks holda e'lon yuborilmaydi.\n\n"
-        f"🔔 <b>\"Obuna bo'lish\" tugmasi:</b> {sub_status}\n"
-        f"(E'lon postlarida foydalanuvchilarga ko'rinadigan, yangi qism/jonli "
-        f"efir haqida shaxsiy xabar olish tugmasi)",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Kanalni belgilash/o'zgartirish", callback_data="admin_announce_channel_set", style="success")],
-            [InlineKeyboardButton(
-                text=("🔴 Obunani o'chirish" if sub_enabled else "🟢 Obunani yoqish"),
-                callback_data="admin_toggle_subscriptions",
-                style=("danger" if sub_enabled else "success")
-            )],
-            [InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")],
-        ]),
-        parse_mode="HTML"
-    )
-
-@dp.callback_query(F.data == "admin_toggle_subscriptions")
-async def admin_toggle_subscriptions(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
-        return
-    sub_enabled = await _subscriptions_enabled()
-    new_value = "0" if sub_enabled else "1"
-    await asyncio.to_thread(db.set_setting, "subscriptions_enabled", new_value)
-    await log_admin_action(
-        call.from_user, "Obuna funksiyasini o'zgartirdi",
-        "Yoqildi" if new_value == "1" else "O'chirildi"
-    )
-    await call.answer("🟢 Obuna funksiyasi yoqildi" if new_value == "1" else "🔴 Obuna funksiyasi o'chirildi", show_alert=True)
-
-    current = await asyncio.to_thread(db.get_setting, "announce_channel_id")
-    status = f"Joriy kanal: <code>{current}</code>" if current else "Hali sozlanmagan."
-    sub_enabled = new_value == "1"
-    sub_status = "🟢 Yoqilgan" if sub_enabled else "🔴 O'chirilgan"
-    await call.message.edit_text(
-        f"📣 <b>E'lon kanali</b>\n\n"
-        f"Yangi anime yoki yangi qism qo'shilganda avtomatik e'lon shu kanalga yuboriladi "
-        f"(<b>STORAGE_CHANNEL emas</b> — u faqat xom video fayllar uchun).\n\n"
-        f"{status}\n\n"
-        f"⚠️ Bot shu kanalda ADMIN bo'lishi shart, aks holda e'lon yuborilmaydi.\n\n"
-        f"🔔 <b>\"Obuna bo'lish\" tugmasi:</b> {sub_status}\n"
-        f"(E'lon postlarida foydalanuvchilarga ko'rinadigan, yangi qism/jonli "
-        f"efir haqida shaxsiy xabar olish tugmasi)",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Kanalni belgilash/o'zgartirish", callback_data="admin_announce_channel_set", style="success")],
-            [InlineKeyboardButton(
-                text=("🔴 Obunani o'chirish" if sub_enabled else "🟢 Obunani yoqish"),
-                callback_data="admin_toggle_subscriptions",
-                style=("danger" if sub_enabled else "success")
-            )],
-            [InlineKeyboardButton(text="🔙 Sozlamalar", callback_data="admin_cat_settings")],
-        ]),
-        parse_mode="HTML"
-    )
-
-@dp.callback_query(F.data == "admin_announce_channel_set")
-async def admin_announce_channel_set(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
-        return
-    await state.set_state(AnnounceChannelState.waiting)
-    await call.message.edit_text(
-        "📣 Kanal username'ini (masalan <code>@Ani_Max</code>) yoki ID'sini "
-        "(masalan <code>-100123456789</code>) yuboring.\n\n"
-        "Eslatma: botni o'sha kanalga ADMIN qilib qo'shishni unutmang.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_announce_channel")],
-        ]),
-        parse_mode="HTML"
-    )
-
-@dp.message(AnnounceChannelState.waiting)
-async def admin_announce_channel_save(message: Message, state: FSMContext):
-    if not await is_admin_user(message.from_user.id):
-        return
-    value = (message.text or "").strip()
-    if not value:
-        await message.answer("❌ Bo'sh bo'lishi mumkin emas. Qaytadan yuboring.")
-        return
-    # Sinov: bot shu kanalga xabar yubora oladimi (admin ekanini tekshiradi)
-    test_channel = int(value) if value.lstrip("-").isdigit() else (value if value.startswith("@") else f"@{value}")
-    try:
-        chat = await bot.get_chat(test_channel)
-        member = await bot.get_chat_member(test_channel, (await bot.get_me()).id)
-        if member.status not in ("administrator", "creator"):
-            await message.answer(
-                f"⚠️ Bot \"{chat.title}\" kanalida topildi, lekin ADMIN emas. "
-                f"Avval botni o'sha kanalga admin qilib qo'shing, keyin qaytadan urinib ko'ring."
-            )
-            return
-    except Exception as e:
-        await message.answer(
-            f"❌ Bu kanalga kira olmadim: {e}\n\n"
-            f"Kanal username/ID to'g'riligini va botning o'sha yerda admin ekanligini tekshiring."
-        )
-        return
-    await asyncio.to_thread(db.set_setting, "announce_channel_id", value)
-    await state.clear()
-    await message.answer(
-        f"✅ E'lon kanali saqlandi: <b>{chat.title}</b>",
-        reply_markup=admin_cat_settings_keyboard(),
-        parse_mode="HTML"
-    )
-
 # ---- ANIME QO'SHISH ----
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(call: CallbackQuery, state: FSMContext):
@@ -2573,12 +2399,6 @@ async def add_done(message: Message, state: FSMContext):
     if await is_auto_clip_enabled() and data["video_ids"]:
         asyncio.create_task(_auto_generate_highlight_clip(message, data["video_ids"][0]))
 
-    # Kanalga e'lon — "Tomosha qilish" tugmasi bosilsa foydalanuvchi botga o'tib,
-    # birinchi qism avtomatik yuboriladi
-    anime_row = await asyncio.to_thread(db.get_anime, anime_id)
-    if anime_row:
-        await announce_to_channel(anime_row, kind="anime")
-
     # Faqat BLOKLNMAGAN foydalanuvchilarga xabar
     users = await asyncio.to_thread(db.get_all_active_users)
     for user_id in users:
@@ -2681,16 +2501,12 @@ async def addepi_done(message: Message, state: FSMContext):
     if await is_auto_clip_enabled() and data["episode_msg_ids"]:
         asyncio.create_task(_auto_generate_highlight_clip(message, data["episode_msg_ids"][0]))
 
-    # Kanalga e'lon — yangi qo'shilgan birinchi qismga yo'naltiruvchi tugma bilan
+    # Obunachilarga shaxsiy xabar — yangi qism chiqqani haqida
     anime_row = await asyncio.to_thread(db.get_anime, data["episode_anime_id"])
     if anime_row:
         eps = await asyncio.to_thread(db.get_episodes, data["episode_anime_id"])
         new_ep = next((e for e in eps if e["episode_number"] == data["next_ep"]), None)
         if new_ep:
-            await announce_to_channel(
-                anime_row, kind="episode",
-                episode_number=data["next_ep"], episode_id=new_ep["id"]
-            )
             asyncio.create_task(notify_anime_subscribers(
                 data["episode_anime_id"],
                 f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!\n\n"
@@ -3110,7 +2926,7 @@ async def admin_check_videos(call: CallbackQuery):
         return
 
     total = len(episodes)
-    await call.message.edit_text(f"🔍 Tekshirilmoqda... (0/{total})")
+    await call.message.edit_text(f"🔍 Tekshirilmoqda... (0/{total}) — 0%")
 
     if not await _ensure_pyro_ready(pyro):
         await call.message.edit_text(
@@ -3143,7 +2959,8 @@ async def admin_check_videos(call: CallbackQuery):
                 broken.append(ep)
 
         try:
-            await call.message.edit_text(f"🔍 Tekshirilmoqda... ({checked}/{total})")
+            percent = round(checked / total * 100)
+            await call.message.edit_text(f"🔍 Tekshirilmoqda... ({checked}/{total}) — {percent}%")
         except Exception:
             pass
 
