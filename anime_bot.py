@@ -1420,6 +1420,7 @@ def admin_cat_content_episodes_keyboard():
             InlineKeyboardButton(text="✏️ Qismlarni tahrirlash", callback_data="admin_episodes", style="primary"),
         ],
         [InlineKeyboardButton(text="✂️ Qiziqarli joy kesish", callback_data="clip_start", style="success")],
+        [InlineKeyboardButton(text="🔍 Videolarni tekshirish", callback_data="admin_check_videos", style="primary")],
         [InlineKeyboardButton(text="🔙 Kontent boshqaruvi", callback_data="admin_cat_content")],
     ])
 
@@ -1443,6 +1444,7 @@ def admin_cat_stats_keyboard():
             InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats", style="primary"),
             InlineKeyboardButton(text="📅 Hisobot", callback_data="admin_report", style="primary"),
         ],
+        [InlineKeyboardButton(text="💰 Daromad", callback_data="admin_revenue", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -3083,6 +3085,93 @@ async def admin_episodes(call: CallbackQuery):
         parse_mode="HTML"
     )
 
+# ---- VIDEOLARNI TEKSHIRISH (kanaldan o'chirilgan xabarlarni topish) ----
+# Videolar STORAGE_CHANNEL'dagi xabarlarga (channel_message_id) havola qilib
+# saqlanadi. Kimdir kanaldan o'sha xabarni o'chirib qo'ysa, epizod jim-jit
+# buziladi — foydalanuvchi "video topilmadi" xatosiga duch kelmaguncha admin
+# bundan bexabar qoladi. Bu tugma barcha qismlarni Telegram'dan (Pyrogram
+# orqali, ommaviy so'rovlar bilan) qayta tekshirib, buzilganlarini ro'yxatlaydi.
+_VIDEO_CHECK_CHUNK = 100
+
+@dp.callback_query(F.data == "admin_check_videos")
+async def admin_check_videos(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not STREAM_ENABLED or not pyro:
+        await call.answer(
+            "Bu funksiya uchun API_ID/API_HASH sozlanmagan (onlayn striming o'chirilgan).",
+            show_alert=True
+        )
+        return
+
+    episodes = await asyncio.to_thread(db.get_all_episodes_with_anime)
+    if not episodes:
+        await call.message.edit_text("Hozircha hech qanday qism yo'q.", reply_markup=admin_back())
+        return
+
+    total = len(episodes)
+    await call.message.edit_text(f"🔍 Tekshirilmoqda... (0/{total})")
+
+    if not await _ensure_pyro_ready(pyro):
+        await call.message.edit_text(
+            "Onlayn ko'rish vaqtincha ishlamayapti, birozdan so'ng qayta urinib ko'ring.",
+            reply_markup=admin_back()
+        )
+        return
+
+    broken = []
+    checked = 0
+    for i in range(0, total, _VIDEO_CHECK_CHUNK):
+        chunk = episodes[i:i + _VIDEO_CHECK_CHUNK]
+        ids = [ep["channel_message_id"] for ep in chunk]
+        try:
+            msgs = await pyro.get_messages(STORAGE_CHANNEL, ids)
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+        except Exception as e:
+            logger.error(f"[admin_check_videos] get_messages xato: {e}")
+            msgs = [None] * len(ids)
+
+        for ep, msg in zip(chunk, msgs):
+            checked += 1
+            is_broken = (
+                msg is None
+                or getattr(msg, "empty", False)
+                or not (getattr(msg, "video", None) or getattr(msg, "document", None) or getattr(msg, "animation", None))
+            )
+            if is_broken:
+                broken.append(ep)
+
+        try:
+            await call.message.edit_text(f"🔍 Tekshirilmoqda... ({checked}/{total})")
+        except Exception:
+            pass
+
+    if not broken:
+        await call.message.edit_text(
+            f"✅ Tekshiruv tugadi.\n\nBarcha {total} ta video havolasi ishlayapti — buzilgan qism topilmadi.",
+            reply_markup=admin_back(),
+            parse_mode="HTML"
+        )
+        return
+
+    lines = [
+        f"❌ <b>{ep['anime_title']}</b> — {ep['episode_number']}-qism (ID: {ep['id']})"
+        for ep in broken[:50]
+    ]
+    extra = f"\n\n...va yana {len(broken) - 50} ta" if len(broken) > 50 else ""
+    await call.message.edit_text(
+        f"🔍 Tekshiruv tugadi: {total} ta qismdan <b>{len(broken)}</b> tasi buzilgan "
+        f"(kanal xabari o'chirilgan yoki topilmagan):\n\n"
+        + "\n".join(lines) + extra +
+        "\n\nBuzilgan qismni tuzatish uchun ✏️ Qismlarni tahrirlash bo'limidan foydalaning.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Qismlarni tahrirlash", callback_data="admin_episodes")],
+            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+
 @dp.callback_query(F.data == "ep_del")
 async def ep_del(call: CallbackQuery, state: FSMContext):
     await state.update_data(ep_action="del")
@@ -4659,6 +4748,43 @@ async def admin_report(call: CallbackQuery):
         parse_mode="HTML"
     )
 
+# ---- DAROMAD STATISTIKASI ----
+_PLAN_LABELS = {"1m": "1 oy", "3m": "3 oy", "1y": "1 yil"}
+
+@dp.callback_query(F.data == "admin_revenue")
+async def admin_revenue(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    r = await asyncio.to_thread(db.get_revenue_stats)
+
+    plan_lines = ""
+    for plan_key, label in _PLAN_LABELS.items():
+        info = r["by_plan"].get(plan_key)
+        if info:
+            plan_lines += f"  • {label}: {info['cnt']} ta — {fmt_som(info['total'])}\n"
+        else:
+            plan_lines += f"  • {label}: 0 ta — {fmt_som(0)}\n"
+
+    if r["by_month"]:
+        month_lines = "\n".join(
+            f"  • {m['month']}: {fmt_som(m['total'])} ({m['cnt']} ta)" for m in r["by_month"]
+        )
+    else:
+        month_lines = "  Hozircha maʼlumot yoʻq"
+
+    await call.message.edit_text(
+        f"💰 <b>Daromad statistikasi</b>\n\n"
+        f"💵 Jami daromad: <b>{fmt_som(r['total'])}</b> ({r['total_cnt']} ta toʻlov)\n"
+        f"📆 Bugun: {fmt_som(r['today'])} ({r['today_cnt']} ta)\n"
+        f"🗓 Oxirgi 30 kun: {fmt_som(r['last30'])} ({r['last30_cnt']} ta)\n\n"
+        f"📦 <b>Reja boʻyicha taqsimot:</b>\n{plan_lines}\n"
+        f"📈 <b>Oylik tushum (oxirgi 6 oy):</b>\n{month_lines}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_cat_stats")],
+        ]),
+        parse_mode="HTML"
+    )
+
 # ---- ADMIN QO'LLANMA ----
 @dp.callback_query(F.data == "admin_help")
 async def admin_help(call: CallbackQuery):
@@ -4675,7 +4801,9 @@ async def admin_help(call: CallbackQuery):
         "✏️ Tahrirlash: Roʻyxat yoki nom → Maydon tanlang → Yangi qiymat\n"
         "🗑 Oʻchirish: Roʻyxat yoki nom → Tasdiqlang\n"
         "🖼 Bannerlar: Webapp bosh sahifasidagi reklama suratlarini "
-        "qoʻshish/oʻchirish\n\n"
+        "qoʻshish/oʻchirish\n"
+        "🔍 Videolarni tekshirish — barcha qismlarni kanaldagi original xabar "
+        "bilan solishtirib, oʻchirilgan/buzilgan video havolalarini topib beradi\n\n"
 
         "👥 <b>Foydalanuvchilar</b>\n"
         "🔍 ID yoki @username orqali foydalanuvchini topish, maʼlumotlarini koʻrish\n"
@@ -4689,7 +4817,9 @@ async def admin_help(call: CallbackQuery):
         "📊 Umumiy statistika — foydalanuvchilar (jami/faol/bloklangan/bugun/"
         "hafta/oy), animelar soni, eng koʻp koʻrilgan 5 ta anime\n"
         "📅 Hisobot — bugungi yangi foydalanuvchilar, tark etganlar, yangi "
-        "animelar, umumiy koʻrishlar\n\n"
+        "animelar, umumiy koʻrishlar\n"
+        "💰 Daromad — umumiy/bugungi/oxirgi 30 kunlik tushum, reja (1 oy/3 oy/"
+        "1 yil) boʻyicha taqsimot, oxirgi 6 oylik oylik tushum\n\n"
 
         "📨 <b>Muloqot</b>\n"
         "📨 Xabar yuborish — barcha faol foydalanuvchilarga: Oddiy (matn/rasm/"

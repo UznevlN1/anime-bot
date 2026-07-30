@@ -514,6 +514,59 @@ def set_payment_status(payment_id, status):
     put_conn(conn)
 
 # ---- Referral bonus ----
+def get_revenue_stats():
+    """Tasdiqlangan (approved) to'lovlar bo'yicha daromad statistikasi: umumiy summa,
+    reja bo'yicha taqsimot (1m/3m/1y — soni va summasi) va oxirgi 6 oylik oylik tushum."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+
+    c.execute("SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt FROM premium_payments WHERE status='approved'")
+    totals = dict(c.fetchone())
+
+    c.execute("""
+        SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
+        FROM premium_payments
+        WHERE status='approved' AND created_at >= to_char(NOW(), 'YYYY-MM-DD')
+    """)
+    today = dict(c.fetchone())
+
+    c.execute("""
+        SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
+        FROM premium_payments
+        WHERE status='approved' AND created_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD')
+    """)
+    last30 = dict(c.fetchone())
+
+    c.execute("""
+        SELECT plan, COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
+        FROM premium_payments
+        WHERE status='approved'
+        GROUP BY plan
+    """)
+    by_plan = {r["plan"]: {"total": r["total"], "cnt": r["cnt"]} for r in c.fetchall()}
+
+    c.execute("""
+        SELECT to_char(to_date(created_at, 'YYYY-MM-DD HH24:MI:SS'), 'YYYY-MM') AS month,
+               COALESCE(SUM(amount),0) AS total,
+               COUNT(*) AS cnt
+        FROM premium_payments
+        WHERE status='approved'
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 6
+    """)
+    by_month = [dict(r) for r in c.fetchall()]
+    by_month.reverse()
+
+    put_conn(conn)
+    return {
+        "total": totals["total"], "total_cnt": totals["cnt"],
+        "today": today["total"], "today_cnt": today["cnt"],
+        "last30": last30["total"], "last30_cnt": last30["cnt"],
+        "by_plan": by_plan,
+        "by_month": by_month,
+    }
+
 def process_referral_bonus(referrer_id, bonus_days):
     """Yangi foydalanuvchi kimningdir taklifi bilan kelganda, taklif qilgan odamga bonus kun qo'shadi."""
     if not referrer_id:
@@ -892,6 +945,21 @@ def update_episode(episode_id, channel_message_id):
     c.execute("UPDATE episodes SET channel_message_id=%s WHERE id=%s", (channel_message_id, episode_id))
     conn.commit()
     put_conn(conn)
+
+def get_all_episodes_with_anime():
+    """Barcha qismlarni tegishli anime nomi bilan birga qaytaradi (video havolalarini
+    ommaviy tekshirish uchun — anime nomi/qism raqami darrov ko'rinishi uchun)."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute("""
+        SELECT e.id, e.anime_id, e.episode_number, e.channel_message_id, a.title AS anime_title
+        FROM episodes e
+        JOIN animes a ON a.id = e.anime_id
+        ORDER BY a.title, e.episode_number
+    """)
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
 
 def get_watch_position(user_id, episode_id):
     conn = get_conn()
