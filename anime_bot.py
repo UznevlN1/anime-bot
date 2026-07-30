@@ -1480,13 +1480,22 @@ def episodes_keyboard(episodes, anime_id, page=0, highlight_id=None):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def anime_card_text(anime):
+    icon = "🎬" if anime.get("media_type") == "film" else "📺"
+    title = anime['title']
+    border = "━" * max(len(title) + 2, 14)
     return (
-        f"<b>{anime['title']}</b>\n\n"
-        f"📅 Yil: {anime['year']}\n"
-        f"🌍 Davlat: {anime['country']}\n"
-        f"🗣 Til: {anime.get('language', 'Nomalum')}\n"
-        f"🎭 Janr: {anime['genre']}\n\n"
-        f"📝 {anime['description']}"
+        f"╭{border}╮\n"
+        f"   {icon} {title}\n"
+        f"╰{border}╯\n\n"
+        f"📅 Chiqqan yil ➤ {anime['year']}\n"
+        f"🌍 Davlat ➤ {anime['country']}\n"
+        f"🎭 Janr ➤ {anime['genre']}\n"
+        f"🌐 Til ➤ {anime.get('language', 'Nomalum')}\n"
+        f"🆔 ID ➤ #{anime['id']}\n\n"
+        f"📖 Qisqacha:\n{anime['description']}\n\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"▶️ HOZIROQ TOMOSHA QILING\n"
+        f"━━━━━━━━━━━━━━"
     )
 
 async def send_anime_card(chat_id, anime):
