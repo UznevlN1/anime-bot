@@ -70,6 +70,19 @@ if not STORAGE_CHANNEL_raw:
 STORAGE_CHANNEL = int(STORAGE_CHANNEL_raw)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://anime-bot-fd8r.onrender.com/webapp")
 
+# Yangi anime qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan ochiq
+# reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina o'chiq
+# hisoblanadi va botning boshqa ishiga ta'sir qilmaydi.
+# Yangi anime qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan ochiq
+# reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina o'chiq
+# hisoblanadi va botning boshqa ishiga ta'sir qilmaydi. Raqamli ID (-100...)
+# yoki @kanal_username shaklida yozilishi mumkin.
+ANNOUNCE_CHANNEL_raw = os.environ.get("ANNOUNCE_CHANNEL")
+if ANNOUNCE_CHANNEL_raw:
+    ANNOUNCE_CHANNEL = int(ANNOUNCE_CHANNEL_raw) if ANNOUNCE_CHANNEL_raw.lstrip("-").isdigit() else ANNOUNCE_CHANNEL_raw
+else:
+    ANNOUNCE_CHANNEL = None
+
 # Onlayn video striming uchun (my.telegram.org dan olinadi)
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
@@ -1492,10 +1505,7 @@ def anime_card_text(anime):
         f"🎭 Janr ➤ {anime['genre']}\n"
         f"🌐 Til ➤ {anime.get('language', 'Nomalum')}\n"
         f"🆔 ID ➤ #{anime['id']}\n\n"
-        f"📖 Qisqacha:\n{anime['description']}\n\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"▶️ HOZIROQ TOMOSHA QILING\n"
-        f"━━━━━━━━━━━━━━"
+        f"📖 Qisqacha:\n{anime['description']}"
     )
 
 async def send_anime_card(chat_id, anime):
@@ -1523,6 +1533,42 @@ async def send_anime_card(chat_id, anime):
             reply_markup=kb,
             parse_mode="HTML"
         )
+
+def announce_caption_text(anime):
+    """E'lon kanali uchun qisqa post matni — botning ichidagi to'liq karta
+    (anime_card_text)dan farqli, kanalda avvaldan qo'llanilgan qisqa uslubga
+    mos: nom, yil, janr va kod, tavsifsiz."""
+    return (
+        f"🆕 Yangi anime qo'shildi!\n\n"
+        f"📌 {anime['title']}\n"
+        f"📅 {anime['year']} • 🎭 {anime['genre']}\n"
+        f"🆔 Kod: {anime['id']}"
+    )
+
+async def post_anime_to_announce_channel(anime):
+    """Yangi qo'shilgan animining qisqa e'loni (rasm + nom/yil/janr/kod)ni
+    ochiq e'lon kanaliga post qiladi. Tugma bosilganda foydalanuvchi botga
+    o'tib, deep-link (?start=anime_<id>) orqali to'g'ridan-to'g'ri 1-qismni
+    oladi."""
+    if not ANNOUNCE_CHANNEL:
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="▶️ Tomosha qilish",
+            url=f"https://t.me/{BOT_USERNAME}?start=anime_{anime['id']}",
+            style="success"
+        )]
+    ])
+    try:
+        await bot.send_photo(
+            ANNOUNCE_CHANNEL,
+            photo=anime["photo_id"],
+            caption=announce_caption_text(anime),
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"[post_anime_to_announce_channel] e'lon kanaliga post qilinmadi (anime_id={anime['id']}): {e}")
 
 def search_method_keyboard(prefix):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -2403,6 +2449,14 @@ async def add_done(message: Message, state: FSMContext):
     for i, msg_id in enumerate(data["video_ids"], 1):
         await asyncio.to_thread(db.add_episode, anime_id, i, msg_id)
     await state.clear()
+
+    # Yangi anime kartasini ochiq e'lon kanaliga post qilish (ANNOUNCE_CHANNEL
+    # o'rnatilgan bo'lsa). anime dict'ini db'dan qayta olamiz — chunki
+    # add_anime natijasi faqat ID, to'liq maydonlar emas.
+    if ANNOUNCE_CHANNEL:
+        new_anime = await asyncio.to_thread(db.get_anime, anime_id)
+        if new_anime:
+            await post_anime_to_announce_channel(new_anime)
 
     # Reklama klipi — 1-qismdan avtomatik yaratiladi (fonda, javobni bloklamaydi)
     if await is_auto_clip_enabled() and data["video_ids"]:
