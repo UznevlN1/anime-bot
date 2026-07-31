@@ -3298,9 +3298,54 @@ async def _analyze_loudness(path, total_duration=None, progress_cb=None):
             pts_time = None
     return frames
 
-def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05):
-    """RMS ro'yxatidan `target_duration` soniyalik eng "baland ovozli" (energiyaga
-    boy) uzluksiz oraliqni topadi. Intro/outro/kredit qismlarini chetlab o'tish uchun
+async def _analyze_scene_cuts(path, total_duration=None, progress_cb=None):
+    """BEPUL usul (faqat ffmpeg, tashqi API kerak emas): videodagi sahna
+    almashinuvlarini (kadr keskin o'zgargan lahzalarni) aniqlaydi. Tez-tez
+    o'zgaruvchi kadrlar odatda harakatli/jang sahnalarga xos, kam o'zgaruvchi
+    uzoq kadrlar esa dialog/tinch sahnalarga xos. Natija: sahna o'zgargan
+    vaqtlar ro'yxati [soniya, soniya, ...]."""
+    cmd = [
+        "ffmpeg", "-i", path,
+        "-vf", "select='gt(scene,0.28)',showinfo",
+        "-an", "-f", "null",
+        "-progress", "pipe:2", "-loglevel", "info", "-"
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    cuts = []
+    last_pct = -1
+    async for raw in proc.stderr:
+        line = raw.decode(errors="ignore").strip()
+        if not line:
+            continue
+        m = re.search(r"pts_time:([\d.]+)", line)
+        if m:
+            try:
+                cuts.append(float(m.group(1)))
+            except ValueError:
+                pass
+            continue
+        if progress_cb and total_duration and line.startswith("out_time_ms="):
+            try:
+                us = int(line.split("=", 1)[1])
+                pct = max(0, min(100, int(us / 1_000_000 / total_duration * 100)))
+            except Exception:
+                continue
+            if pct != last_pct:
+                last_pct = pct
+                await progress_cb(pct)
+    await proc.wait()
+    return cuts
+
+def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05, cuts=None):
+    """`target_duration` soniyalik eng "faol" uzluksiz oraliqni topadi. Ikki
+    bepul signal birlashtiriladi: (1) ovoz balandligi (RMS energiya) va
+    (2) sahna almashinuv tezligi (`cuts` berilsa) — bu ikkinchisi tez-tez
+    kesishga ega (odatda jang/harakat) qismlarni ustuvor qiladi, hatto ovoz
+    baland bo'lmasa ham. Intro/outro/kredit qismlarini chetlab o'tish uchun
     boshi va oxiridan ozgina joy (~5%) hisobga olinmaydi."""
     n_windows = max(1, round(target_duration / _CLIP_WINDOW_SEC))
     edge_margin = max(0, total_duration * edge_margin_ratio)
@@ -3309,11 +3354,27 @@ def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio
         usable = frames
     if not usable:
         return max(0, (total_duration - target_duration) / 2)
-    # dB logarifmik shkala — to'g'ri qo'shish uchun chiziqli energiyaga o'giramiz
-    energies = [10 ** (r / 10.0) for (_, r) in usable]
+    # dB logarifmik shkala — to'g'ri qo'shish uchun chiziqli energiyaga o'giramiz,
+    # so'ng 0..1 oralig'iga normallashtiramiz.
+    raw_energies = [10 ** (r / 10.0) for (_, r) in usable]
+    max_e = max(raw_energies) or 1.0
+    energies = [e / max_e for e in raw_energies]
+
+    # Har bir oyna uchun shu oraliqdagi sahna-kesish sonini hisoblab, 0..1 ga normallashtiramiz.
+    cut_scores = [0.0] * len(usable)
+    if cuts:
+        for i, (t, _) in enumerate(usable):
+            cut_scores[i] = sum(1 for c in cuts if t <= c < t + _CLIP_WINDOW_SEC)
+        max_c = max(cut_scores) or 1.0
+        cut_scores = [c / max_c for c in cut_scores]
+
+    # Kombinatsiyalangan ball: ovoz va harakat teng vaznda, ikkalasi ham baland
+    # bo'lgan (jang kabi) qismlar eng yuqori ballni oladi.
+    combined = [0.55 * e + 0.45 * c for e, c in zip(energies, cut_scores)] if cuts else energies
+
     best_idx, best_sum = 0, -1.0
     for i in range(0, len(usable) - n_windows + 1):
-        s = sum(energies[i:i + n_windows])
+        s = sum(combined[i:i + n_windows])
         if s > best_sum:
             best_sum = s
             best_idx = i
@@ -3445,29 +3506,46 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
 
 async def _find_highlight_start(path, target_duration, total_duration, progress_cb=None):
     """Avval AI (vision) usulini sinaydi; muvaffaqiyatsiz bo'lsa yoki
-    ANTHROPIC_API_KEY o'rnatilmagan bo'lsa, ovoz-balandligi evristikasiga qaytadi.
+    ANTHROPIC_API_KEY o'rnatilmagan bo'lsa, BEPUL evristikaga qaytadi — bu
+    ovoz balandligi (RMS) VA sahna-almashinuv tezligini birlashtiradi (ikkalasi
+    ham faqat ffmpeg orqali, hech qanday tashqi/pullik xizmat kerak emas).
     Qaytaradi: (start_soniya, usul_nomi — status xabarida ko'rsatish uchun).
     `progress_cb(text, force=False)` — AI ishlayaptimi, muvaffaqiyatsizmi yoki
     umuman o'chirilganmi — bu holatlar aniq ajratib xabar qilinadi, shunda admin
     jarayon "qotib qolmaganini", balki AI haqiqatan ishlayotganini ko'radi."""
-    def _make_loudness_pct_cb():
-        """pct-only chaqiruvni progress_cb(text, force) formatiga o'giradi,
-        shunda RMS tahlili davomida ham foiz bar ekranda tirik yangilanadi."""
-        if not progress_cb:
-            return None
-        async def _cb(pct):
-            await progress_cb(f"🔊 Ovoz balandligi tahlili...\n\n{_progress_bar(pct)} {pct}%")
-        return _cb
+    async def _free_heuristic():
+        """Ovoz balandligi + sahna-kesish tezligini birlashtirgan bepul usul."""
+        def _loud_cb():
+            if not progress_cb:
+                return None
+            async def _cb(pct):
+                await progress_cb(f"🔊 Ovoz balandligi tahlili...\n\n{_progress_bar(pct)} {pct}%")
+            return _cb
+
+        def _cut_cb():
+            if not progress_cb:
+                return None
+            async def _cb(pct):
+                await progress_cb(f"🎬 Sahna/harakat faolligi tahlili...\n\n{_progress_bar(pct)} {pct}%")
+            return _cb
+
+        frames = await _analyze_loudness(path, total_duration, progress_cb=_loud_cb())
+        try:
+            cuts = await _analyze_scene_cuts(path, total_duration, progress_cb=_cut_cb())
+        except Exception as e:
+            logger.warning(f"[scene-cuts] tahlil qilinmadi: {e}")
+            cuts = None
+        start = (
+            _pick_best_window(frames, target_duration, total_duration, cuts=cuts)
+            if frames else max(0, (total_duration - target_duration) / 2)
+        )
+        method = "🎬 faollik tahlili (ovoz+sahna)" if cuts else "🔊 ovoz tahlili"
+        return start, method
 
     if not ANTHROPIC_API_KEY:
         if progress_cb:
-            await progress_cb("🔇 AI o'chirilgan (ANTHROPIC_API_KEY yo'q) — ovoz balandligi tahlili ishlatilmoqda...", True)
-        frames = await _analyze_loudness(path, total_duration, progress_cb=_make_loudness_pct_cb())
-        start = (
-            _pick_best_window(frames, target_duration, total_duration)
-            if frames else max(0, (total_duration - target_duration) / 2)
-        )
-        return start, "🔊 ovoz tahlili"
+            await progress_cb("🆓 Bepul tahlil: ovoz + sahna faolligi ishlatilmoqda...", True)
+        return await _free_heuristic()
 
     if progress_cb:
         await progress_cb("🤖 AI ishlamoqda: kadrlar tanlanmoqda...", True)
@@ -3477,13 +3555,8 @@ async def _find_highlight_start(path, target_duration, total_duration, progress_
             await progress_cb("✅ AI tanladi — klip tayyorlanmoqda...", True)
         return ai_start, "🤖 AI tahlili"
     if progress_cb:
-        await progress_cb("⚠️ AI javob bermadi — ovoz balandligi (RMS) tahliliga o'tilmoqda...", True)
-    frames = await _analyze_loudness(path, total_duration, progress_cb=_make_loudness_pct_cb())
-    start = (
-        _pick_best_window(frames, target_duration, total_duration)
-        if frames else max(0, (total_duration - target_duration) / 2)
-    )
-    return start, "🔊 ovoz tahlili"
+        await progress_cb("⚠️ AI javob bermadi — bepul tahlilga o'tilmoqda...", True)
+    return await _free_heuristic()
 
 
 # ---- SUV BELGISI (WATERMARK) ----
@@ -3514,12 +3587,16 @@ def _drawtext_filter(text, font_path, fontsize, y_expr):
         f"x=(w-text_w)/2:y={y_expr}"
     )
 
-async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None):
+async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None, stall_timeout=90):
     """`cmd` (ffmpeg buyrug'i, ro'yxat) ni -progress pipe:1 bilan ishga tushiradi.
     ffmpeg joriy pozitsiyasini out_time_ms sifatida chiqarib turadi (bu maydon nomi
     chalg'ituvchi — aslida MIKROsoniya, ffmpeg'ning eski moslik uchun saqlab
     qolingan xatosi). Shundan foizni hisoblab on_progress(percent) callback'iga
-    (sync yoki async bo'lishi mumkin) uzatib boradi."""
+    (sync yoki async bo'lishi mumkin) uzatib boradi.
+    MUHIM (qotib qolishning oldini olish): agar `stall_timeout` soniya davomida
+    progress foizi umuman o'zgarmasa (ffmpeg qotib qolgan/juda sekinlashgan
+    hisoblanadi), jarayon majburan o'chiriladi va xatolik qaytariladi — shu
+    orqali admin abadiy "qotib qolgan" progress-barni kutib qolmaydi."""
     full_cmd = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
     proc = await asyncio.create_subprocess_exec(
         *full_cmd,
@@ -3527,7 +3604,18 @@ async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None):
         stderr=asyncio.subprocess.STDOUT,
     )
     last_pct = -1
+    last_progress_at = time.monotonic()
     error_tail = []
+
+    async def _stall_watchdog():
+        while True:
+            await asyncio.sleep(5)
+            if time.monotonic() - last_progress_at > stall_timeout:
+                if proc.returncode is None:
+                    proc.kill()
+                return
+
+    watchdog_task = asyncio.create_task(_stall_watchdog())
     try:
         async for raw in proc.stdout:
             line = raw.decode(errors="ignore").strip()
@@ -3539,6 +3627,7 @@ async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None):
                     pct = max(0, min(99, int((out_us / 1_000_000) / max(0.1, total_seconds) * 100)))
                     if pct != last_pct:
                         last_pct = pct
+                        last_progress_at = time.monotonic()
                         if on_progress:
                             result = on_progress(pct)
                             if asyncio.iscoroutine(result):
@@ -3556,12 +3645,23 @@ async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None):
             proc.kill()
             await proc.wait()
         raise
+    finally:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except (asyncio.CancelledError, Exception):
+            pass
+    if proc.returncode == -9 or proc.returncode == 137:
+        raise RuntimeError(
+            f"ffmpeg {stall_timeout}s davomida ilgarilamadi (qotib qoldi) — majburan to'xtatildi."
+        )
     if ret != 0:
         raise RuntimeError("ffmpeg xato bilan tugadi: " + " / ".join(error_tail[-3:]))
     if on_progress:
         result = on_progress(100)
         if asyncio.iscoroutine(result):
             await result
+
 
 async def _render_horizontal(path, start, duration, out_path, font_path, progress_cb=None):
     """16:9 (1280x720) format — kerak bo'lsa qora chiziqlar (pad) bilan aniq 16:9
@@ -3593,30 +3693,27 @@ def _has_audio_stream(path):
     return bool(out.stdout.strip())
 
 async def _render_vertical(path, start, duration, out_path, font_path, has_audio=True, progress_cb=None):
-    """9:16 (1080x1920, Instagram Stories/Reels) format — butun kadr saqlanadi:
-    fon sifatida xiralashtirilgan (blur) kattalashtirilgan nusxa, markazda esa
-    original video to'liq ko'rinishda, ustiga suv belgisi qo'yiladi."""
+    """9:16 (1080x1920, Instagram Stories/Reels) format.
+    MUHIM: avvalgi versiyada fon uchun xiralashtirilgan (blur) kattalashtirilgan
+    nusxa + overlay ishlatilar edi — bu ancha og'ir hisoblash bo'lib, serverning
+    kuchsiz CPU'sida amalda to'xtab qolar edi (foiz bir joyda "qotib" qolardi).
+    Shu sabab endi 16:9 bilan bir xil, YENGIL usul qo'llaniladi: video 1080 kenlikka
+    moslab kichraytiriladi va yuqori-pastiga oddiy qora chiziqlar (pad) qo'yiladi.
+    Bu overlay/blur'siz, bitta oddiy filtr zanjiri bo'lgani uchun ancha tezroq va
+    barqaror ishlaydi."""
     fs = 34
-    filter_complex = (
-        # MUHIM (3% da "qotib qolish" muammosi tuzatildi): gblur filtri to'g'ridan-to'g'ri
-        # 1080x1920 kadrga qo'llansa, og'ir CPU sarflaydi va sekin/cheklangan serverda
-        # amalda cheksiz davom etishi mumkin edi. Fon baribir xira bo'lgani uchun avval
-        # kichik o'lchamda (270x480, 16x kam piksel) xiralashtirib, keyin qayta kattalashtiramiz —
-        # natija vizual jihatdan bir xil, lekin sezilarli tezroq.
-        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,scale=270:480,gblur=sigma=20,scale=1080:1920[bg];"
-        "[0:v]scale=1080:-2[fg];"
-        "[bg][fg]overlay=(W-w)/2:(H-h)/2,"
+    vf = (
+        "scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,"
         + _drawtext_filter(WATERMARK_LINE1, font_path, fs, f"h-th-{fs+56}") + ","
         + _drawtext_filter(WATERMARK_LINE2, font_path, fs, f"h-th-{fs+6}")
-        + "[outv]"
     )
     cmd = [
         "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
-        "-filter_complex", filter_complex, "-map", "[outv]"
+        "-vf", vf,
     ]
     if has_audio:
-        cmd += ["-map", "0:a", "-c:a", "aac", "-b:a", "128k"]
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
     cmd += [
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-movflags", "+faststart", out_path, "-loglevel", "error"
