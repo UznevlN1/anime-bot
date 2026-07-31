@@ -3598,8 +3598,13 @@ async def _render_vertical(path, start, duration, out_path, font_path, has_audio
     original video to'liq ko'rinishda, ustiga suv belgisi qo'yiladi."""
     fs = 34
     filter_complex = (
+        # MUHIM (3% da "qotib qolish" muammosi tuzatildi): gblur filtri to'g'ridan-to'g'ri
+        # 1080x1920 kadrga qo'llansa, og'ir CPU sarflaydi va sekin/cheklangan serverda
+        # amalda cheksiz davom etishi mumkin edi. Fon baribir xira bo'lgani uchun avval
+        # kichik o'lchamda (270x480, 16x kam piksel) xiralashtirib, keyin qayta kattalashtiramiz —
+        # natija vizual jihatdan bir xil, lekin sezilarli tezroq.
         "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,gblur=sigma=20[bg];"
+        "crop=1080:1920,scale=270:480,gblur=sigma=20,scale=1080:1920[bg];"
         "[0:v]scale=1080:-2[fg];"
         "[bg][fg]overlay=(W-w)/2:(H-h)/2,"
         + _drawtext_filter(WATERMARK_LINE1, font_path, fs, f"h-th-{fs+56}") + ","
@@ -3758,21 +3763,26 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
         font_path = await asyncio.to_thread(_find_watermark_font)
         has_audio = await asyncio.to_thread(_has_audio_stream, src_path)
 
+        mm, ss = int(start // 60), int(start % 60)
+        method_line = f" ({method})" if method else ""
+        base_caption = f"✂️ Qiziqarli joy{method_line} — {mm}:{ss:02d} dan {int(clip_len)} soniya"
+
+        # MUHIM: har bir format tayyor bo'lishi bilan DARHOL yuboriladi (ikkalasini
+        # ham kutib turilmaydi). Avval bu ikkalasi tugagunicha hech narsa yuborilmas
+        # edi — shu sabab 9:16 bosqichi qotib qolsa yoki xato bersa, 16:9 muvaffaqiyatli
+        # tayyor bo'lgan bo'lsa ham adminga umuman yetib bormas edi.
         await set_progress(_stage_progress_text("16:9", 0, int(time.monotonic() - pipeline_start)), force=True)
         await _render_horizontal(src_path, start, clip_len, out_h_path, font_path,
                                   progress_cb=make_stage_cb("16:9"))
+        await bot.send_video(admin_chat_id, FSInputFile(out_h_path), caption=f"{base_caption}\n📐 16:9")
 
         await set_progress(_stage_progress_text("9:16", 0, int(time.monotonic() - pipeline_start)), force=True)
         await _render_vertical(src_path, start, clip_len, out_v_path, font_path, has_audio,
                                 progress_cb=make_stage_cb("9:16"))
-
-        mm, ss = int(start // 60), int(start % 60)
-        method_line = f" ({method})" if method else ""
-        total_elapsed = int(time.monotonic() - pipeline_start)
-        base_caption = f"✂️ Qiziqarli joy{method_line} — {mm}:{ss:02d} dan {int(clip_len)} soniya"
-        await set_progress(f"✅ Tayyor! (jami {total_elapsed}s ketdi)", force=True, show_cancel=False)
-        await bot.send_video(admin_chat_id, FSInputFile(out_h_path), caption=f"{base_caption}\n📐 16:9")
         await bot.send_video(admin_chat_id, FSInputFile(out_v_path), caption=f"{base_caption}\n📱 9:16 (Stories/Reels)")
+
+        total_elapsed = int(time.monotonic() - pipeline_start)
+        await set_progress(f"✅ Tayyor! (jami {total_elapsed}s ketdi)", force=True, show_cancel=False)
         await status_message.answer("✅ Tayyor!", reply_markup=admin_keyboard())
     except asyncio.CancelledError:
         await set_progress("❌ Bekor qilindi.", force=True, show_cancel=False)
