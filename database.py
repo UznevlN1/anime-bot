@@ -867,6 +867,18 @@ def update_anime(anime_id, field, value):
     put_conn(conn)
     _invalidate_animes_cache()
 
+def finish_all_animes():
+    """Bir martalik tuzatish: barcha animelarni 'Tugagan' (finished) holatiga
+    o'tkazadi. Nechta qator o'zgartirilganini qaytaradi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE animes SET status='finished' WHERE status IS DISTINCT FROM 'finished'")
+    updated = c.rowcount
+    conn.commit()
+    put_conn(conn)
+    _invalidate_animes_cache()
+    return updated
+
 def increment_views(anime_id):
     conn = get_conn()
     c = conn.cursor()
