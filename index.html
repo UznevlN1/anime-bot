@@ -1007,7 +1007,7 @@ function renderCard(a,variant){
   }else if(variant==='new'){
     sub=`<div class="card-sub">${typeLabel} • ${a.year||''}</div>`;
   }else{
-    sub=`<div class="card-sub">${a.media_type==='film'?'Film':`<span class="card-ep-pill"><b>${a.episode_count||0}</b> / ${a.total_episodes||a.episode_count||0} qism</span>`}</div>`;
+    sub=`<div class="card-sub">${a.media_type==='film'?'Film':'Serial'}</div>`;
   }
   d.innerHTML=inner+`<div class="card-title">${safeTitle}</div>`+sub;
   d.querySelector('.card-img-wrap').addEventListener('click',()=>openDetail(a.id));
@@ -1095,15 +1095,19 @@ function renderPopular(){
    bosqichma-bosqich (chunk) render qilinadi, hammasi bir vaqtda DOM'ga
    qoʻshilmaydi. Foydalanuvchi pastga tushganda IntersectionObserver keyingi
    qismni yuklaydi ("cheksiz scroll" uslubida). ---------- */
-const GRID_CHUNK_SIZE=24;
+const GRID_CHUNK_SIZE=15;
 let _gridItems=[];
 let _gridRendered=0;
 let _gridSentinel=null;
+// rootMargin kattalashtirildi: karta qatorlari foydalanuvchi ularga yetib
+// kelishidan ancha oldin, hali scroll tezligi past paytda tayyorlanadi —
+// shu bilan aynan scroll paytida DOM'ga katta qoʻshish "qotib qolish"
+// (jank) hissi kamayadi.
 const _gridLoadObserver=(typeof IntersectionObserver!=='undefined')?new IntersectionObserver((entries)=>{
   entries.forEach(entry=>{
-    if(entry.isIntersecting)renderGridChunk();
+    if(entry.isIntersecting)requestAnimationFrame(renderGridChunk);
   });
-},{rootMargin:'400px 0px'}):null;
+},{rootMargin:'900px 0px'}):null;
 
 function renderGridChunk(){
   const g=document.getElementById('allGrid');
@@ -2187,6 +2191,10 @@ async function init(){
       startY=e.touches[0].clientY;
       startX=e.touches[0].clientX;
       pulling=true;
+    }else{
+      // Eski (tugallanmagan) teginishdan qolgan holatni ehtiyot shart tozalaymiz —
+      // aks holda quyidagi touchcancel bilan bogʻliq xatolik qayta chiqishi mumkin.
+      pulling=false;startY=null;startX=null;
     }
   },{passive:true});
   home.addEventListener('touchmove',(e)=>{
@@ -2204,6 +2212,13 @@ async function init(){
   },{passive:true});
   home.addEventListener('touchend',(e)=>{
     if(pulling&&indicator.classList.contains('show')){init();}
+    indicator.classList.remove('show');startY=null;startX=null;pulling=false;
+  });
+  home.addEventListener('touchcancel',()=>{
+    // Teginish tugallanmasdan bekor boʻlsa (masalan, brauzer oʻzi scroll
+    // gestini boshqarib olsa) — holatni tozalaymiz. Aks holda eski startY
+    // qiymati keyingi (aloqasiz) teginishda notoʻgʼri diffY hisoblab,
+    // kutilmagan yangilanishga (va sahifa boshiga qaytishga) olib kelardi.
     indicator.classList.remove('show');startY=null;startX=null;pulling=false;
   });
 })();
