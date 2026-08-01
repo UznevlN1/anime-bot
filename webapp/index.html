@@ -1921,6 +1921,12 @@ async function checkAccess(){
       document.getElementById('maintenanceSub').textContent='Iltimos, birozdan so\'ng qayta urinib ko\'ring';
       showBlockView('maintenance');return false;
     }
+    if(status.blocked){
+      document.getElementById('maintenanceIcon').textContent='🚫';
+      document.getElementById('maintenanceTitle').textContent='Siz bloklangansiz';
+      document.getElementById('maintenanceSub').textContent='Botdan foydalanish huquqingiz cheklangan';
+      showBlockView('maintenance');return false;
+    }
     if(!status.subscribed){renderSubscribeChannels(status.channels);showBlockView('subscribe');return false;}
     document.querySelector('.tabbar').style.display='';
     return true;
