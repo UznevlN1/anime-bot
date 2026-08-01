@@ -327,7 +327,7 @@ async def notify_anime_subscribers(anime_id, text, exclude_user_id=None):
         try:
             await bot.send_message(uid, text, parse_mode="HTML", disable_web_page_preview=True)
         except TelegramForbiddenError:
-            pass
+            await mark_user_left(uid)
         except Exception as e:
             logger.warning(f"[subscribers] {uid} ga xabar yuborilmadi: {e}")
         await asyncio.sleep(0.05)  # Telegram flood-limitiga tegib qolmaslik uchun
@@ -1444,6 +1444,9 @@ def admin_cat_settings_keyboard():
         [
             InlineKeyboardButton(text="👤 Profil bo'limi (bepul)", callback_data="admin_profile_lock", style="danger"),
         ],
+        [
+            InlineKeyboardButton(text="🔒 Avtomatik bloklash", callback_data="admin_autoblock", style="danger"),
+        ],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -1793,8 +1796,7 @@ async def start_handler(message: Message, state: FSMContext):
         )
 
 # Qabul qilaman bosilganda
-@dp.callback_query(F.data == "accept_rules")
-async def accept_rules(call: CallbackQuery, state: FSMContext):
+async def _request_phone(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         "📱 Botdan foydalanish uchun telefon raqamingizni yuboring:"
     )
@@ -1805,6 +1807,19 @@ async def accept_rules(call: CallbackQuery, state: FSMContext):
     )
     await call.message.answer("👇 Tugmani bosing:", reply_markup=kb)
     await state.set_state(RegState.phone)
+
+@dp.callback_query(F.data == "accept_rules")
+async def accept_rules(call: CallbackQuery, state: FSMContext):
+    # Avval majburiy kanallarga obunani tekshiramiz — faqat obuna bo'lgandan
+    # keyin telefon raqami so'raladi (ro'yxatdan o'tish shu bilan yakunlanadi).
+    subscribed = await check_subscription(call.from_user.id)
+    if not subscribed:
+        await call.message.edit_text(
+            await sub_message_text(),
+            reply_markup=await sub_keyboard()
+        )
+        return
+    await _request_phone(call, state)
 
 # Raqam yuborilganda
 @dp.message(RegState.phone, F.contact)
@@ -1831,24 +1846,31 @@ async def reg_phone(message: Message, state: FSMContext):
 
     if is_new:
         u = await asyncio.to_thread(db.get_user, user.id)
-        try:
-            await bot.send_message(
-                ADMIN_ID,
-                f"👤 <b>Yangi foydalanuvchi!</b>\n\n"
-                f"📌 Ism: {user.full_name}\n"
-                f"🔢 Raqam: {u['join_number']}-chi\n"
-                f"🆔 ID: <code>{user.id}</code>\n"
-                f"👤 Username: @{user.username or 'yoq'}\n"
-                f"📱 Telefon: {phone}\n"
-                f"📅 Sana: {u['joined_at'][:10]}\n\n"
-                f"📊 Jami: {u['join_number']} ta foydalanuvchi",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="👤 Profilni ko'rish", url=f"tg://user?id={user.id}")]
-                ]),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
+        new_user_text = (
+            f"👤 <b>Yangi foydalanuvchi!</b>\n\n"
+            f"📌 Ism: {user.full_name}\n"
+            f"🔢 Raqam: {u['join_number']}-chi\n"
+            f"🆔 ID: <code>{user.id}</code>\n"
+            f"👤 Username: @{user.username or 'yoq'}\n"
+            f"📱 Telefon: {phone}\n"
+            f"📅 Sana: {u['joined_at'][:10]}\n\n"
+            f"📊 Jami: {u['join_number']} ta foydalanuvchi"
+        )
+        new_user_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👤 Profilni ko'rish", url=f"tg://user?id={user.id}")]
+        ])
+        for attempt in range(2):
+            try:
+                await bot.send_message(
+                    ADMIN_ID, new_user_text, reply_markup=new_user_kb, parse_mode="HTML"
+                )
+                break
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception as e:
+                logger.warning(f"[reg_phone] yangi foydalanuvchi xabari yuborilmadi (user {user.id}): {e}")
+                break
 
     # Klaviaturani yopish
     await message.answer("✅ Ro'yxatdan o'tdingiz!", reply_markup=ReplyKeyboardRemove())
@@ -1875,37 +1897,29 @@ async def check_sub_handler(call: CallbackQuery, state: FSMContext):
     # keshlangan (obuna emas) natijaga ishonmasdan, majburiy yangilab tekshiramiz.
     _invalidate_sub_cache(call.from_user.id)
     subscribed = await check_subscription(call.from_user.id)
-    if subscribed:
-        await call.answer()
-        await call.message.edit_text(
-            f"👋 Salom, {call.from_user.full_name}!\n"
-            f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
-            f"👇 Nimani qidiryapsiz?",
-            reply_markup=main_keyboard()
-        )
-    else:
+    if not subscribed:
         await call.answer("❌ Hali obuna bolmadingiz!", show_alert=True)
+        return
+
+    await call.answer()
+    u = await asyncio.to_thread(db.get_user, call.from_user.id)
+    if not u:
+        # Hali ro'yxatdan o'tmagan — obuna endi tasdiqlandi, navbatdagi qadam
+        # telefon raqamini so'rash (ro'yxatdan o'tish shu bilan tugaydi).
+        await _request_phone(call, state)
+        return
+
+    await call.message.edit_text(
+        f"👋 Salom, {call.from_user.full_name}!\n"
+        f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
+        f"👇 Nimani qidiryapsiz?",
+        reply_markup=main_keyboard()
+    )
 
 # ===================== BOT BLOKLANSA =====================
 @dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=KICKED))
 async def user_blocked_bot(event: ChatMemberUpdated):
-    user_id = event.from_user.id
-    user = event.from_user
-    await asyncio.to_thread(db.set_user_inactive, user_id)
-    u = await asyncio.to_thread(db.get_user, user_id)
-    try:
-        await bot.send_message(
-            ADMIN_ID,
-            f"🚫 <b>Foydalanuvchi chiqib ketdi!</b>\n\n"
-            f"📌 Ism: {user.full_name}\n"
-            f"🆔 ID: <code>{user_id}</code>\n"
-            f"👤 Username: @{user.username or 'yoq'}\n"
-            f"🔢 Raqam: {u['join_number'] if u else '?'}-chi\n\n"
-            f"🔒 Avtomatik bloklandi.",
-            parse_mode="HTML"
-        )
-    except Exception:
-        pass
+    await mark_user_left(event.from_user.id, tg_user=event.from_user)
 
 # ===================== BOSH MENU =====================
 @dp.callback_query(F.data == "main_menu")
@@ -4438,7 +4452,7 @@ async def bc_send(call: CallbackQuery, state: FSMContext):
                 sent += 1
                 break
             except TelegramForbiddenError:
-                await asyncio.to_thread(db.set_user_inactive, user_id)
+                await mark_user_left(user_id)
                 failed += 1
                 break
             except TelegramRetryAfter as e:
@@ -4687,6 +4701,86 @@ async def set_content(call: CallbackQuery):
     await asyncio.to_thread(db.set_setting, "content_protect", value)
     await call.answer("✅ Saqlandi!", show_alert=True)
     await admin_content(call)
+
+# ---- AVTOMATIK BLOKLASH ----
+# Foydalanuvchi botni bloklab/chiqib ketganda, tizim uni avtomatik ravishda
+# "bloklangan" deb belgilashi kerakmi? Yoqiq bo'lsa — qaytib kelib blokdan
+# chiqarsa ham, admin qo'lda blokdan chiqarmaguncha botdan foydalana olmaydi.
+# O'chiq bo'lsa — faqat "nofaol" deb belgilanadi, qaytib kelsa erkin foydalanadi.
+@dp.callback_query(F.data == "admin_autoblock")
+async def admin_autoblock(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    current = await asyncio.to_thread(db.get_setting, "auto_block_on_leave")
+    enabled = current != "0"  # standart holat — yoqiq
+    status = "✅ Yoqiq" if enabled else "❌ O'chirilgan"
+    await call.message.edit_text(
+        f"🔒 <b>Avtomatik bloklash</b>\n\n"
+        f"Foydalanuvchi botni bloklab/chiqib ketsa, tizim uni avtomatik "
+        f"bloklaydi (qaytib kelsa ham, admin blokdan chiqarmaguncha botdan "
+        f"foydalana olmaydi).\n\nHolat: {status}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Yoqish", callback_data="autoblk_on"),
+                InlineKeyboardButton(text="❌ Ochirish", callback_data="autoblk_off"),
+            ],
+            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.in_(["autoblk_on", "autoblk_off"]))
+async def set_autoblock(call: CallbackQuery):
+    value = "1" if call.data == "autoblk_on" else "0"
+    await asyncio.to_thread(db.set_setting, "auto_block_on_leave", value)
+    await call.answer("✅ Saqlandi!", show_alert=True)
+    await admin_autoblock(call)
+
+async def _notify_admin_user_left(user_id, full_name, username, join_number, auto_block):
+    status_line = "🔒 Avtomatik bloklandi." if auto_block else "⚪️ Nofaol deb belgilandi (avtomatik bloklash o'chirilgan)."
+    text = (
+        f"🚫 <b>Foydalanuvchi chiqib ketdi!</b>\n\n"
+        f"📌 Ism: {full_name}\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"👤 Username: @{username or 'yoq'}\n"
+        f"🔢 Raqam: {join_number if join_number else '?'}-chi\n\n"
+        f"{status_line}"
+    )
+    for attempt in range(2):
+        try:
+            await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
+            return
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            continue
+        except Exception as e:
+            logger.warning(f"[mark_user_left] adminga xabar yuborilmadi (user {user_id}): {e}")
+            return
+
+async def mark_user_left(user_id, tg_user=None):
+    """Foydalanuvchi botni bloklab/chiqib ketganda chaqiriladi — bir nechta joydan
+    (my_chat_member KICKED hodisasi, broadcast, obunachilarga xabar yuborish va h.k.)
+    chaqirilishi mumkin, chunki Telegramning 'bloklandi' hodisasi yolg'iz o'zi
+    yetarlicha tez/ishonchli emas. 'Avtomatik bloklash' sozlamasiga qarab, foydalanuvchini
+    to'liq bloklaydi yoki faqat nofaol deb belgilaydi — va FAQAT u ilgari faol bo'lgan
+    bo'lsa admiga xabar yuboradi, shu bilan bir xil foydalanuvchi uchun bir nechta
+    joydan takroriy xabar kelishining oldi olinadi."""
+    u = await asyncio.to_thread(db.get_user, user_id)
+    was_active = bool(u and u.get("is_active") and not u.get("is_blocked"))
+
+    auto_block = await asyncio.to_thread(db.get_setting, "auto_block_on_leave") != "0"
+    if auto_block:
+        await asyncio.to_thread(db.set_user_inactive, user_id)
+    else:
+        await asyncio.to_thread(db.set_user_left_only, user_id)
+
+    if not was_active:
+        return  # allaqachon nofaol/bloklangan edi — qayta xabar bermaymiz
+
+    full_name = (tg_user.full_name if tg_user else None) or (u.get("full_name") if u else None) or "Nomalum"
+    username = (tg_user.username if tg_user else None) or (u.get("username") if u else None)
+    join_number = u.get("join_number") if u else None
+    await _notify_admin_user_left(user_id, full_name, username, join_number, auto_block)
 
 @dp.callback_query(F.data == "admin_autoclip")
 async def admin_autoclip(call: CallbackQuery):
@@ -5535,6 +5629,14 @@ async def webapp_access_status(user_id: int):
         # Webapp Telegram foydalanuvchi ID'sini yubormadi — bu "obuna yo'q"dan
         # boshqa holat, frontend buni alohida ko'rsatishi uchun belgilaymiz.
         return {"maintenance": False, "subscribed": False, "channels": [], "invalid_session": True}
+
+    # Botda bloklangan foydalanuvchi webapp'ga ham kira olmasligi kerak.
+    # Mavjud "subscribed" tekshiruvidan foydalanamiz — shu orqali bu holat
+    # webapp_access_status'ni chaqiruvchi HAMMA endpoint'larda (animes ro'yxati,
+    # anime tafsiloti, video yuborish, izohlar va h.k.) avtomatik qo'llanadi.
+    u = await asyncio.to_thread(db.get_user, user_id)
+    if u and u.get("is_blocked"):
+        return {"maintenance": False, "subscribed": False, "channels": [], "blocked": True}
 
     subscribed = await check_subscription(user_id)
     channels_out = []

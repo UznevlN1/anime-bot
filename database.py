@@ -599,6 +599,17 @@ def set_user_inactive(user_id):
     conn.commit()
     put_conn(conn)
 
+def set_user_left_only(user_id):
+    """Botni bloklab/chiqib ketgan foydalanuvchini faqat NOFAOL qiladi —
+    is_blocked'ga tegmaydi. 'Avtomatik bloklash' sozlamasi O'CHIQ bo'lganda
+    ishlatiladi: foydalanuvchi qaytib kelsa (blokdan chiqarsa), qayta bloklanmagan
+    holda botdan foydalana oladi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET is_active=0 WHERE user_id=%s", (user_id,))
+    conn.commit()
+    put_conn(conn)
+
 def update_user_info(user_id, username=None, full_name=None):
     """Telegramdan kelgan joriy ism/username bilan foydalanuvchi yozuvini
     yangilaydi ("Hisobni yangilash" tugmasi uchun)."""
