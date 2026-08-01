@@ -80,6 +80,12 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .notif-time{font-size:11px;color:var(--text-dim);margin-top:4px;}
 .notif-empty{text-align:center;color:var(--text-dim);font-size:13px;padding:30px 0;}
 
+/* Stat ro'yxat modali (Ko'rilgan / Davom etishda) */
+.stat-modal-list{overflow-y:auto;flex:1;display:flex;flex-wrap:wrap;gap:16px 10px;padding-top:2px;justify-content:flex-start;}
+.stat-modal-list .card{width:104px;}
+.stat-modal-list .card-img-wrap{width:104px;height:146px;}
+.stat-modal-loading{text-align:center;color:var(--text-dim);font-size:13px;padding:30px 0;width:100%;}
+
 /* Search + segmented tabs */
 .search-wrap{padding:4px 18px 12px;}
 .search-box{display:flex;align-items:center;gap:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;color:var(--text-dim);font-size:14px;}
@@ -306,7 +312,9 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .pf-edit-btn{margin-left:auto;flex:none;background:var(--bg-card2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;padding:9px 13px;border-radius:11px;display:flex;align-items:center;gap:6px;align-self:flex-start;}
 
 .pf-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
-.pf-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:15px 4px;text-align:center;}
+.pf-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:15px 4px;text-align:center;cursor:pointer;transition:transform .15s cubic-bezier(.4,0,.2,1),opacity .15s ease,border-color .15s ease;}
+.pf-stat:active{transform:scale(.94);opacity:.85;border-color:var(--purple);}
+@media (prefers-reduced-motion:reduce){.pf-stat{transition:none!important;}.pf-stat:active{transform:none!important;opacity:1!important;}}
 .pf-stat-icon{width:32px;height:32px;margin:0 auto 8px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;}
 .pf-stat-icon.icon-fav{background:rgba(168,85,247,.16);}
 .pf-stat-icon.icon-eye{background:rgba(59,130,246,.16);}
@@ -598,10 +606,10 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     </div>
 
     <div class="pf-stats">
-      <div class="pf-stat"><div class="pf-stat-icon icon-fav">💜</div><b id="statFav">0</b><span>Sevimlilar</span></div>
-      <div class="pf-stat"><div class="pf-stat-icon icon-eye">👁️</div><b id="statWatched">0</b><span>Ko'rilgan</span></div>
-      <div class="pf-stat"><div class="pf-stat-icon icon-time">🕐</div><b id="statTime">0 soat</b><span>Tomosha vaqti</span></div>
-      <div class="pf-stat"><div class="pf-stat-icon icon-streak">🔥</div><b id="statStreak">0</b><span>Davom etishda</span></div>
+      <div class="pf-stat" data-stat="fav"><div class="pf-stat-icon icon-fav">💜</div><b id="statFav">0</b><span>Sevimlilar</span></div>
+      <div class="pf-stat" data-stat="watched"><div class="pf-stat-icon icon-eye">👁️</div><b id="statWatched">0</b><span>Ko'rilgan</span></div>
+      <div class="pf-stat" data-stat="time"><div class="pf-stat-icon icon-time">🕐</div><b id="statTime">0 soat</b><span>Tomosha vaqti</span></div>
+      <div class="pf-stat" data-stat="continue"><div class="pf-stat-icon icon-streak">🔥</div><b id="statStreak">0</b><span>Davom etishda</span></div>
     </div>
 
     <div class="pf-vip-section" id="pfVipSection" style="display:none;">
@@ -713,6 +721,16 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <button class="btn-primary sub-check-btn" id="subPremiumBtn" style="margin-top:0;background:linear-gradient(135deg,#f5c542,#c9932e);">💎 Premium orqali kirish (kanalsiz)</button>
   </div>
 </main>
+
+<div class="notif-modal-overlay" id="statModalOverlay">
+  <div class="notif-modal" style="max-height:82vh;">
+    <div class="notif-modal-head">
+      <div class="notif-modal-title" id="statModalTitle">📊</div>
+      <button class="notif-modal-close" id="statModalClose">✕</button>
+    </div>
+    <div class="stat-modal-list" id="statModalList"></div>
+  </div>
+</div>
 
 <div class="notif-modal-overlay" id="notifModalOverlay">
   <div class="notif-modal">
@@ -912,6 +930,17 @@ async function loadFavoritesFromServer(){
     if(res.ok){const data=await res.json();SERVER_FAVS=data.ids||[];}
   }catch(e){/* localStorage keshi bilan davom etamiz */}
 }
+// Umumiy tomosha vaqtini "1 soat 30 daqiqa" / "45 daqiqa" / "1 soat" koʻrinishida,
+// har doim toʻliq va tushunarli qilib formatlaydi (soniyalar asosida — aniqroq).
+function formatWatchTime(totalSeconds){
+  const secs=Math.max(0,Math.round(Number(totalSeconds)||0));
+  const h=Math.floor(secs/3600);
+  const m=Math.floor((secs%3600)/60);
+  if(h<=0&&m<=0)return secs>0?'1 daqiqadan kam':'0 daqiqa';
+  if(h<=0)return `${m} daqiqa`;
+  if(m<=0)return `${h} soat`;
+  return `${h} soat ${m} daqiqa`;
+}
 async function loadProfileStats(){
   try{
     const res=await fetch(`/api/stats?${initDataQS()}`);
@@ -919,7 +948,8 @@ async function loadProfileStats(){
       const s=await res.json();
       document.getElementById('statFav').textContent=s.favorites;
       document.getElementById('statWatched').textContent=s.watched;
-      document.getElementById('statTime').textContent=s.watch_hours+' soat';
+      const secs=(s.watch_seconds!=null)?s.watch_seconds:Math.round((s.watch_hours||0)*3600);
+      document.getElementById('statTime').textContent=formatWatchTime(secs);
       document.getElementById('statStreak').textContent=s.streak;
       return;
     }
@@ -927,6 +957,70 @@ async function loadProfileStats(){
   // Server javob bermasa — 0 emas, "—" ko'rsatib qo'yamiz (chalg'ituvchi 0 dan yaxshiroq)
   ['statFav','statWatched','statTime','statStreak'].forEach(id=>document.getElementById(id).textContent='—');
 }
+
+/* ---------- Stat kartalari: bosilganda toʻliq roʻyxatni koʻrsatish ---------- */
+function closeStatModal(){document.getElementById('statModalOverlay').classList.remove('active');}
+async function openStatModal(type){
+  if(type==='fav'){
+    // Sevimlilar uchun alohida modal shart emas — allaqachon mavjud boʻlgan
+    // "Sevimlilar" sahifasiga toʻgʻridan-toʻgʻri oʻtkazamiz.
+    showView('favorites');
+    return;
+  }
+  if(type==='time')return; // vaqt statistikasi uchun alohida roʻyxat yoʻq — faqat formatlangan qiymat
+
+  const overlay=document.getElementById('statModalOverlay');
+  const titleEl=document.getElementById('statModalTitle');
+  const listEl=document.getElementById('statModalList');
+  titleEl.textContent = type==='watched' ? "👁️ Ko'rilgan animelar" : '🔥 Davom etayotgan animelar';
+  listEl.innerHTML='<div class="stat-modal-loading">Yuklanmoqda...</div>';
+  overlay.classList.add('active');
+
+  try{
+    const res=await fetch(`/api/history?limit=10&${initDataQS()}`);
+    if(!res.ok)throw new Error('http_'+res.status);
+    const data=await res.json();
+    let items=data.items||(data.ids||[]).map(id=>({anime_id:id,episode_number:null}));
+    if(type==='continue'){
+      // "Davom etishda" — foydalanuvchi saqlangan pozitsiyasi (aniq qism) bor
+      // animelar, yaʼni hali tomosha qilishni tugatmagan/davom etayotganlari.
+      items=items.filter(it=>it.episode_number!=null);
+    }
+    if(!items.length){
+      listEl.innerHTML = type==='watched'
+        ? '<div class="empty-msg empty-msg-lg"><span class="empty-icon">👁️</span>Hali hech qanday anime koʻrilmagan.</div>'
+        : '<div class="empty-msg empty-msg-lg"><span class="empty-icon">🔥</span>Hozircha davom etayotgan anime yoʻq.</div>';
+      return;
+    }
+    // Avval lokal xotiradagi (ALL_ANIME) maʼlumotdan foydalanamiz, topilmasa serverdan olamiz.
+    const details=await Promise.all(items.map(it=>{
+      const cached=ALL_ANIME.find(a=>a.id===it.anime_id);
+      if(cached)return Promise.resolve(cached);
+      return fetchJSON(`${API}/animes/${it.anime_id}?${initDataQS()}`).catch(()=>null);
+    }));
+    listEl.innerHTML='';
+    items.forEach((it,i)=>{
+      const det=details[i];
+      if(!det)return;
+      const card=renderCard(det,type==='continue'?'continue':undefined);
+      if(it.episode_number){
+        const subEl=card.querySelector('.card-sub');
+        if(subEl)subEl.textContent+=` • ${it.episode_number}-qism`;
+      }
+      // Kartani bosganda anime sahifasiga oʻtadi — shu bilan birga modalni yopamiz.
+      card.querySelector('.card-img-wrap').addEventListener('click',closeStatModal);
+      card.querySelector('.card-title').addEventListener('click',closeStatModal);
+      listEl.appendChild(card);
+    });
+  }catch(e){
+    listEl.innerHTML='<div class="empty-msg empty-msg-lg">Yuklab boʻlmadi. Qaytadan urinib koʻring.</div>';
+  }
+}
+document.getElementById('statModalClose').addEventListener('click',closeStatModal);
+document.getElementById('statModalOverlay').addEventListener('click',(e)=>{if(e.target.id==='statModalOverlay')closeStatModal();});
+document.querySelectorAll('.pf-stat[data-stat]').forEach(el=>{
+  el.addEventListener('click',()=>openStatModal(el.dataset.stat));
+});
 function historyIds(){try{return JSON.parse(localStorage.getItem('anifilm_history')||'[]');}catch(e){return [];}}
 function pushHistory(id){let h=historyIds().filter(x=>x!==id);h.unshift(id);localStorage.setItem('anifilm_history',JSON.stringify(h.slice(0,15)));}
 function lastEpMap(){try{return JSON.parse(localStorage.getItem('anifilm_last_ep')||'{}');}catch(e){return {};}}
