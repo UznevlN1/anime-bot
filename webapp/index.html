@@ -61,7 +61,24 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .brand-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--purple2),var(--purple));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;box-shadow:0 3px 12px var(--glow);}
 .brand-name{font-size:15px;font-weight:800;letter-spacing:.3px;}
 .bell{width:38px;height:38px;border-radius:12px;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--text);position:relative;}
-.bell .dot{position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--purple2);}
+.bell .dot{display:none;position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--purple2);box-shadow:0 0 0 2px var(--bg-card);}
+.bell .dot.show{display:block;}
+
+/* Bildirishnomalar paneli */
+.notif-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:55;display:none;align-items:flex-end;}
+.notif-modal-overlay.active{display:flex;}
+.notif-modal{background:var(--bg-card);width:100%;max-height:78vh;display:flex;flex-direction:column;border-radius:20px 20px 0 0;padding:18px;padding-bottom:max(18px,env(safe-area-inset-bottom));border:1px solid var(--border);border-bottom:none;}
+.notif-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex:none;}
+.notif-modal-title{font-size:15px;font-weight:800;}
+.notif-modal-close{background:none;border:none;color:var(--text-dim);font-size:20px;line-height:1;padding:4px;}
+.notif-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;}
+.notif-item{display:flex;gap:10px;padding:12px;border-radius:13px;background:var(--bg-card2);border:1px solid var(--border);text-align:left;width:100%;}
+.notif-icon{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;background:rgba(139,92,246,.16);}
+.notif-body{flex:1;min-width:0;}
+.notif-title-t{font-size:13.5px;font-weight:700;margin-bottom:2px;}
+.notif-text{font-size:12.5px;color:var(--text-dim);white-space:pre-wrap;}
+.notif-time{font-size:11px;color:var(--text-dim);margin-top:4px;}
+.notif-empty{text-align:center;color:var(--text-dim);font-size:13px;padding:30px 0;}
 
 /* Search + segmented tabs */
 .search-wrap{padding:4px 18px 12px;}
@@ -91,6 +108,9 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .section-title{font-size:16px;font-weight:800;}
 .section-link{font-size:12px;color:var(--purple2);font-weight:700;}
+.sort-pill{display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.32);color:var(--purple2);font-size:12.5px;font-weight:800;letter-spacing:.1px;padding:7px 13px;border-radius:20px;white-space:nowrap;transition:background .15s,transform .1s;}
+.sort-pill svg{flex-shrink:0;}
+.sort-pill:active{background:rgba(74,222,128,.24);transform:scale(.96);}
 .row-scroll{display:flex;gap:12px;overflow-x:scroll;padding-bottom:4px;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
 .row-scroll::-webkit-scrollbar{display:none;}
 
@@ -500,7 +520,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   </div>
 
   <div class="section" id="allSection">
-    <div class="section-head"><div class="section-title" id="allSectionTitle">Barchasi</div><button class="section-link" id="sortToggle" style="background:none;border:none;">🆕 Yangi</button></div>
+    <div class="section-head"><div class="section-title" id="allSectionTitle">Barchasi</div><button class="sort-pill" id="sortToggle" aria-label="Saralash turini almashtirish"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l-6.5 7.5V19l-3 1.5v-9L4 4z"></path></svg><span id="sortToggleLabel">Yangi</span></button></div>
     <div class="grid" id="allGrid"></div>
   </div>
 </main>
@@ -694,6 +714,16 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   </div>
 </main>
 
+<div class="notif-modal-overlay" id="notifModalOverlay">
+  <div class="notif-modal">
+    <div class="notif-modal-head">
+      <div class="notif-modal-title">🔔 Bildirishnomalar</div>
+      <button class="notif-modal-close" id="notifModalClose">✕</button>
+    </div>
+    <div class="notif-list" id="notifList"></div>
+  </div>
+</div>
+
 <div class="ep-modal-overlay" id="epModalOverlay">
   <div class="ep-modal">
     <div class="ep-modal-title" id="epModalTitle">1-qism</div>
@@ -816,7 +846,7 @@ let ALL_ANIME=[];
 let ACTIVE_TYPE='all';
 let ACTIVE_CATEGORY='';
 let ACTIVE_SORT='new'; // 'new' | 'popular' | 'az'
-const SORT_LABELS={new:'🆕 Yangi',popular:'🔥 Mashhur',az:'🔤 A-Z'};
+const SORT_LABELS={new:'Yangi',popular:'Mashhur',az:'A-Z'};
 const SORT_ORDER=['new','popular','az'];
 function applySort(items){
   const sorted=[...items];
@@ -934,6 +964,69 @@ function formatJoinDate(iso){
   if(isNaN(d))return '—';
   return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear();
 }
+function timeAgo(iso){
+  if(!iso)return '';
+  const d=new Date(iso.replace(' ','T'));
+  if(isNaN(d))return '';
+  const diffSec=Math.max(0,Math.floor((Date.now()-d.getTime())/1000));
+  if(diffSec<60)return 'hozirgina';
+  const m=Math.floor(diffSec/60);if(m<60)return `${m} daq oldin`;
+  const h=Math.floor(m/60);if(h<24)return `${h} soat oldin`;
+  const dd=Math.floor(h/24);if(dd<7)return `${dd} kun oldin`;
+  return formatJoinDate(iso);
+}
+
+/* ---------- bildirishnomalar (🔔) ---------- */
+let NOTIF_ITEMS=[];
+async function refreshNotifBadge(){
+  try{
+    const r=await fetchJSON(`${API}/notifications?${initDataQS()}`);
+    NOTIF_ITEMS=r.items||[];
+    const unread=r.unread||0;
+    document.querySelectorAll('.bell .dot').forEach(d=>d.classList.toggle('show',unread>0));
+  }catch(e){/* jimgina o'tkazamiz - bildirishnoma ikkinchi darajali */}
+}
+function renderNotifList(){
+  const list=document.getElementById('notifList');
+  if(!NOTIF_ITEMS.length){
+    list.innerHTML='<div class="notif-empty">Hozircha bildirishnomalar yoʻq</div>';
+    return;
+  }
+  list.innerHTML=NOTIF_ITEMS.map(n=>`
+    <button class="notif-item" data-anime-id="${n.anime_id||''}">
+      <div class="notif-icon">${n.icon||'🔔'}</div>
+      <div class="notif-body">
+        <div class="notif-title-t">${escapeHtml(n.title)}</div>
+        ${n.body&&n.body!==n.title?`<div class="notif-text">${escapeHtml(n.body)}</div>`:''}
+        <div class="notif-time">${timeAgo(n.created_at)}</div>
+      </div>
+    </button>
+  `).join('');
+  list.querySelectorAll('.notif-item').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const aid=el.dataset.animeId;
+      closeNotifPanel();
+      if(aid)openDetail(parseInt(aid,10));
+    });
+  });
+}
+async function openNotifPanel(){
+  document.getElementById('notifModalOverlay').classList.add('active');
+  renderNotifList();
+  try{
+    const r=await fetchJSON(`${API}/notifications?${initDataQS()}`);
+    NOTIF_ITEMS=r.items||[];
+    renderNotifList();
+  }catch(e){}
+  document.querySelectorAll('.bell .dot').forEach(d=>d.classList.remove('show'));
+  const initData=getInitData();
+  if(initData){
+    fetch(`${API}/notifications/seen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData})}).catch(()=>{});
+  }
+}
+function closeNotifPanel(){document.getElementById('notifModalOverlay').classList.remove('active');}
+document.getElementById('notifModalClose').addEventListener('click',closeNotifPanel);
+document.getElementById('notifModalOverlay').addEventListener('click',(e)=>{if(e.target.id==='notifModalOverlay')closeNotifPanel();});
 function applyTheme(light){
   document.body.classList.toggle('light-theme',light);
   localStorage.setItem('anifilm_theme',light?'light':'dark');
@@ -1956,7 +2049,7 @@ document.getElementById('searchInput').addEventListener('input',(e)=>{
 document.getElementById('sortToggle').addEventListener('click',()=>{
   const idx=(SORT_ORDER.indexOf(ACTIVE_SORT)+1)%SORT_ORDER.length;
   ACTIVE_SORT=SORT_ORDER[idx];
-  document.getElementById('sortToggle').textContent=SORT_LABELS[ACTIVE_SORT];
+  document.getElementById('sortToggleLabel').textContent=SORT_LABELS[ACTIVE_SORT];
   renderAllGrid();
 });
 document.getElementById('searchClear').addEventListener('click',()=>{
@@ -1976,7 +2069,7 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   if(v==='favorites')renderFavorites();
   if(v==='profil')renderProfil();
 }));
-document.getElementById('bellBtn').addEventListener('click',()=>{pfAlert('Hozircha yangi bildirishnomalar yoʻq');});
+document.getElementById('bellBtn').addEventListener('click',openNotifPanel);
 document.getElementById('profilBotLink').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
 document.getElementById('pfPremium').addEventListener('click',pfOpenPremiumPurchase);
 
@@ -1985,7 +2078,7 @@ function pfOpenLink(url){tg?.openTelegramLink?tg.openTelegramLink(url):window.op
 document.getElementById('pfLockCta').addEventListener('click',pfOpenPremiumPurchase);
 document.getElementById('pfDisabledCta').addEventListener('click',pfOpenPremiumPurchase);
 
-document.getElementById('pfBellBtn').addEventListener('click',()=>pfAlert('Hozircha yangi bildirishnomalar yoʻq'));
+document.getElementById('pfBellBtn').addEventListener('click',openNotifPanel);
 document.getElementById('profilEditBtn').addEventListener('click',()=>pfAlert('Profil maʼlumotlari Telegram akkauntingizdan olinadi. Oʻzgartirish uchun Telegram sozlamalariga oʻting.'));
 
 document.getElementById('pfThemeBtn').addEventListener('click',()=>applyTheme(!document.body.classList.contains('light-theme')));
@@ -2180,6 +2273,7 @@ async function init(){
   }catch(e){
     showHomeError();
   }
+  refreshNotifBadge();
   Splash.finish();
 }
 
