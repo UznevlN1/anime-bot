@@ -24,6 +24,7 @@
   --glow-red:rgba(239,68,68,.4);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--purple2);outline-offset:2px;}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:88px;}
 img{-webkit-user-drag:none;}
 button{font-family:inherit;cursor:pointer;}
@@ -66,6 +67,8 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .search-wrap{padding:4px 18px 12px;}
 .search-box{display:flex;align-items:center;gap:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;color:var(--text-dim);font-size:14px;}
 .search-box input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:14px;}
+.search-clear{background:var(--bg-card2);border:none;color:var(--text-dim);width:20px;height:20px;border-radius:50%;font-size:11px;display:flex;align-items:center;justify-content:center;flex:none;}
+.search-clear:active{background:var(--border);}
 .segmented{display:flex;gap:8px;padding:0 18px 6px;}
 .seg-btn{flex:1;padding:11px 4px;border-radius:12px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .seg-btn.active{background:linear-gradient(135deg,var(--purple2),var(--purple));border-color:var(--purple);color:#fff;box-shadow:0 3px 10px var(--glow);}
@@ -449,11 +452,11 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   <div class="pull-indicator" id="pullIndicator">🔄 Yangilash uchun qoʻyib yuboring</div>
   <div class="topbar">
     <div class="brand"><div class="brand-icon">A</div><div class="brand-name">ANIFILM BOT</div></div>
-    <button class="bell" id="bellBtn">🔔<span class="dot"></span></button>
+    <button class="bell" id="bellBtn" aria-label="Bildirishnomalar">🔔<span class="dot"></span></button>
   </div>
 
   <div class="search-wrap">
-    <div class="search-box">🔍<input id="searchInput" placeholder="Nomi bo'yicha qidirish..."></div>
+    <div class="search-box">🔍<input id="searchInput" placeholder="Nomi bo'yicha qidirish..." aria-label="Nomi bo'yicha qidirish"><button id="searchClear" class="search-clear" aria-label="Qidiruvni tozalash" style="display:none;">✕</button></div>
   </div>
   <div class="segmented" id="segmented">
     <button class="seg-btn active" data-type="all"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg> Barchasi</button>
@@ -497,7 +500,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   </div>
 
   <div class="section" id="allSection">
-    <div class="section-head"><div class="section-title" id="allSectionTitle">Barchasi</div></div>
+    <div class="section-head"><div class="section-title" id="allSectionTitle">Barchasi</div><button class="section-link" id="sortToggle" style="background:none;border:none;">🆕 Yangi</button></div>
     <div class="grid" id="allGrid"></div>
   </div>
 </main>
@@ -513,8 +516,8 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   <div class="topbar">
     <div class="brand-name" style="font-size:18px;">Profil</div>
     <div style="display:flex;gap:8px;">
-      <button class="bell" id="pfThemeBtn">🌙</button>
-      <button class="bell" id="pfBellBtn">🔔<span class="dot"></span></button>
+      <button class="bell" id="pfThemeBtn" aria-label="Mavzuni almashtirish">🌙</button>
+      <button class="bell" id="pfBellBtn" aria-label="Bildirishnomalar">🔔<span class="dot"></span></button>
     </div>
   </div>
 
@@ -640,8 +643,8 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 <main id="view-detail" class="view">
   <div class="detail-hero">
     <img id="detailImg" src="" alt="">
-    <button class="detail-back" id="detailBack"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button>
-    <button class="detail-fav" id="detailFav">♡</button>
+    <button class="detail-back" id="detailBack" aria-label="Orqaga"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button>
+    <button class="detail-fav" id="detailFav" aria-label="Sevimlilarga qo'shish">♡</button>
   </div>
   <div class="detail-body">
     <div class="detail-title" id="detailTitle"></div>
@@ -659,7 +662,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     </div>
     <div class="comment-input-row">
       <input class="comment-input" id="commentInput" placeholder="Izoh yozing..." maxlength="300">
-      <button class="comment-send" id="commentSend">➤</button>
+      <button class="comment-send" id="commentSend" aria-label="Izohni yuborish">➤</button>
     </div>
     <div id="commentsList"></div>
   </div>
@@ -702,7 +705,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 
 <div class="player-view" id="playerView">
   <div class="player-topbar">
-    <button id="playerClose">✕</button>
+    <button id="playerClose" aria-label="Pleerni yopish">✕</button>
     <div class="player-title" id="playerTitle"></div>
   </div>
   <div class="player-video-wrap" id="playerVideoWrap">
@@ -728,7 +731,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
           <text x="12" y="16.3" text-anchor="middle" font-size="7.5" font-weight="800" fill="currentColor" font-family="-apple-system,Segoe UI,Roboto,sans-serif">15</text>
         </svg>
       </button>
-      <button class="player-play-btn" id="playerPlayBtn">
+      <button class="player-play-btn" id="playerPlayBtn" aria-label="Pauza/Ijro">
         <svg class="ppb-play" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M7 4.5c0-1.1 1.19-1.79 2.14-1.24l11 6.5c.93.55.93 1.93 0 2.48l-11 6.5C8.19 19.29 7 18.6 7 17.5v-13z" fill="currentColor"/>
         </svg>
@@ -748,7 +751,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
       <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" step="0.1">
       <div class="player-controls-row">
         <span class="player-time" id="playerTime">0:00 / 0:00</span>
-        <button class="player-fs-btn" id="playerFsBtn">⛶</button>
+        <button class="player-fs-btn" id="playerFsBtn" aria-label="To'liq ekran">⛶</button>
       </div>
     </div>
     <div class="player-next-overlay" id="playerNextOverlay">
@@ -812,6 +815,16 @@ let BOT_USERNAME='';
 let ALL_ANIME=[];
 let ACTIVE_TYPE='all';
 let ACTIVE_CATEGORY='';
+let ACTIVE_SORT='new'; // 'new' | 'popular' | 'az'
+const SORT_LABELS={new:'🆕 Yangi',popular:'🔥 Mashhur',az:'🔤 A-Z'};
+const SORT_ORDER=['new','popular','az'];
+function applySort(items){
+  const sorted=[...items];
+  if(ACTIVE_SORT==='popular')sorted.sort((a,b)=>(b.views||0)-(a.views||0));
+  else if(ACTIVE_SORT==='az')sorted.sort((a,b)=>a.title.localeCompare(b.title,'uz'));
+  else sorted.sort((a,b)=>b.id-a.id);
+  return sorted;
+}
 let CATEGORIES=[];
 let BANNERS=[];
 let heroList=[]; let heroIdx=0; let heroTimer=null;
@@ -931,6 +944,7 @@ function applyTheme(light){
 
 
 function formatViews(n){n=n||0;if(n>=1000000)return(n/1000000).toFixed(1)+'M';if(n>=1000)return(n/1000).toFixed(1)+'K';return String(n);}
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function placeholderImg(t){return`https://placehold.co/300x420/15151d/7c5cff?text=${encodeURIComponent(t||'Anime')}`;}
 function posterUrl(a){return a.photo_id?`${API}/photo/${a.photo_id}`:placeholderImg(a.title);}
 async function fetchJSON(url){const r=await fetch(url);if(!r.ok)throw new Error(r.status);return r.json();}
@@ -968,12 +982,13 @@ function revealCard(d){
   }
 }
 function favBtn(a){
-  return `<button class="fav-btn ${isFav(a.id)?'active':''}" data-favtoggle="${a.id}">${isFav(a.id)?'♥':'♡'}</button>`;
+  return `<button class="fav-btn ${isFav(a.id)?'active':''}" data-favtoggle="${a.id}" aria-label="Sevimlilarga qo'shish">${isFav(a.id)?'♥':'♡'}</button>`;
 }
 function renderCard(a,variant){
   const d=document.createElement('div');d.className='card';
   const typeLabel=a.media_type==='film'?'Film':'Serial';
-  let inner=`<div class="card-img-wrap"><img class="card-img" src="${posterUrl(a)}" alt="${a.title}" loading="lazy" decoding="async">`;
+  const safeTitle=escapeHtml(a.title);
+  let inner=`<div class="card-img-wrap"><img class="card-img" src="${posterUrl(a)}" alt="${safeTitle}" loading="lazy" decoding="async">`;
   if(variant==='continue'){inner+=`<div class="play-overlay"><div class="play-circle">▶</div></div>`;}
   if(variant==='new'){inner+=`<div class="badge-new">NEW</div>`;}
   if(variant&&variant.rank){
@@ -992,9 +1007,9 @@ function renderCard(a,variant){
   }else if(variant==='new'){
     sub=`<div class="card-sub">${typeLabel} • ${a.year||''}</div>`;
   }else{
-    sub=`<div class="card-sub">${a.media_type==='film'?'Film':`<span class="card-ep-pill"><b>${a.episode_count||0}</b> / ${a.total_episodes||a.episode_count||0} qism</span>`}</div>`;
+    sub=`<div class="card-sub">${a.media_type==='film'?'Film':'Serial'}</div>`;
   }
-  d.innerHTML=inner+`<div class="card-title">${a.title}</div>`+sub;
+  d.innerHTML=inner+`<div class="card-title">${safeTitle}</div>`+sub;
   d.querySelector('.card-img-wrap').addEventListener('click',()=>openDetail(a.id));
   d.querySelector('.card-title').addEventListener('click',()=>openDetail(a.id));
   const fb=d.querySelector('[data-favtoggle]');
@@ -1080,15 +1095,19 @@ function renderPopular(){
    bosqichma-bosqich (chunk) render qilinadi, hammasi bir vaqtda DOM'ga
    qoʻshilmaydi. Foydalanuvchi pastga tushganda IntersectionObserver keyingi
    qismni yuklaydi ("cheksiz scroll" uslubida). ---------- */
-const GRID_CHUNK_SIZE=24;
+const GRID_CHUNK_SIZE=15;
 let _gridItems=[];
 let _gridRendered=0;
 let _gridSentinel=null;
+// rootMargin kattalashtirildi: karta qatorlari foydalanuvchi ularga yetib
+// kelishidan ancha oldin, hali scroll tezligi past paytda tayyorlanadi —
+// shu bilan aynan scroll paytida DOM'ga katta qoʻshish "qotib qolish"
+// (jank) hissi kamayadi.
 const _gridLoadObserver=(typeof IntersectionObserver!=='undefined')?new IntersectionObserver((entries)=>{
   entries.forEach(entry=>{
-    if(entry.isIntersecting)renderGridChunk();
+    if(entry.isIntersecting)requestAnimationFrame(renderGridChunk);
   });
-},{rootMargin:'400px 0px'}):null;
+},{rootMargin:'900px 0px'}):null;
 
 function renderGridChunk(){
   const g=document.getElementById('allGrid');
@@ -1112,6 +1131,7 @@ function renderAllGrid(){
   if(ACTIVE_TYPE!=='all')items=items.filter(a=>a.media_type===ACTIVE_TYPE);
   if(ACTIVE_CATEGORY)items=items.filter(a=>a.category===ACTIVE_CATEGORY);
   if(q)items=items.filter(a=>a.title.toLowerCase().includes(q));
+  items=applySort(items);
   document.getElementById('allSectionTitle').textContent=q?`"${q}" bo'yicha natijalar`:(ACTIVE_CATEGORY||'Barchasi');
   const isFiltering=q||ACTIVE_TYPE!=='all'||ACTIVE_CATEGORY;
   document.getElementById('heroSection').style.display=isFiltering?'none':(heroList.length?'':'none');
@@ -1380,7 +1400,7 @@ async function openDetail(id){
       b.innerHTML=ep.is_locked?`🔒 ${label}`:label;
       if(ep.is_locked){
         b.addEventListener('click',()=>{
-          tg?.showAlert?tg.showAlert("👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq."):alert("👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq.");
+          pfAlert("👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq.");
         });
       }else{
         b.addEventListener('click',()=>openEpModal(ep,d.id,d.title,b,d.media_type));
@@ -1398,11 +1418,12 @@ let REPLY_TO=null;
 function renderCommentItem(c,isReply){
   const el=document.createElement('div');el.className='comment-item'+(c.is_premium?' comment-premium':'');
   const uname=c.username?('@'+c.username):('Foydalanuvchi '+String(c.user_id).slice(-4));
-  const unameHtml=uname+(c.is_premium?' <span class="comment-crown">👑</span>':'');
+  const safeUname=escapeHtml(uname);
+  const unameHtml=safeUname+(c.is_premium?' <span class="comment-crown">👑</span>':'');
   el.innerHTML=`<div class="comment-user">${unameHtml}</div><div class="comment-text"></div>
     <div class="comment-actions">
       <button class="comment-action-btn${c.liked_by_me?' liked':''}" data-cid="${c.id}" data-action="like">${c.liked_by_me?'❤️':'🤍'} <span class="like-count">${c.likes||0}</span></button>
-      ${isReply?'':'<button class="comment-action-btn" data-cid="'+c.id+'" data-user="'+uname+'" data-action="reply">↩️ Javob</button>'}
+      ${isReply?'':'<button class="comment-action-btn" data-cid="'+c.id+'" data-user="'+safeUname+'" data-action="reply">↩️ Javob</button>'}
     </div>`;
   el.querySelector('.comment-text').textContent=c.text;
   return el;
@@ -1472,14 +1493,14 @@ document.getElementById('commentSend').addEventListener('click',async()=>{
     const res=await r.json();
     if(res.error){
       const msg=res.error==='juda tez, biroz kuting'?'Iltimos, biroz kuting va qayta urinib koʻring':'Xatolik: '+res.error;
-      tg?.showAlert?tg.showAlert(msg):alert(msg);
+      pfAlert(msg);
       return;
     }
     input.value='';
     REPLY_TO=null;
     document.getElementById('replyBanner').classList.remove('active');
     loadComments(CURRENT_DETAIL_ID);
-  }catch(e){tg?.showAlert?tg.showAlert('Tarmoq xatoligi'):alert('Tarmoq xatoligi');}
+  }catch(e){pfAlert('Tarmoq xatoligi');}
 });
 
 function sendEp(eid,animeId){
@@ -1487,12 +1508,12 @@ function sendEp(eid,animeId){
     .then(r=>r.json()).then(res=>{
       if(res.error){
         const msg=res.error==='premium_only'?"👑 Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq.":'Xatolik: '+res.error;
-        tg?.showAlert?tg.showAlert(msg):alert(msg);
+        pfAlert(msg);
         return;
       }
       if(animeId)pushHistory(animeId);
-      tg?.showAlert?tg.showAlert('✅ Epizod botga yuborildi'):alert('✅ Epizod botga yuborildi');
-    }).catch(()=>{tg?.showAlert?tg.showAlert('Tarmoq xatoligi'):alert('Tarmoq xatoligi');});
+      pfAlert('✅ Epizod botga yuborildi');
+    }).catch(()=>{pfAlert('Tarmoq xatoligi');});
 }
 
 /* ---------- epizod tanlash modali (Onlayn ko'rish / Botga yuborish) ---------- */
@@ -1537,6 +1558,7 @@ const pvPauseIcon=pvPlayBtn.querySelector('.ppb-pause');
 function pvSetPlayIcon(isPlaying){
   pvPlayIcon.style.display=isPlaying?'none':'block';
   pvPauseIcon.style.display=isPlaying?'block':'none';
+  document.getElementById('playerPlayBtn').setAttribute('aria-label',isPlaying?'Pauza qilish':'Ijro etish');
 }
 const pvLoading=document.getElementById('playerLoading');
 const pvLoadingText=document.getElementById('playerLoadingText');
@@ -1830,7 +1852,7 @@ function pvReconnect(){
   if(!pvLastEpId)return closePlayer();
   if(pvRetryCount>=2){
     closePlayer();
-    tg?.showAlert?tg.showAlert("❌ Videoni yuklab bo'lmadi. Birozdan so'ng qayta urinib ko'ring."):alert("❌ Videoni yuklab bo'lmadi.");
+    pfAlert("❌ Videoni yuklab bo'lmadi. Birozdan so'ng qayta urinib ko'ring.");
     return;
   }
   pvRetryCount++;
@@ -1920,9 +1942,23 @@ document.getElementById('maintenanceRetry').addEventListener('click',async()=>{c
 
 /* ---------- events ---------- */
 let _searchDebounce=null;
-document.getElementById('searchInput').addEventListener('input',()=>{
+document.getElementById('searchInput').addEventListener('input',(e)=>{
+  document.getElementById('searchClear').style.display=e.target.value?'flex':'none';
   clearTimeout(_searchDebounce);
   _searchDebounce=setTimeout(renderAllGrid,220);
+});
+document.getElementById('sortToggle').addEventListener('click',()=>{
+  const idx=(SORT_ORDER.indexOf(ACTIVE_SORT)+1)%SORT_ORDER.length;
+  ACTIVE_SORT=SORT_ORDER[idx];
+  document.getElementById('sortToggle').textContent=SORT_LABELS[ACTIVE_SORT];
+  renderAllGrid();
+});
+document.getElementById('searchClear').addEventListener('click',()=>{
+  const input=document.getElementById('searchInput');
+  input.value='';
+  document.getElementById('searchClear').style.display='none';
+  renderAllGrid();
+  input.focus();
 });
 document.getElementById('segmented').addEventListener('click',(e)=>{
   const b=e.target.closest('.seg-btn');if(!b)return;
@@ -1934,7 +1970,7 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   if(v==='favorites')renderFavorites();
   if(v==='profil')renderProfil();
 }));
-document.getElementById('bellBtn').addEventListener('click',()=>{tg?.showAlert?tg.showAlert('Hozircha yangi bildirishnomalar yoʻq'):alert('Hozircha yangi bildirishnomalar yoʻq');});
+document.getElementById('bellBtn').addEventListener('click',()=>{pfAlert('Hozircha yangi bildirishnomalar yoʻq');});
 document.getElementById('profilBotLink').addEventListener('click',()=>{tg?.close?tg.close():history.back();});
 document.getElementById('pfPremium').addEventListener('click',pfOpenPremiumPurchase);
 
@@ -2155,6 +2191,10 @@ async function init(){
       startY=e.touches[0].clientY;
       startX=e.touches[0].clientX;
       pulling=true;
+    }else{
+      // Eski (tugallanmagan) teginishdan qolgan holatni ehtiyot shart tozalaymiz —
+      // aks holda quyidagi touchcancel bilan bogʻliq xatolik qayta chiqishi mumkin.
+      pulling=false;startY=null;startX=null;
     }
   },{passive:true});
   home.addEventListener('touchmove',(e)=>{
@@ -2172,6 +2212,13 @@ async function init(){
   },{passive:true});
   home.addEventListener('touchend',(e)=>{
     if(pulling&&indicator.classList.contains('show')){init();}
+    indicator.classList.remove('show');startY=null;startX=null;pulling=false;
+  });
+  home.addEventListener('touchcancel',()=>{
+    // Teginish tugallanmasdan bekor boʻlsa (masalan, brauzer oʻzi scroll
+    // gestini boshqarib olsa) — holatni tozalaymiz. Aks holda eski startY
+    // qiymati keyingi (aloqasiz) teginishda notoʻgʼri diffY hisoblab,
+    // kutilmagan yangilanishga (va sahifa boshiga qaytishga) olib kelardi.
     indicator.classList.remove('show');startY=null;startX=null;pulling=false;
   });
 })();
@@ -2196,8 +2243,14 @@ async function init(){
       if(!dragging||e.touches.length!==1)return;
       const dx=e.touches[0].clientX-startX;
       const dy=e.touches[0].clientY-startY;
-      if(horizontal===null && (Math.abs(dx)>6||Math.abs(dy)>6)){
-        horizontal=Math.abs(dx)>Math.abs(dy);
+      // Yoʻnalishni juda erta va yengil qaror qilish sahifani pastga tushirishga
+      // xalaqit berardi: barmoq deyarli vertikal harakatlansa ham, bir necha
+      // pikselli tasodifiy gorizontal siljish "gorizontal" deb qabul qilinib,
+      // butun teginish shu qatorga "yutilib" ketardi. Shu sabab: (1) qaror
+      // qilishdan oldin kattaroq harakatni kutamiz, (2) gorizontal siljish
+      // vertikaldan sezilarli darajada katta boʻlishini talab qilamiz.
+      if(horizontal===null && (Math.abs(dx)>10||Math.abs(dy)>10)){
+        horizontal=Math.abs(dx)>Math.abs(dy)*1.3;
       }
       if(horizontal){
         moved=true;
