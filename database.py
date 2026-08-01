@@ -93,6 +93,9 @@ def init_db():
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_plan TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_renew_notified INTEGER DEFAULT 0")
+    # Webapp 🔔 bildirishnoma paneli — foydalanuvchi oxirgi ko'rgan bildirishnoma
+    # id'si (shundan katta id'li bildirishnomalar "o'qilmagan" hisoblanadi).
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_notification_id INTEGER DEFAULT 0")
 
     # Animlar
     c.execute("""
@@ -307,6 +310,19 @@ def init_db():
         processed_at TEXT
     )""")
     c.execute("ALTER TABLE premium_payments ADD COLUMN IF NOT EXISTS gift_to BIGINT")
+
+    # Webapp 🔔 bildirishnoma paneli — yangi qism/anime va admin e'lonlari
+    # shu jadvalga yoziladi, webapp uni /api/notifications orqali o'qiydi.
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        ntype TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT,
+        anime_id INTEGER,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_id_desc ON notifications(id DESC)")
 
     # --- Tezlik uchun indekslar (mavjud ma'lumot yoki xulq-atvorni o'zgartirmaydi,
     # faqat qidiruv/filtrlashni tezlashtiradi) ---
@@ -1146,16 +1162,20 @@ def get_recent_watch_details(user_id, limit=8):
     return [{"anime_id": r[0], "episode_number": r[1]} for r in rows]
 
 def unlock_anime_episodes(anime_id):
-    """Bitta animening (Premium 'oldinroq kirish' bilan qulflangan) barcha qismlarini
-    qo'lda ochish — created_at'ni uzoq o'tmishga suradi, shu bilan bu anime hech kimga
-    qulflanmay qoladi (kelajakda shu animega YANGI qism qo'shilsa, u odatdagidek qayta
-    qulflanadi va normal 'oldinroq kirish' muddati ishlaydi)."""
+    """Bitta animening barcha qismlarini to'liq qulfdan chiqaradi:
+    1) 'oldinroq kirish' vaqtinchalik qulfi — created_at'ni uzoq o'tmishga suradi
+       (kelajakda shu animega YANGI qism qo'shilsa, u odatdagidek qayta qulflanadi).
+    2) Doimiy 'Premium-only' belgisi — animening o'zida ham, uning barcha
+       qismlarida ham is_premium_only=0 qilib tozalanadi (aks holda 'qulfdan
+       chiqarish' tugmasi bosilsa ham anime hamon Premium-only bo'lib qolar edi)."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("UPDATE episodes SET created_at='2000-01-01 00:00:00' WHERE anime_id=%s", (anime_id,))
+    c.execute("UPDATE episodes SET created_at='2000-01-01 00:00:00', is_premium_only=0 WHERE anime_id=%s", (anime_id,))
     affected = c.rowcount
+    c.execute("UPDATE animes SET is_premium_only=0 WHERE id=%s", (anime_id,))
     conn.commit()
     put_conn(conn)
+    _invalidate_animes_cache()
     return affected
 
 def unlock_all_old_episodes():
@@ -1684,3 +1704,49 @@ def get_anime_subscriber_count(anime_id):
     put_conn(conn)
     return count
 
+# ===== BILDIRISHNOMALAR (webapp 🔔 paneli) =====
+def create_notification(ntype, title, body=None, anime_id=None):
+    """Yangi bildirishnoma yozadi: ntype 'episode' | 'anime' | 'announcement'."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO notifications (ntype, title, body, anime_id) VALUES (%s,%s,%s,%s)",
+        (ntype, title, body, anime_id)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def get_notifications(limit=30):
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT %s", (limit,))
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+def get_unread_notification_count(user_id):
+    """Foydalanuvchi hali ko'rmagan bildirishnomalar soni. Mehmon (user_id=0/None)
+    uchun har doim 0 qaytaradi — Telegram orqali tasdiqlanmagan foydalanuvchiga
+    o'qilgan/o'qilmagan holatini kuzatib bo'lmaydi."""
+    if not user_id:
+        return 0
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COALESCE(last_seen_notification_id,0) FROM users WHERE user_id=%s", (user_id,))
+    row = c.fetchone()
+    last_seen = row[0] if row else 0
+    c.execute("SELECT COUNT(*) FROM notifications WHERE id > %s", (last_seen,))
+    count = c.fetchone()[0]
+    put_conn(conn)
+    return count
+
+def mark_notifications_seen(user_id):
+    if not user_id:
+        return
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COALESCE(MAX(id),0) FROM notifications")
+    max_id = c.fetchone()[0]
+    c.execute("UPDATE users SET last_seen_notification_id=%s WHERE user_id=%s", (max_id, user_id))
+    conn.commit()
+    put_conn(conn)

@@ -2537,6 +2537,12 @@ async def add_done(message: Message, state: FSMContext):
     total = data.get("total_episodes")
     progress_line = f"\n📦 Yuklandi: {len(data['video_ids'])}/{total} qism" if total else f"\n📹 {len(data['video_ids'])} ta video"
     await log_admin_action(message.from_user, "Anime qo'shdi", f"{data['title']} ({len(data['video_ids'])} qism)")
+    # Webapp 🔔 paneli uchun bildirishnoma
+    await asyncio.to_thread(
+        db.create_notification, "anime",
+        f"Yangi anime qo'shildi: {data['title']}",
+        anime_id=anime_id
+    )
     await message.answer(
         f"✅ <b>{data['title']}</b> qoshildi!{progress_line}",
         reply_markup=admin_keyboard(),
@@ -2645,6 +2651,12 @@ async def addepi_done(message: Message, state: FSMContext):
                 f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!\n\n"
                 f"👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
             ))
+        # Webapp 🔔 paneli uchun bildirishnoma
+        await asyncio.to_thread(
+            db.create_notification, "episode",
+            f"{anime_row['title']} — {data['next_ep']}-qism chiqdi!",
+            anime_id=data["episode_anime_id"]
+        )
 
     await message.answer(
         f"✅ {len(data['episode_msg_ids'])} ta qism qoshildi!",
@@ -4432,7 +4444,10 @@ async def bc_inline(call: CallbackQuery, state: FSMContext):
 
 @dp.message(BroadcastState.message)
 async def bc_message(message: Message, state: FSMContext):
-    await state.update_data(bc_message_id=message.message_id, bc_chat_id=message.chat.id)
+    await state.update_data(
+        bc_message_id=message.message_id, bc_chat_id=message.chat.id,
+        bc_text=message.text or message.caption or ""
+    )
     data = await state.get_data()
     if data["bc_type"] == "inline":
         await state.set_state(BroadcastState.button_text)
@@ -4510,6 +4525,10 @@ async def bc_send(call: CallbackQuery, state: FSMContext):
         # Har xabardan keyin qisqa pauza — Telegramning flood-limitiga
         # (~30 xabar/soniya) uchramaslik uchun.
         await asyncio.sleep(BROADCAST_DELAY)
+    # Webapp 🔔 paneli uchun e'lon bildirishnomasi (faqat matnli/caption'li xabar bo'lsa)
+    if data.get("bc_text"):
+        title = data["bc_text"].strip().splitlines()[0][:120]
+        await asyncio.to_thread(db.create_notification, "announcement", title, body=data["bc_text"])
     await call.message.edit_text(
         f"📨 Yuborildi!\n✅ {sent} ta\n❌ {failed} ta",
         reply_markup=admin_back()
@@ -5934,6 +5953,37 @@ async def webapp_photo(request):
     except Exception:
         raise web.HTTPNotFound()
 
+# ===== 🔔 BILDIRISHNOMALAR (webapp bell paneli) =====
+_NOTIF_ICON = {"episode": "🎬", "anime": "🆕", "announcement": "📣"}
+
+async def webapp_notifications(request):
+    user_id = _webapp_user_id(request)
+    rows, unread = await asyncio.gather(
+        asyncio.to_thread(db.get_notifications, 30),
+        asyncio.to_thread(db.get_unread_notification_count, user_id),
+    )
+    items = [{
+        "id": n["id"],
+        "type": n["ntype"],
+        "icon": _NOTIF_ICON.get(n["ntype"], "🔔"),
+        "title": n["title"],
+        "body": n.get("body"),
+        "anime_id": n.get("anime_id"),
+        "created_at": n.get("created_at"),
+    } for n in rows]
+    return web.json_response({"items": items, "unread": unread})
+
+async def webapp_notifications_seen(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    user = _verified_post_user(data)
+    if not user:
+        return web.json_response({"error": "ruxsat yoq"}, status=403)
+    await asyncio.to_thread(db.mark_notifications_seen, int(user["id"]))
+    return web.json_response({"ok": True})
+
 async def webapp_banners(request):
     status = await webapp_access_status(_webapp_user_id(request))
     if status["maintenance"]:
@@ -6478,6 +6528,8 @@ async def start_web_server():
     app.router.add_post("/api/send_episode", webapp_send_episode)
     app.router.add_get("/api/banners", webapp_banners)
     app.router.add_get("/api/categories", webapp_categories)
+    app.router.add_get("/api/notifications", webapp_notifications)
+    app.router.add_post("/api/notifications/seen", webapp_notifications_seen)
     app.router.add_get("/api/public/animes", webapp_public_animes)
     app.router.add_get("/api/public/categories", webapp_public_categories)
     app.router.add_post("/api/site/register", webapp_site_register)
