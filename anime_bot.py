@@ -24,6 +24,12 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from aiohttp import web
 import aiohttp
+import io
+try:
+    from PIL import Image as _PILImage
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
 
 # MUHIM: Pyrogramning sync-yordamchi moduli import paytida asyncio.get_event_loop()
 # ni chaqiradi va shu loop'ni ichkarida eslab qoladi. Agar keyinroq dastur boshqa
@@ -5827,6 +5833,32 @@ async def webapp_send_episode(request):
 _PHOTO_CACHE = {}
 _PHOTO_CACHE_TTL = 6 * 3600  # 6 soat
 _PHOTO_CACHE_MAX = 400  # xotirada saqlanadigan maksimal rasm soni
+_PHOTO_MAX_DIM = 720  # webapp'da rasm bundan kattaroq ko'rsatilmaydi — Telegramning original
+                       # (ko'pincha 1280px+, yuzlab KB) rasmini shu o'lchamgacha kichraytiramiz.
+                       # Kartalar sahifasida bir vaqtda 15-20 ta rasm yuklanadi — asl hajmda
+                       # bu sekinlik/"qotib qolish" hissining asosiy sababi edi.
+
+def _shrink_image_bytes(data, max_dim=_PHOTO_MAX_DIM, quality=82):
+    """Rasmni max_dim'gacha kichraytirib, JPEG'ga siqib qaytaradi. Xato bo'lsa,
+    asl baytlarni (None content_type bilan — 'kichraytirilmadi' belgisi) qaytaradi."""
+    try:
+        img = _PILImage.open(io.BytesIO(data))
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = _PILImage.new("RGB", img.size, (10, 10, 15))
+            bg.paste(img.convert("RGBA"), mask=img.convert("RGBA").split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
+            img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), _PILImage.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue(), "image/jpeg"
+    except Exception as e:
+        logger.warning(f"[photo] rasm kichraytirilmadi, asl holida yuboriladi: {e}")
+        return data, None
 
 async def webapp_photo(request):
     photo_id = request.match_info["photo_id"]
@@ -5846,6 +5878,10 @@ async def webapp_photo(request):
                     raise web.HTTPNotFound()
                 data = await resp.read()
                 content_type = resp.headers.get("Content-Type", "image/jpeg")
+        if _PIL_AVAILABLE:
+            resized_data, resized_type = await asyncio.to_thread(_shrink_image_bytes, data)
+            if resized_type:
+                data, content_type = resized_data, resized_type
         _PHOTO_CACHE[photo_id] = (data, content_type, now)
         if len(_PHOTO_CACHE) > _PHOTO_CACHE_MAX:
             oldest = min(_PHOTO_CACHE, key=lambda k: _PHOTO_CACHE[k][2])
@@ -6363,7 +6399,26 @@ async def start_web_server():
                 pass
         return resp
 
-    app = web.Application()
+    @web.middleware
+    async def compress_middleware(request, handler):
+        """API javoblarini (anime ro'yxati va h.k. — ba'zida yuzlab KB JSON)
+        gzip bilan siqib yuboradi. Rasm/video kabi allaqachon siqilgan
+        formatlarga tegmaydi — ularni qayta siqish foyda bermaydi, faqat
+        protsessor vaqtini yeydi."""
+        resp = await handler(request)
+        try:
+            if (
+                isinstance(resp, web.Response) and resp.body
+                and len(resp.body) > 1024
+                and "gzip" in request.headers.get("Accept-Encoding", "")
+                and (resp.content_type or "").startswith(("application/json", "text/"))
+            ):
+                resp.enable_compression()
+        except Exception:
+            pass
+        return resp
+
+    app = web.Application(middlewares=[compress_middleware])
     app.router.add_get("/", health_check)
     app.router.add_get("/favicon.ico", serve_favicon)
     app.router.add_get("/sitemap.xml", serve_sitemap)
