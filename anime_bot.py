@@ -2566,6 +2566,16 @@ async def addepi_list(call: CallbackQuery, state: FSMContext):
         reply_markup=admin_anime_list_keyboard(animes, 0, total, "addepi_sel")
     )
 
+@dp.callback_query(F.data.startswith("addepi_sel_page_"))
+async def addepi_sel_page(call: CallbackQuery, state: FSMContext):
+    page = int(call.data.split("_")[-1])
+    animes = await asyncio.to_thread(db.get_animes, "serial", page)
+    total = await asyncio.to_thread(db.get_anime_count, "serial")
+    await call.message.edit_text(
+        "📺 Serialni tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, page, total, "addepi_sel")
+    )
+
 @dp.callback_query(F.data == "addepi_search")
 async def addepi_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(AddEpisode.choose_method)
@@ -2736,6 +2746,16 @@ async def edit_list(call: CallbackQuery):
     await call.message.edit_text(
         "Animeni tanlang:",
         reply_markup=admin_anime_list_keyboard(animes, 0, total, "editsel")
+    )
+
+@dp.callback_query(F.data.startswith("editsel_page_"))
+async def editsel_page(call: CallbackQuery):
+    page = int(call.data.split("_")[-1])
+    animes = await asyncio.to_thread(db.get_animes, page=page)
+    total = await asyncio.to_thread(db.get_anime_count)
+    await call.message.edit_text(
+        "Animeni tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, page, total, "editsel")
     )
 
 @dp.callback_query(F.data == "edit_search")
@@ -2989,6 +3009,16 @@ async def del_list(call: CallbackQuery):
         reply_markup=admin_anime_list_keyboard(animes, 0, total, "delsel")
     )
 
+@dp.callback_query(F.data.startswith("delsel_page_"))
+async def delsel_page(call: CallbackQuery):
+    page = int(call.data.split("_")[-1])
+    animes = await asyncio.to_thread(db.get_animes, page=page)
+    total = await asyncio.to_thread(db.get_anime_count)
+    await call.message.edit_text(
+        "Animeni tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, page, total, "delsel")
+    )
+
 @dp.callback_query(F.data == "del_search")
 async def del_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(DeleteAnime.search_query)
@@ -3160,6 +3190,16 @@ async def epact_list(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         "Serial tanlang:",
         reply_markup=admin_anime_list_keyboard(animes, 0, total, "epact_sel")
+    )
+
+@dp.callback_query(F.data.startswith("epact_sel_page_"))
+async def epact_sel_page(call: CallbackQuery, state: FSMContext):
+    page = int(call.data.split("_")[-1])
+    animes = await asyncio.to_thread(db.get_animes, "serial", page)
+    total = await asyncio.to_thread(db.get_anime_count, "serial")
+    await call.message.edit_text(
+        "Serial tanlang:",
+        reply_markup=admin_anime_list_keyboard(animes, page, total, "epact_sel")
     )
 
 @dp.callback_query(F.data == "epact_search")

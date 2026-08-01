@@ -904,6 +904,7 @@ def set_anime_premium_only(anime_id, is_premium_only: bool):
     c.execute("UPDATE animes SET is_premium_only=%s WHERE id=%s", (1 if is_premium_only else 0, anime_id))
     conn.commit()
     put_conn(conn)
+    _invalidate_animes_cache()
 
 def get_premium_only_animes():
     """Faqat doimiy Premium-only qilib belgilangan animelar ro'yxati (admin panel uchun)."""
@@ -963,6 +964,7 @@ def set_episode_premium_only(episode_id, is_premium_only: bool):
     c.execute("UPDATE episodes SET is_premium_only=%s WHERE id=%s", (1 if is_premium_only else 0, episode_id))
     conn.commit()
     put_conn(conn)
+    _invalidate_animes_cache()
 
 def update_episode(episode_id, channel_message_id):
     conn = get_conn()
@@ -1237,7 +1239,7 @@ def get_animes_for_webapp():
     c = psycopg2.extras.RealDictCursor(conn)
     c.execute("""
         SELECT a.id, a.title, a.year, a.genre, a.category, a.description, a.photo_id,
-               a.media_type, a.views, a.total_episodes,
+               a.media_type, a.views, a.total_episodes, a.is_premium_only,
                COUNT(e.id) AS episode_count
         FROM animes a
         LEFT JOIN episodes e ON e.anime_id = a.id
