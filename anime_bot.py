@@ -299,13 +299,13 @@ class FindUserState(StatesGroup):
 class AdminManageState(StatesGroup):
     add_id = State()
 
-class PremiumGiftState(StatesGroup):
-    user_id = State()
-
 class AdminPremiumGiftState(StatesGroup):
     user_id = State()
     choosing_plan = State()
     custom_days = State()
+
+class AdminPaymentAdjustState(StatesGroup):
+    amount = State()
 
 class VersionState(StatesGroup):
     version = State()
@@ -531,7 +531,6 @@ def premium_menu_keyboard(prices):
         rows.append([InlineKeyboardButton(text=f"3 oy — {fmt_som(prices['3m'])}", callback_data="premium_buy_3m", style="success")])
     if prices["plan_1y_on"]:
         rows.append([InlineKeyboardButton(text=f"1 yil — {fmt_som(prices['1y'])}", callback_data="premium_buy_1y", style="success")])
-    rows.append([InlineKeyboardButton(text="🎁 Do'stga sovg'a qilish", callback_data="premium_gift_start")])
     rows.append([InlineKeyboardButton(text="🎁 Do'stlarni taklif qilish", callback_data="premium_referral")])
     rows.append([InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -595,18 +594,15 @@ async def premium_menu(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("premium_buy_"))
 async def premium_buy(call: CallbackQuery, state: FSMContext):
     plan = call.data.replace("premium_buy_", "")
-    data = await state.get_data()
-    gift_to = data.get("gift_to")
-    if not gift_to:
-        status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
-        if status["is_premium"] and status["days_left"] > PREMIUM_RENEWAL_WINDOW_DAYS:
-            await call.answer(
-                "👑 Siz allaqachon Premium foydalanuvchisiz!\n"
-                f"Amal qilish muddati: {status['days_left']} kun qoldi.\n"
-                "Yangi tarif sotib olish hozircha kerak emas 😉",
-                show_alert=True
-            )
-            return
+    status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
+    if status["is_premium"] and status["days_left"] > PREMIUM_RENEWAL_WINDOW_DAYS:
+        await call.answer(
+            "👑 Siz allaqachon Premium foydalanuvchisiz!\n"
+            f"Amal qilish muddati: {status['days_left']} kun qoldi.\n"
+            "Yangi tarif sotib olish hozircha kerak emas 😉",
+            show_alert=True
+        )
+        return
     prices = await premium_settings()
     if not prices["enabled"]:
         await call.answer("⏸ Premium xizmati hozircha vaqtincha o'chirilgan.", show_alert=True)
@@ -624,103 +620,73 @@ async def premium_buy(call: CallbackQuery, state: FSMContext):
         return
     await call.answer()
     await state.set_state(PremiumState.waiting_screenshot)
-    await state.update_data(plan=plan, amount=amount, gift_to=gift_to)
+    await state.update_data(plan=plan, amount=amount)
     card_line = f"💳 <code>{prices['card']}</code>"
     holder_line = f"\n👤 {prices['holder']}" if prices["holder"] else ""
-    gift_line = f"\n🎁 Sovg'a qilinadi: <code>{gift_to}</code> foydalanuvchiga\n" if gift_to else ""
     await call.message.edit_text(
         f"💳 <b>{PLAN_LABELS[plan]} — {fmt_som(amount)}</b>\n"
-        f"{gift_line}\n"
         f"Quyidagi kartaga to'lovni amalga oshiring:\n\n"
         f"{card_line}{holder_line}\n\n"
         f"💰 Summa: <b>{fmt_som(amount)}</b>\n\n"
-        f"To'lovni amalga oshirgach, chek skrinshotini shu yerga rasm qilib yuboring 📸",
+        f"To'lovni amalga oshirgach, chekni shu yerga yuboring.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="premium_menu")],
         ]),
         parse_mode="HTML"
     )
 
-@dp.message(PremiumState.waiting_screenshot, F.photo)
+@dp.message(PremiumState.waiting_screenshot, F.photo | F.document)
 async def premium_screenshot_received(message: Message, state: FSMContext):
     data = await state.get_data()
     plan = data.get("plan")
     amount = data.get("amount")
-    gift_to = data.get("gift_to")
     if not plan:
         await state.clear()
         return
+
+    is_document = message.document is not None
+    if is_document:
+        # Fayl sifatida yuborilgan chek — faqat rasm fayllarini qabul qilamiz
+        # (masalan, hujjat yoki arxiv chek sifatida yuborilishining oldini olamiz).
+        mime = (message.document.mime_type or "")
+        if not mime.startswith("image/"):
+            await message.answer("📸 Iltimos, chekni rasm (screenshot) yoki rasm fayli sifatida yuboring.")
+            return
+        file_id = message.document.file_id
+    else:
+        file_id = message.photo[-1].file_id
+
     payment_id = await asyncio.to_thread(
-        db.create_payment_request, message.from_user.id, plan, amount, message.photo[-1].file_id, gift_to
+        db.create_payment_request, message.from_user.id, plan, amount, file_id
     )
     await state.clear()
-    if gift_to:
-        await message.answer("✅ Chek qabul qilindi! Admin tasdiqlagach, sovg'a do'stingizga yetkaziladi 🎁")
-    else:
-        await message.answer("✅ Chek qabul qilindi! Admin tomonidan tekshirilib, tez orada tasdiqlanadi.")
+    await message.answer("✅ Chek qabul qilindi! Admin tomonidan tekshirilib, tez orada tasdiqlanadi.")
     u = message.from_user
     uname = f"@{u.username}" if u.username else u.full_name
-    gift_caption = f"\n🎁 Sovg'a qilinadi → ID: <code>{gift_to}</code>" if gift_to else ""
+    caption = (
+        f"💎 <b>Yangi Premium to'lovi</b>\n\n"
+        f"👤 {uname} (ID: <code>{u.id}</code>)\n"
+        f"📦 Tarif: {PLAN_LABELS.get(plan, plan)}\n"
+        f"💰 Summa: {fmt_som(amount)}"
+    )
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"pay_ok_{payment_id}", style="success"),
+            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"pay_no_{payment_id}", style="danger"),
+        ],
+        [InlineKeyboardButton(text="💰 Summani tuzatib tasdiqlash", callback_data=f"pay_editamt_{payment_id}", style="primary")],
+    ])
     try:
-        await bot.send_photo(
-            ADMIN_ID,
-            message.photo[-1].file_id,
-            caption=(
-                f"💎 <b>Yangi Premium to'lovi</b>\n\n"
-                f"👤 {uname} (ID: <code>{u.id}</code>)\n"
-                f"📦 Tarif: {PLAN_LABELS.get(plan, plan)}\n"
-                f"💰 Summa: {fmt_som(amount)}{gift_caption}"
-            ),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"pay_ok_{payment_id}", style="success"),
-                    InlineKeyboardButton(text="❌ Rad etish", callback_data=f"pay_no_{payment_id}", style="danger"),
-                ]
-            ]),
-            parse_mode="HTML"
-        )
+        if is_document:
+            await bot.send_document(ADMIN_ID, file_id, caption=caption, reply_markup=admin_kb, parse_mode="HTML")
+        else:
+            await bot.send_photo(ADMIN_ID, file_id, caption=caption, reply_markup=admin_kb, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Admin'ga to'lov xabari yuborilmadi: {e}")
 
 @dp.message(PremiumState.waiting_screenshot)
 async def premium_screenshot_wrong(message: Message):
-    await message.answer("📸 Iltimos, chek skrinshotini rasm sifatida yuboring.")
-
-# ---- PREMIUM SOVG'A QILISH ----
-@dp.callback_query(F.data == "premium_gift_start")
-async def premium_gift_start(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    await state.set_state(PremiumGiftState.user_id)
-    await call.message.edit_text(
-        "🎁 Sovg'a qilmoqchi bo'lgan do'stingizning ID yoki @username'ini yozing:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="premium_menu")],
-        ])
-    )
-
-@dp.message(PremiumGiftState.user_id)
-async def premium_gift_target(message: Message, state: FSMContext):
-    query = message.text.strip()
-    if query.startswith("@"):
-        u = await asyncio.to_thread(db.get_user_by_username, query)
-    else:
-        try:
-            u = await asyncio.to_thread(db.get_user, int(query))
-        except Exception:
-            u = None
-    if not u:
-        await message.answer("❌ Bunday foydalanuvchi topilmadi. Do'stingiz avval botdan foydalangan bo'lishi kerak.")
-        return
-    if u["user_id"] == message.from_user.id:
-        await message.answer("❌ O'zingizga sovg'a qila olmaysiz 🙂 Boshqa foydalanuvchi ID sini yozing.")
-        return
-    await state.update_data(gift_to=u["user_id"])
-    prices = await premium_settings()
-    await message.answer(
-        f"🎁 <b>{u['full_name']}</b> uchun tarif tanlang:",
-        reply_markup=premium_menu_keyboard(prices),
-        parse_mode="HTML"
-    )
+    await message.answer("📸 Iltimos, chekni rasm (screenshot) yoki fayl sifatida yuboring.")
 
 @dp.callback_query(F.data.startswith("pay_ok_"))
 async def premium_approve(call: CallbackQuery):
@@ -732,39 +698,21 @@ async def premium_approve(call: CallbackQuery):
         await call.answer("Bu so'rov allaqachon ko'rib chiqilgan", show_alert=True)
         return
     days = PLAN_DAYS.get(payment["plan"], 30)
-    gift_to = payment.get("gift_to")
-    recipient_id = gift_to or payment["user_id"]
-    new_until = await asyncio.to_thread(db.extend_premium, recipient_id, days, payment["plan"])
+    new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
     await asyncio.to_thread(db.set_payment_status, payment_id, "approved")
-    _invalidate_sub_cache(recipient_id)  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
-    if gift_to:
-        await asyncio.to_thread(db.record_premium_gift, payment["user_id"], gift_to, payment["plan"], days)
+    _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
     try:
         await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ <b>Tasdiqlandi</b>", parse_mode="HTML")
     except Exception:
         pass
-    if gift_to:
-        try:
-            await bot.send_message(
-                gift_to,
-                f"🎁 Sizga do'stingizdan Premium sovg'a qilindi!\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
-        try:
-            await bot.send_message(payment["user_id"], "✅ Sovg'angiz tasdiqlandi va do'stingizga yetkazildi! 🎉")
-        except Exception:
-            pass
-    else:
-        try:
-            await bot.send_message(
-                payment["user_id"],
-                f"🎉 Tabriklaymiz! Premium yoqildi.\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
+    try:
+        await bot.send_message(
+            payment["user_id"],
+            f"🎉 Tabriklaymiz! Premium yoqildi.\n\n📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
     await call.answer("✅ Tasdiqlandi")
 
 @dp.callback_query(F.data.startswith("pay_no_"))
@@ -790,13 +738,94 @@ async def premium_reject(call: CallbackQuery):
         pass
     await call.answer("❌ Rad etildi")
 
+# ---- To'lov summasini TUZATIB tasdiqlash (foydalanuvchi so'ralganidan kam/ko'p pul yuborgan bo'lsa) ----
+@dp.callback_query(F.data.startswith("pay_editamt_"))
+async def premium_edit_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    payment_id = int(call.data.split("_")[-1])
+    payment = await asyncio.to_thread(db.get_payment_request, payment_id)
+    if not payment or payment["status"] != "pending":
+        await call.answer("Bu so'rov allaqachon ko'rib chiqilgan", show_alert=True)
+        return
+    await call.answer()
+    await state.set_state(AdminPaymentAdjustState.amount)
+    await state.update_data(payment_id=payment_id, chat_id=call.message.chat.id, message_id=call.message.message_id)
+    await call.message.answer(
+        f"💰 To'lov #{payment_id} — so'ralgan summa: <b>{fmt_som(payment['amount'])}</b>.\n"
+        f"Foydalanuvchi haqiqatda qancha yuborgan bo'lsa, o'sha summani raqam bilan yuboring "
+        f"(masalan: <code>7000</code>). Premium muddati shu summaga mos ravishda "
+        f"(qisman) qo'shiladi.",
+        parse_mode="HTML"
+    )
+
+@dp.message(AdminPaymentAdjustState.amount)
+async def premium_edit_amount(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        await state.clear()
+        return
+    try:
+        real_amount = int(re.sub(r"[^\d]", "", message.text.strip()))
+        if real_amount <= 0:
+            raise ValueError
+    except Exception:
+        await message.answer("❌ Iltimos, musbat butun son kiriting (masalan: 7000).")
+        return
+    data = await state.get_data()
+    payment_id = data.get("payment_id")
+    chat_id = data.get("chat_id")
+    message_id = data.get("message_id")
+    await state.clear()
+
+    payment = await asyncio.to_thread(db.get_payment_request, payment_id)
+    if not payment or payment["status"] != "pending":
+        await message.answer("Bu so'rov allaqachon ko'rib chiqilgan.")
+        return
+
+    requested_amount = payment["amount"] or 1
+    full_days = PLAN_DAYS.get(payment["plan"], 30)
+    # Haqiqatda tushgan summaga proporsional kun beriladi (masalan 10 000 o'rniga
+    # 7 000 tushsa, 30 kundan 21 kun beriladi). Kamida 1 kun beriladi.
+    days = max(1, round(full_days * real_amount / requested_amount))
+
+    await asyncio.to_thread(db.set_payment_amount, payment_id, real_amount)
+    new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
+    await asyncio.to_thread(db.set_payment_status, payment_id, "approved")
+    _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
+
+    if chat_id and message_id:
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id, message_id=message_id,
+                caption=(
+                    f"💰 <b>Summa tuzatildi va tasdiqlandi</b>\n"
+                    f"So'ralgan: {fmt_som(requested_amount)} → Tushgan: {fmt_som(real_amount)}\n"
+                    f"📅 Berilgan muddat: {days} kun"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+    try:
+        await bot.send_message(
+            payment["user_id"],
+            f"🎉 To'lovingiz tasdiqlandi va Premium yoqildi ({days} kunlik).\n\n"
+            f"📅 Amal qilish muddati: <b>{new_until.strftime('%d.%m.%Y')}</b> gacha",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await message.answer(
+        f"✅ To'lov #{payment_id} tasdiqlandi — summa {fmt_som(real_amount)} deb tuzatildi, "
+        f"foydalanuvchiga {days} kunlik Premium berildi."
+    )
+
 @dp.callback_query(F.data == "premium_referral")
 async def premium_referral(call: CallbackQuery):
     await call.answer()
     prices = await premium_settings()
     link = f"https://t.me/{BOT_USERNAME}?start=ref_{call.from_user.id}"
     stats = await asyncio.to_thread(db.get_referral_stats, call.from_user.id)
-    gifts_sent = await asyncio.to_thread(db.get_sent_gifts_count, call.from_user.id)
     await call.message.edit_text(
         f"🎁 <b>Do'stlaringizni taklif qiling!</b>\n\n"
         f"Har bir do'stingiz sizning havolangiz orqali botga birinchi marta kirsa, "
@@ -804,8 +833,7 @@ async def premium_referral(call: CallbackQuery):
         f"🔗 Sizning shaxsiy havolangiz:\n<code>{link}</code>\n\n"
         f"📊 <b>Statistikangiz:</b>\n"
         f"👥 Taklif qilinganlar: <b>{stats['total']}</b>\n"
-        f"👑 Ulardan Premium bo'lganlar: <b>{stats['premium_count']}</b>\n"
-        f"🎁 Sovg'a qilingan Premiumlar: <b>{gifts_sent}</b>",
+        f"👑 Ulardan Premium bo'lganlar: <b>{stats['premium_count']}</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Orqaga", callback_data="premium_menu")],
         ]),
@@ -6144,7 +6172,15 @@ async def webapp_get_history(request):
     user_id = _webapp_user_id(request)
     if not user_id:
         return web.json_response({"error": "ruxsat yoq"}, status=403)
-    items = await asyncio.to_thread(db.get_recent_watch_details, user_id, 8)
+    # Profildagi "Oxirgi ko'rilganlar" qatori uchun standart 8 ta yetarli, lekin
+    # "Ko'rilgan"/"Davom etishda" statistikasi bosilganda to'liq ro'yxat (10
+    # tagacha) ko'rsatiladi — shuning uchun ?limit= orqali moslashuvchan qilindi.
+    try:
+        limit = int(request.query.get("limit", 8))
+    except Exception:
+        limit = 8
+    limit = max(1, min(limit, 20))
+    items = await asyncio.to_thread(db.get_recent_watch_details, user_id, limit)
     # `ids` maydoni eski frontend versiyalari bilan moslik uchun saqlab qolinadi.
     return web.json_response({"ids": [it["anime_id"] for it in items], "items": items})
 

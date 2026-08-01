@@ -309,7 +309,6 @@ def init_db():
         created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
         processed_at TEXT
     )""")
-    c.execute("ALTER TABLE premium_payments ADD COLUMN IF NOT EXISTS gift_to BIGINT")
 
     # Webapp 🔔 bildirishnoma paneli — yangi qism/anime va admin e'lonlari
     # shu jadvalga yoziladi, webapp uni /api/notifications orqali o'qiydi.
@@ -493,12 +492,12 @@ def expire_premiums():
     return affected
 
 # ---- Premium to'lov so'rovlari ----
-def create_payment_request(user_id, plan, amount, screenshot_file_id, gift_to=None):
+def create_payment_request(user_id, plan, amount, screenshot_file_id):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO premium_payments (user_id, plan, amount, screenshot_file_id, gift_to) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-        (user_id, plan, amount, screenshot_file_id, gift_to)
+        "INSERT INTO premium_payments (user_id, plan, amount, screenshot_file_id) VALUES (%s,%s,%s,%s) RETURNING id",
+        (user_id, plan, amount, screenshot_file_id)
     )
     new_id = c.fetchone()[0]
     conn.commit()
@@ -528,6 +527,16 @@ def set_payment_status(payment_id, status):
         "UPDATE premium_payments SET status=%s, processed_at=to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=%s",
         (status, payment_id)
     )
+    conn.commit()
+    put_conn(conn)
+
+def set_payment_amount(payment_id, amount):
+    """Admin chekni ko'rib, haqiqatda tushgan summa so'ralgandan kam/ko'p bo'lsa,
+    to'lov yozuvidagi summani shu haqiqiy summaga to'g'irlaydi (masalan 10 000 so'm
+    kerak bo'lib, foydalanuvchi 7 000 so'm yuborgan bo'lsa)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE premium_payments SET amount=%s WHERE id=%s", (amount, payment_id))
     conn.commit()
     put_conn(conn)
 
@@ -1083,6 +1092,7 @@ def get_profile_stats(user_id):
         "favorites": favorites,
         "watched": watched,
         "watch_hours": round(total_seconds / 3600, 1),
+        "watch_seconds": int(total_seconds),
         "streak": streak,
     }
 
@@ -1638,14 +1648,6 @@ def record_premium_gift(from_user_id, to_user_id, plan, days):
     )
     conn.commit()
     put_conn(conn)
-
-def get_sent_gifts_count(from_user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM premium_gifts WHERE from_user_id=%s", (from_user_id,))
-    count = c.fetchone()[0]
-    put_conn(conn)
-    return count
 
 # ===== REFERAL STATISTIKASI =====
 def get_referral_stats(user_id):
