@@ -70,6 +70,14 @@ if not STORAGE_CHANNEL_raw:
 STORAGE_CHANNEL = int(STORAGE_CHANNEL_raw)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://anime-bot-fd8r.onrender.com/webapp")
 
+# Qism videolari STORAGE_CHANNEL'ga saqlanganda avtomatik qo'yiladigan caption.
+# Raqam (qism tartib raqami) har safar avtomatik hisoblanadi — admin qo'lda
+# yozmaydi. Brend nomini o'zgartirish uchun faqat shu qatorni tahrirlang.
+EPISODE_CREDIT_TAG = "@Ani_Max"
+
+def episode_caption(ep_num: int) -> str:
+    return f"{EPISODE_CREDIT_TAG} kanali uchun maxsus ({ep_num}-qism)"
+
 # Yangi anime qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan ochiq
 # reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina o'chiq
 # hisoblanadi va botning boshqa ishiga ta'sir qilmaydi.
@@ -2457,7 +2465,11 @@ async def add_status(call: CallbackQuery, state: FSMContext):
 async def add_video(message: Message, state: FSMContext):
     data = await state.get_data()
     video_ids = data.get("video_ids", [])
-    sent = await bot.forward_message(STORAGE_CHANNEL, message.chat.id, message.message_id)
+    ep_num = len(video_ids) + 1
+    sent = await bot.copy_message(
+        STORAGE_CHANNEL, message.chat.id, message.message_id,
+        caption=episode_caption(ep_num), parse_mode=None
+    )
     video_ids.append(sent.message_id)
     await state.update_data(video_ids=video_ids)
     await message.answer(f"✅ {len(video_ids)}-video kanalga saqlandi. /done yozing yoki davom eting.")
@@ -2568,10 +2580,13 @@ async def addepi_selected(call: CallbackQuery, state: FSMContext):
 async def addepi_video(message: Message, state: FSMContext):
     data = await state.get_data()
     msg_ids = data.get("episode_msg_ids", [])
-    sent = await bot.forward_message(STORAGE_CHANNEL, message.chat.id, message.message_id)
+    ep_num = data["next_ep"] + len(msg_ids)
+    sent = await bot.copy_message(
+        STORAGE_CHANNEL, message.chat.id, message.message_id,
+        caption=episode_caption(ep_num), parse_mode=None
+    )
     msg_ids.append(sent.message_id)
     await state.update_data(episode_msg_ids=msg_ids)
-    ep_num = data["next_ep"] + len(msg_ids) - 1
     await message.answer(f"✅ {ep_num}-qism kanalga saqlandi.")
 
 @dp.message(AddEpisode.videos, Command("done"))
@@ -3183,7 +3198,12 @@ async def epact_ep(call: CallbackQuery, state: FSMContext):
 @dp.message(EditEpisode.new_video, F.video)
 async def epact_new_video(message: Message, state: FSMContext):
     data = await state.get_data()
-    sent = await bot.forward_message(STORAGE_CHANNEL, message.chat.id, message.message_id)
+    old_ep = await asyncio.to_thread(db.get_episode, data["edit_ep_id"])
+    ep_num = old_ep["episode_number"] if old_ep else None
+    sent = await bot.copy_message(
+        STORAGE_CHANNEL, message.chat.id, message.message_id,
+        caption=episode_caption(ep_num) if ep_num else None, parse_mode=None
+    )
     await asyncio.to_thread(db.update_episode, data["edit_ep_id"], sent.message_id)
     await state.clear()
     await message.answer("✅ Qism yangilandi!", reply_markup=admin_keyboard())
@@ -3233,17 +3253,25 @@ def _ffprobe_duration(path):
     except Exception:
         return None
 
-async def _analyze_loudness(path, total_duration=None, progress_cb=None):
+async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpass_hz=None):
     """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
     balandligi (RMS, dB) darajasini o'lchaydi. Natija: [(vaqt_soniya, rms_db), ...]
+    `highpass_hz` berilsa (masalan 2000), past chastotalar (musiqa/bass) kesib
+    tashlanadi va faqat YUQORI chastotali tovushlar (qilich-zarba, portlash,
+    shovqin-siyosat kabi keskin effektlar) o'lchanadi — bu jang sahnalarini
+    fon musiqasidan ko'proq ajratib topishga yordam beradi.
     `total_duration` va `progress_cb(pct)` berilsa, ffmpeg'ning o'z `-progress`
     chiqishidan foydalanib, tahlil davomida foizni (0-100) real vaqtda xabar qiladi
     — aks holda jarayon tugagunicha ekranda hech narsa yangilanmaydi."""
     n_samples = _CLIP_SAMPLE_RATE * _CLIP_WINDOW_SEC
+    af_chain = f"highpass=f={highpass_hz}," if highpass_hz else ""
+    af_chain += (
+        f"aresample={_CLIP_SAMPLE_RATE},asetnsamples=n={n_samples},"
+        f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-"
+    )
     cmd = [
         "ffmpeg", "-i", path,
-        "-af", f"aresample={_CLIP_SAMPLE_RATE},asetnsamples=n={n_samples},"
-               f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+        "-af", af_chain,
         "-progress", "pipe:2", "-nostats", "-loglevel", "error",
         "-f", "null", "-"
     ]
@@ -3298,6 +3326,113 @@ async def _analyze_loudness(path, total_duration=None, progress_cb=None):
             pts_time = None
     return frames
 
+async def _analyze_motion(path, total_duration=None, progress_cb=None):
+    """BEPUL usul (faqat ffmpeg'ning ichki `signalstats` filtri, tashqi
+    kutubxona kerak emas): har bir kadrning oldingi kadrdan qanchalik farq
+    qilishini (YDIF — harakat/o'zgarish kuchi) o'lchaydi. Yuqori qiymat —
+    kuchli harakat (jang, tez yugurish), past qiymat — deyarli statik kadr
+    (tinch dialog). CPU tejash uchun video avval soniyasiga 2 kadrga
+    siyraklashtiriladi (fps=2). Natija: [(vaqt_soniya, ydif_qiymati), ...]"""
+    cmd = [
+        "ffmpeg", "-i", path,
+        "-vf", "fps=2,signalstats,metadata=print:key=lavfi.signalstats.YDIF:file=-",
+        "-an", "-f", "null",
+        "-progress", "pipe:2", "-nostats", "-loglevel", "error", "-"
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_chunks = []
+
+    async def _read_stdout():
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            stdout_chunks.append(chunk)
+
+    async def _read_stderr():
+        last_pct = -1
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            if not (progress_cb and total_duration):
+                continue
+            text = line.decode(errors="ignore").strip()
+            if text.startswith("out_time_us=") or text.startswith("out_time_ms="):
+                try:
+                    us = int(text.split("=", 1)[1])
+                    pct = max(0, min(100, int(us / 1_000_000 / total_duration * 100)))
+                except Exception:
+                    continue
+                if pct != last_pct:
+                    last_pct = pct
+                    await progress_cb(pct)
+
+    await asyncio.gather(_read_stdout(), _read_stderr(), proc.wait())
+
+    frames = []
+    pts_time = None
+    output = b"".join(stdout_chunks).decode(errors="ignore")
+    for line in output.splitlines():
+        m_pts = re.search(r"pts_time:([\d.]+)", line)
+        if m_pts:
+            pts_time = float(m_pts.group(1))
+            continue
+        m_ydif = re.search(r"YDIF=([\d.]+)", line)
+        if m_ydif and pts_time is not None:
+            frames.append((pts_time, float(m_ydif.group(1))))
+            pts_time = None
+    return frames
+
+async def _analyze_silence(path, total_duration=None, progress_cb=None, noise_db=-30, min_silence=0.3):
+    """BEPUL usul (`silencedetect` filtri): videoning qaysi qismlarida ovoz
+    (nutq/tovush) bor, qaysi qismida jim ekanini aniqlaydi. Natija: jimlik
+    oraliqlari ro'yxati [(boshlanish, tugash), ...]. Bundan foydalanib har
+    bir oynada "nutq zichligi"ni hisoblash mumkin — ko'p gaplashuv (kam
+    jimlik) odatda suhbatga boy (romantik/kulgili) sahnalarga xos."""
+    cmd = [
+        "ffmpeg", "-i", path,
+        "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}",
+        "-progress", "pipe:2", "-nostats", "-loglevel", "info",
+        "-f", "null", "-"
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    intervals = []
+    open_start = None
+    last_pct = -1
+    async for raw in proc.stderr:
+        line = raw.decode(errors="ignore").strip()
+        m_start = re.search(r"silence_start:\s*(-?[\d.]+)", line)
+        if m_start:
+            open_start = max(0.0, float(m_start.group(1)))
+            continue
+        m_end = re.search(r"silence_end:\s*(-?[\d.]+)", line)
+        if m_end and open_start is not None:
+            intervals.append((open_start, float(m_end.group(1))))
+            open_start = None
+            continue
+        if progress_cb and total_duration and line.startswith("out_time_ms="):
+            try:
+                us = int(line.split("=", 1)[1])
+                pct = max(0, min(100, int(us / 1_000_000 / total_duration * 100)))
+            except Exception:
+                continue
+            if pct != last_pct:
+                last_pct = pct
+                await progress_cb(pct)
+    await proc.wait()
+    if open_start is not None and total_duration:
+        intervals.append((open_start, total_duration))
+    return intervals
+
 async def _analyze_scene_cuts(path, total_duration=None, progress_cb=None):
     """BEPUL usul (faqat ffmpeg, tashqi API kerak emas): videodagi sahna
     almashinuvlarini (kadr keskin o'zgargan lahzalarni) aniqlaydi. Tez-tez
@@ -3340,13 +3475,18 @@ async def _analyze_scene_cuts(path, total_duration=None, progress_cb=None):
     await proc.wait()
     return cuts
 
-def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05, cuts=None):
-    """`target_duration` soniyalik eng "faol" uzluksiz oraliqni topadi. Ikki
-    bepul signal birlashtiriladi: (1) ovoz balandligi (RMS energiya) va
-    (2) sahna almashinuv tezligi (`cuts` berilsa) — bu ikkinchisi tez-tez
-    kesishga ega (odatda jang/harakat) qismlarni ustuvor qiladi, hatto ovoz
-    baland bo'lmasa ham. Intro/outro/kredit qismlarini chetlab o'tish uchun
-    boshi va oxiridan ozgina joy (~5%) hisobga olinmaydi."""
+def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05,
+                       cuts=None, high_freq_frames=None, motion_frames=None, silence_intervals=None):
+    """`target_duration` soniyalik eng "qiziqarli" uzluksiz oraliqni topadi.
+    Beshta BEPUL signal birlashtiriladi (qaysi biri berilgan bo'lsa, o'shanisi
+    hisobga olinadi, vaznlar shunga qarab qayta taqsimlanadi):
+      1. `frames`            — umumiy ovoz balandligi (RMS)
+      2. `cuts`               — sahna almashinuv tezligi (jang/tez montaj belgisi)
+      3. `high_freq_frames`   — yuqori chastotali "zarba" tovushlari (qilich, portlash)
+      4. `motion_frames`      — kadr ichidagi harakat kuchi (YDIF)
+      5. `silence_intervals`  — nutq zichligi (suhbatga boy sahnalarni topish uchun)
+    Intro/outro/kredit qismlarini chetlab o'tish uchun boshi va oxiridan
+    ozgina joy (~5%) hisobga olinmaydi."""
     n_windows = max(1, round(target_duration / _CLIP_WINDOW_SEC))
     edge_margin = max(0, total_duration * edge_margin_ratio)
     usable = [(t, r) for (t, r) in frames if edge_margin <= t <= max(edge_margin, total_duration - edge_margin)]
@@ -3354,23 +3494,69 @@ def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio
         usable = frames
     if not usable:
         return max(0, (total_duration - target_duration) / 2)
-    # dB logarifmik shkala — to'g'ri qo'shish uchun chiziqli energiyaga o'giramiz,
-    # so'ng 0..1 oralig'iga normallashtiramiz.
-    raw_energies = [10 ** (r / 10.0) for (_, r) in usable]
-    max_e = max(raw_energies) or 1.0
-    energies = [e / max_e for e in raw_energies]
 
-    # Har bir oyna uchun shu oraliqdagi sahna-kesish sonini hisoblab, 0..1 ga normallashtiramiz.
-    cut_scores = [0.0] * len(usable)
+    def _normalize(vals):
+        m = max(vals) if vals else 0.0
+        return [v / m for v in vals] if m > 0 else [0.0] * len(vals)
+
+    # 1) Ovoz balandligi (RMS, dB -> chiziqli energiya)
+    energy_scores = _normalize([10 ** (r / 10.0) for (_, r) in usable])
+
+    # 2) Sahna-kesish zichligi — har bir oynadagi kesishlar soni
+    cut_scores = None
     if cuts:
-        for i, (t, _) in enumerate(usable):
-            cut_scores[i] = sum(1 for c in cuts if t <= c < t + _CLIP_WINDOW_SEC)
-        max_c = max(cut_scores) or 1.0
-        cut_scores = [c / max_c for c in cut_scores]
+        cut_scores = _normalize([
+            sum(1 for c in cuts if t <= c < t + _CLIP_WINDOW_SEC) for (t, _) in usable
+        ])
 
-    # Kombinatsiyalangan ball: ovoz va harakat teng vaznda, ikkalasi ham baland
-    # bo'lgan (jang kabi) qismlar eng yuqori ballni oladi.
-    combined = [0.55 * e + 0.45 * c for e, c in zip(energies, cut_scores)] if cuts else energies
+    # 3) Yuqori chastotali "zarba" energiyasi
+    hf_scores = None
+    if high_freq_frames:
+        hf_lookup = {round(t): r for (t, r) in high_freq_frames}
+        hf_scores = _normalize([
+            10 ** (hf_lookup.get(round(t), -120.0) / 10.0) for (t, _) in usable
+        ])
+
+    # 4) Harakat kuchi — oynadagi namunalarning o'rtachasi
+    motion_scores = None
+    if motion_frames:
+        motion_scores = _normalize([
+            (lambda pts: sum(pts) / len(pts) if pts else 0.0)(
+                [v for (mt, v) in motion_frames if t <= mt < t + _CLIP_WINDOW_SEC]
+            )
+            for (t, _) in usable
+        ])
+
+    # 5) Nutq zichligi — oynaning jimlik bilan qoplanmagan qismi ulushi
+    speech_scores = None
+    if silence_intervals is not None:
+        def _speech_ratio(t):
+            win_end = t + _CLIP_WINDOW_SEC
+            silent = 0.0
+            for s, e in silence_intervals:
+                overlap = min(win_end, e) - max(t, s)
+                if overlap > 0:
+                    silent += overlap
+            return max(0.0, 1.0 - silent / _CLIP_WINDOW_SEC)
+        speech_scores = [_speech_ratio(t) for (t, _) in usable]  # allaqachon 0..1
+
+    # Faqat mavjud signallar bo'yicha vaznlarni qayta taqsimlaymiz.
+    weighted = [("energy", energy_scores, 0.30)]
+    if cut_scores is not None:
+        weighted.append(("cuts", cut_scores, 0.25))
+    if hf_scores is not None:
+        weighted.append(("hf", hf_scores, 0.20))
+    if motion_scores is not None:
+        weighted.append(("motion", motion_scores, 0.15))
+    if speech_scores is not None:
+        weighted.append(("speech", speech_scores, 0.10))
+    total_w = sum(w for _, _, w in weighted)
+
+    combined = [0.0] * len(usable)
+    for _, scores, w in weighted:
+        norm_w = w / total_w
+        for i, s in enumerate(scores):
+            combined[i] += norm_w * s
 
     best_idx, best_sum = 0, -1.0
     for i in range(0, len(usable) - n_windows + 1):
@@ -3514,37 +3700,57 @@ async def _find_highlight_start(path, target_duration, total_duration, progress_
     umuman o'chirilganmi — bu holatlar aniq ajratib xabar qilinadi, shunda admin
     jarayon "qotib qolmaganini", balki AI haqiqatan ishlayotganini ko'radi."""
     async def _free_heuristic():
-        """Ovoz balandligi + sahna-kesish tezligini birlashtirgan bepul usul."""
-        def _loud_cb():
+        """Beshta bepul signalni (ovoz, kesish, yuqori chastota, harakat,
+        nutq zichligi) birlashtirgan usul — barchasi faqat ffmpeg orqali."""
+        def _cb(label):
             if not progress_cb:
                 return None
-            async def _cb(pct):
-                await progress_cb(f"🔊 Ovoz balandligi tahlili...\n\n{_progress_bar(pct)} {pct}%")
-            return _cb
+            async def _inner(pct):
+                await progress_cb(f"{label}\n\n{_progress_bar(pct)} {pct}%")
+            return _inner
 
-        def _cut_cb():
-            if not progress_cb:
-                return None
-            async def _cb(pct):
-                await progress_cb(f"🎬 Sahna/harakat faolligi tahlili...\n\n{_progress_bar(pct)} {pct}%")
-            return _cb
+        frames = await _analyze_loudness(path, total_duration, progress_cb=_cb("🔊 Ovoz balandligi tahlili..."))
 
-        frames = await _analyze_loudness(path, total_duration, progress_cb=_loud_cb())
         try:
-            cuts = await _analyze_scene_cuts(path, total_duration, progress_cb=_cut_cb())
+            cuts = await _analyze_scene_cuts(path, total_duration, progress_cb=_cb("🎬 Sahna almashinuvi tahlili..."))
         except Exception as e:
             logger.warning(f"[scene-cuts] tahlil qilinmadi: {e}")
             cuts = None
+
+        try:
+            hf_frames = await _analyze_loudness(
+                path, total_duration, progress_cb=_cb("💥 Zarba tovushlari tahlili..."), highpass_hz=2000
+            )
+        except Exception as e:
+            logger.warning(f"[high-freq] tahlil qilinmadi: {e}")
+            hf_frames = None
+
+        try:
+            motion_frames = await _analyze_motion(path, total_duration, progress_cb=_cb("🏃 Harakat kuchi tahlili..."))
+        except Exception as e:
+            logger.warning(f"[motion] tahlil qilinmadi: {e}")
+            motion_frames = None
+
+        try:
+            silence_intervals = await _analyze_silence(path, total_duration, progress_cb=_cb("🗣 Nutq zichligi tahlili..."))
+        except Exception as e:
+            logger.warning(f"[silence] tahlil qilinmadi: {e}")
+            silence_intervals = None
+
         start = (
-            _pick_best_window(frames, target_duration, total_duration, cuts=cuts)
+            _pick_best_window(
+                frames, target_duration, total_duration,
+                cuts=cuts, high_freq_frames=hf_frames,
+                motion_frames=motion_frames, silence_intervals=silence_intervals,
+            )
             if frames else max(0, (total_duration - target_duration) / 2)
         )
-        method = "🎬 faollik tahlili (ovoz+sahna)" if cuts else "🔊 ovoz tahlili"
+        method = "🆓 kombinatsiyalangan tahlil" if frames else "🔊 ovoz tahlili"
         return start, method
 
     if not ANTHROPIC_API_KEY:
         if progress_cb:
-            await progress_cb("🆓 Bepul tahlil: ovoz + sahna faolligi ishlatilmoqda...", True)
+            await progress_cb("🆓 Bepul tahlil: ovoz + sahna + harakat + nutq tahlili ishlatilmoqda...", True)
         return await _free_heuristic()
 
     if progress_cb:
