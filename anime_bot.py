@@ -344,6 +344,9 @@ class PremiumAdminState(StatesGroup):
     referral_bonus = State()
     promo_end = State()
     promo_note = State()
+    discount_1m = State()
+    discount_3m = State()
+    discount_1y = State()
 
 class SearchState(StatesGroup):
     query = State()
@@ -564,34 +567,88 @@ async def premium_settings():
         "premium_card_number", "premium_card_holder", "premium_early_hours",
         "premium_referral_bonus_days", "premium_enabled",
         "premium_plan_1m_enabled", "premium_plan_3m_enabled", "premium_plan_1y_enabled",
+        "premium_discount_1m", "premium_discount_3m", "premium_discount_1y",
+        "premium_promo_active", "premium_promo_end",
     ]
     values = await asyncio.gather(*(asyncio.to_thread(db.get_setting, k) for k in keys))
     (p1, p3, p12, card, holder, early, ref_bonus, enabled_raw,
-     plan_1m_raw, plan_3m_raw, plan_1y_raw) = values
-    p1 = p1 or "15000"; p3 = p3 or "40000"; p12 = p12 or "120000"
+     plan_1m_raw, plan_3m_raw, plan_1y_raw,
+     disc1_raw, disc3_raw, disc12_raw, promo_active_raw, promo_end_raw) = values
+    p1 = int(p1 or "15000"); p3 = int(p3 or "40000"); p12 = int(p12 or "120000")
     card = card or ""; holder = holder or ""
     early = early or "48"; ref_bonus = ref_bonus or "3"
+
+    # Chegirma HOZIR amalda faolmi — bu doim vaqtga qarab, so'rov kelgan
+    # zahoti hisoblanadi. Shu tufayli promo_end vaqti o'tishi bilan (admin
+    # hech narsa qilmasa ham) narxlar o'z-o'zidan asl holatiga qaytadi —
+    # alohida "chegirmani o'chirish" cron/vazifasi shart emas.
+    promo_effective = False
+    if (promo_active_raw or "0") == "1" and promo_end_raw:
+        try:
+            if datetime.now() < datetime.fromisoformat(promo_end_raw):
+                promo_effective = True
+        except Exception:
+            pass
+
+    def _discount_or_none(raw, original):
+        try:
+            v = int(raw)
+        except (TypeError, ValueError):
+            return None
+        # 0 yoki asl narxdan katta/teng qiymat — chegirma yo'q hisoblanadi
+        return v if 0 < v < original else None
+
+    d1 = _discount_or_none(disc1_raw, p1)
+    d3 = _discount_or_none(disc3_raw, p3)
+    d12 = _discount_or_none(disc12_raw, p12)
+
+    eff1 = d1 if (promo_effective and d1) else p1
+    eff3 = d3 if (promo_effective and d3) else p3
+    eff12 = d12 if (promo_effective and d12) else p12
+
     result = {
-        "1m": int(p1), "3m": int(p3), "1y": int(p12),
+        # "1m"/"3m"/"1y" — HOZIR TO'LANADIGAN (effektiv) narx. Chegirma faol
+        # bo'lsa chegirma narxi, aks holda (yoki muddati tugagan bo'lsa) asl narx.
+        "1m": eff1, "3m": eff3, "1y": eff12,
+        "1m_original": p1, "3m_original": p3, "1y_original": p12,
+        "1m_discounted": eff1 < p1, "3m_discounted": eff3 < p3, "1y_discounted": eff12 < p12,
         "card": card, "holder": holder,
         "early_hours": int(early), "ref_bonus": int(ref_bonus),
         "enabled": (enabled_raw or "1") == "1",
         "plan_1m_on": (plan_1m_raw or "1") == "1",
         "plan_3m_on": (plan_3m_raw or "1") == "1",
         "plan_1y_on": (plan_1y_raw or "1") == "1",
+        "promo_effective": promo_effective,
+        "promo_end": promo_end_raw,
     }
     _premium_settings_cache["data"] = result
     _premium_settings_cache["ts"] = now
     return result
 
+def _promo_banner_line(prices):
+    """Chegirma hozir amalda faol bo'lsa, tugash vaqti bilan qisqa banner qatorini
+    qaytaradi; aks holda bo'sh satr (hech narsa ko'rsatilmaydi)."""
+    if not prices.get("promo_effective"):
+        return ""
+    try:
+        end_dt = datetime.fromisoformat(prices["promo_end"])
+        end_str = end_dt.strftime('%d.%m.%Y %H:%M')
+        return f"🔥 <b>Chegirma faol!</b> {end_str} gacha pastroq narxda 👇\n\n"
+    except Exception:
+        return "🔥 <b>Chegirma faol!</b> Pastroq narxda 👇\n\n"
+
 def premium_menu_keyboard(prices):
+    def _plan_label(code, human_label):
+        if prices[f"{code}_discounted"]:
+            return f"{human_label} — {fmt_som(prices[code])} 🔥 (asli {fmt_som(prices[f'{code}_original'])})"
+        return f"{human_label} — {fmt_som(prices[code])}"
     rows = []
     if prices["plan_1m_on"]:
-        rows.append([InlineKeyboardButton(text=f"1 oy — {fmt_som(prices['1m'])}", callback_data="premium_buy_1m", style="success")])
+        rows.append([InlineKeyboardButton(text=_plan_label("1m", "1 oy"), callback_data="premium_buy_1m", style="success")])
     if prices["plan_3m_on"]:
-        rows.append([InlineKeyboardButton(text=f"3 oy — {fmt_som(prices['3m'])}", callback_data="premium_buy_3m", style="success")])
+        rows.append([InlineKeyboardButton(text=_plan_label("3m", "3 oy"), callback_data="premium_buy_3m", style="success")])
     if prices["plan_1y_on"]:
-        rows.append([InlineKeyboardButton(text=f"1 yil — {fmt_som(prices['1y'])}", callback_data="premium_buy_1y", style="success")])
+        rows.append([InlineKeyboardButton(text=_plan_label("1y", "1 yil"), callback_data="premium_buy_1y", style="success")])
     rows.append([InlineKeyboardButton(text="🎁 Do'stlarni taklif qilish", callback_data="premium_referral")])
     rows.append([InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -639,6 +696,7 @@ async def build_premium_menu(user_id):
         "✅ Reklama bannersiz\n"
         f"✅ Yangi qismlarga {prices['early_hours']} soat oldinroq kirish\n"
         "✅ Izohlaringiz yuqorida va 👑 belgi bilan chiqadi\n\n"
+        f"{_promo_banner_line(prices)}"
         "Tarifni tanlang:"
     )
     return text, premium_menu_keyboard(prices)
@@ -910,28 +968,37 @@ async def _premium_admin_text():
     p1_state = "🟢 Yoqilgan" if p["plan_1m_on"] else "🔴 O'chirilgan"
     p3_state = "🟢 Yoqilgan" if p["plan_3m_on"] else "🔴 O'chirilgan"
     p12_state = "🟢 Yoqilgan" if p["plan_1y_on"] else "🔴 O'chirilgan"
-    promo_active, promo_end, promo_note = await asyncio.gather(
+
+    def _price_line(label, code, state):
+        if p[f"{code}_discounted"]:
+            return f"{label}: <s>{fmt_som(p[f'{code}_original'])}</s> {fmt_som(p[code])} 🔥 — {state}"
+        return f"{label}: {fmt_som(p[code])} — {state}"
+
+    promo_active_raw, promo_note = await asyncio.gather(
         asyncio.to_thread(db.get_setting, "premium_promo_active"),
-        asyncio.to_thread(db.get_setting, "premium_promo_end"),
         asyncio.to_thread(db.get_setting, "premium_promo_note"),
     )
-    promo_on = (promo_active or "0") == "1"
-    if promo_on and promo_end:
+    promo_toggle_on = (promo_active_raw or "0") == "1"
+    if p["promo_effective"]:
         try:
-            end_dt = datetime.fromisoformat(promo_end)
+            end_dt = datetime.fromisoformat(p["promo_end"])
             promo_line = f"🔥 Chegirma: <b>🟢 Faol</b> — tugash: {end_dt.strftime('%d.%m.%Y %H:%M')}"
-            if promo_note:
-                promo_line += f"\n📝 Izoh: {promo_note}"
         except Exception:
-            promo_line = "🔥 Chegirma: <b>🟢 Faol</b> (sana noto'g'ri formatda)"
+            promo_line = "🔥 Chegirma: <b>🟢 Faol</b>"
+        if promo_note:
+            promo_line += f"\n📝 Izoh: {promo_note}"
+    elif promo_toggle_on:
+        # Yoqilgan bo'lsa-da, tugash vaqti o'tib ketgan — narxlar allaqachon
+        # avtomatik asl holatiga qaytgan, admin uchun buni aniq ko'rsatamiz.
+        promo_line = "🔥 Chegirma: 🟡 Muddati tugagan (narxlar asl holatiga qaytdi)"
     else:
         promo_line = "🔥 Chegirma: 🔴 O'chirilgan"
     return (
         f"💎 <b>Premium sozlamalari</b>\n\n"
         f"⚙️ Tizim holati: <b>{sys_state}</b>\n\n"
-        f"1 oy: {fmt_som(p['1m'])} — {p1_state}\n"
-        f"3 oy: {fmt_som(p['3m'])} — {p3_state}\n"
-        f"1 yil: {fmt_som(p['1y'])} — {p12_state}\n\n"
+        f"{_price_line('1 oy', '1m', p1_state)}\n"
+        f"{_price_line('3 oy', '3m', p3_state)}\n"
+        f"{_price_line('1 yil', '1y', p12_state)}\n\n"
         f"💳 Karta: <code>{card}</code>\n"
         f"👤 Karta egasi: {holder}\n\n"
         f"⏱ Oldinroq kirish: {p['early_hours']} soat\n"
@@ -993,6 +1060,11 @@ def _padm_promo_kb():
             InlineKeyboardButton(text="⏱ 3 kun", callback_data="padm_promo_quick_72"),
         ],
         [InlineKeyboardButton(text="✏️ Sana/vaqtni qo'lda kiritish", callback_data="padm_promo_end", style="success")],
+        [
+            InlineKeyboardButton(text="💰 1 oy chegirma narxi", callback_data="padm_discount_1m", style="success"),
+            InlineKeyboardButton(text="💰 3 oy chegirma narxi", callback_data="padm_discount_3m", style="success"),
+        ],
+        [InlineKeyboardButton(text="💰 1 yil chegirma narxi", callback_data="padm_discount_1y", style="success")],
         [InlineKeyboardButton(text="📝 Izoh matnini o'zgartirish", callback_data="padm_promo_note", style="success")],
         [InlineKeyboardButton(text="🛑 Chegirmani to'xtatish", callback_data="padm_promo_off", style="danger")],
         [InlineKeyboardButton(text="🔙 Premium sozlamalari", callback_data="admin_premium")],
@@ -1002,12 +1074,15 @@ def _padm_promo_kb():
 # keyin foydalanuvchini bosh menyuga emas, oʻsha boʻlimga qaytarish uchun.
 _PADM_PRICING_KEYS = {"padm_toggle_1m", "padm_toggle_3m", "padm_toggle_1y", "padm_price_1m", "padm_price_3m", "padm_price_1y"}
 _PADM_GENERAL_KEYS = {"padm_toggle_enabled", "padm_card", "padm_early", "padm_ref"}
+_PADM_PROMO_KEYS = {"padm_discount_1m", "padm_discount_3m", "padm_discount_1y"}
 
 def _padm_kb_for(callback_data):
     if callback_data in _PADM_PRICING_KEYS:
         return _padm_pricing_kb()
     if callback_data in _PADM_GENERAL_KEYS:
         return _padm_general_kb()
+    if callback_data in _PADM_PROMO_KEYS:
+        return _padm_promo_kb()
     return _premium_admin_kb()
 
 @dp.callback_query(F.data == "padm_cat_pricing")
@@ -1044,6 +1119,7 @@ async def padm_promo_quick(call: CallbackQuery):
         asyncio.to_thread(db.set_setting, "premium_promo_active", "1"),
         asyncio.to_thread(db.set_setting, "premium_promo_end", end_dt.isoformat()),
     )
+    _invalidate_premium_cache()
     await call.answer(f"🔥 Chegirma yoqildi — {hours} soatlik countdown ishga tushdi!")
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
 
@@ -1052,6 +1128,7 @@ async def padm_promo_off(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
     await asyncio.to_thread(db.set_setting, "premium_promo_active", "0")
+    _invalidate_premium_cache()
     await call.answer("🛑 Chegirma to'xtatildi")
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
 
@@ -1087,6 +1164,7 @@ async def padm_promo_end_save(message: Message, state: FSMContext):
         asyncio.to_thread(db.set_setting, "premium_promo_active", "1"),
         asyncio.to_thread(db.set_setting, "premium_promo_end", end_dt.isoformat()),
     )
+    _invalidate_premium_cache()
     await state.clear()
     await message.answer("✅ Saqlandi! Chegirma countdown yoqildi.")
     await message.answer(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
@@ -1310,7 +1388,24 @@ _PADM_FIELD_MAP = {
     "padm_price_1y": ("premium_price_1y", PremiumAdminState.price_1y, "1 yillik narxni faqat raqam bilan yuboring (masalan: 120000):"),
     "padm_early": ("premium_early_hours", PremiumAdminState.early_hours, "Oldinroq kirish necha soat bo'lsin? (masalan: 48):"),
     "padm_ref": ("premium_referral_bonus_days", PremiumAdminState.referral_bonus, "Referal bonusi necha kun bo'lsin? (masalan: 3):"),
+    "padm_discount_1m": ("premium_discount_1m", PremiumAdminState.discount_1m, "1 oylik chegirma narxini yuboring (asl narxdan kichik bo'lishi kerak). Chegirmani bekor qilish uchun 0 yuboring:"),
+    "padm_discount_3m": ("premium_discount_3m", PremiumAdminState.discount_3m, "3 oylik chegirma narxini yuboring (asl narxdan kichik bo'lishi kerak). Chegirmani bekor qilish uchun 0 yuboring:"),
+    "padm_discount_1y": ("premium_discount_1y", PremiumAdminState.discount_1y, "1 yillik chegirma narxini yuboring (asl narxdan kichik bo'lishi kerak). Chegirmani bekor qilish uchun 0 yuboring:"),
 }
+
+# Chegirma narxi (padm_discount_*) qaysi asl narx sozlamasiga taqqoslanishi kerakligi
+_DISCOUNT_ORIGINAL_KEY = {
+    "premium_discount_1m": "premium_price_1m",
+    "premium_discount_3m": "premium_price_3m",
+    "premium_discount_1y": "premium_price_1y",
+}
+
+def _padm_back_for(callback_data):
+    if callback_data in _PADM_PRICING_KEYS:
+        return "padm_cat_pricing"
+    if callback_data in _PADM_PROMO_KEYS:
+        return "padm_cat_promo"
+    return "padm_cat_general"
 
 @dp.callback_query(F.data.in_(list(_PADM_FIELD_MAP.keys())))
 async def padm_field_start(call: CallbackQuery, state: FSMContext):
@@ -1318,7 +1413,7 @@ async def padm_field_start(call: CallbackQuery, state: FSMContext):
         return
     key, st, prompt = _PADM_FIELD_MAP[call.data]
     await state.set_state(st)
-    back_cb="padm_cat_pricing" if call.data in _PADM_PRICING_KEYS else "padm_cat_general"
+    back_cb = _padm_back_for(call.data)
     await state.update_data(setting_key=key, padm_back=back_cb)
     await call.message.edit_text(prompt, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=back_cb)],
@@ -1329,6 +1424,9 @@ async def padm_field_start(call: CallbackQuery, state: FSMContext):
 @dp.message(PremiumAdminState.price_1y)
 @dp.message(PremiumAdminState.early_hours)
 @dp.message(PremiumAdminState.referral_bonus)
+@dp.message(PremiumAdminState.discount_1m)
+@dp.message(PremiumAdminState.discount_3m)
+@dp.message(PremiumAdminState.discount_1y)
 async def padm_field_save(message: Message, state: FSMContext):
     if not await is_admin_user(message.from_user.id):
         return
@@ -1339,11 +1437,26 @@ async def padm_field_save(message: Message, state: FSMContext):
     if not value.isdigit():
         await message.answer("❌ Faqat raqam yuboring. Qaytadan urinib ko'ring.")
         return
+    # Chegirma narxlari uchun qo'shimcha tekshiruv: 0 (chegirmani bekor qilish)
+    # dan tashqari, qiymat albatta asl narxdan kichik bo'lishi shart — aks holda
+    # "chegirma" narxi aslidan qimmat/teng bo'lib qolishi mumkin edi.
+    if key in _DISCOUNT_ORIGINAL_KEY and value != "0":
+        original_raw = await asyncio.to_thread(db.get_setting, _DISCOUNT_ORIGINAL_KEY[key])
+        try:
+            original = int(original_raw) if original_raw else {"premium_price_1m": 15000, "premium_price_3m": 40000, "premium_price_1y": 120000}[_DISCOUNT_ORIGINAL_KEY[key]]
+        except (TypeError, ValueError):
+            original = None
+        if original is not None and int(value) >= original:
+            await message.answer(
+                f"❌ Chegirma narxi asl narxdan ({fmt_som(original)}) kichik bo'lishi kerak. Qaytadan urinib ko'ring."
+            )
+            return
     await asyncio.to_thread(db.set_setting, key, value)
     _invalidate_premium_cache()
     await state.clear()
     await message.answer("✅ Saqlandi!")
-    kb = _padm_pricing_kb() if padm_back == "padm_cat_pricing" else _padm_general_kb()
+    kb_map = {"padm_cat_pricing": _padm_pricing_kb, "padm_cat_promo": _padm_promo_kb, "padm_cat_general": _padm_general_kb}
+    kb = kb_map.get(padm_back, _padm_general_kb)()
     await message.answer(await _premium_admin_text(), reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "padm_card")
@@ -6217,21 +6330,19 @@ async def webapp_premium_info(request):
     """Webapp ichidagi Premium sahifasi uchun: tarif narxlari, imtiyozlar
     solishtiruvi va (agar admin yoqqan bo'lsa) chegirma countdown ma'lumoti."""
     user_id = _webapp_user_id(request)
-    prices, premium, promo_active, promo_end, promo_note = await asyncio.gather(
+    prices, premium, promo_note = await asyncio.gather(
         premium_settings(),
         asyncio.to_thread(db.get_premium_status, user_id) if user_id else asyncio.sleep(0, result={"is_premium": False, "days_left": 0, "plan": None}),
-        asyncio.to_thread(db.get_setting, "premium_promo_active"),
-        asyncio.to_thread(db.get_setting, "premium_promo_end"),
         asyncio.to_thread(db.get_setting, "premium_promo_note"),
     )
 
     plans = []
     if prices["plan_1m_on"]:
-        plans.append({"code": "1m", "label": "1 oy", "days": 30, "price": prices["1m"]})
+        plans.append({"code": "1m", "label": "1 oy", "days": 30, "price": prices["1m"], "original_price": prices["1m_original"], "discounted": prices["1m_discounted"]})
     if prices["plan_3m_on"]:
-        plans.append({"code": "3m", "label": "3 oy", "days": 90, "price": prices["3m"]})
+        plans.append({"code": "3m", "label": "3 oy", "days": 90, "price": prices["3m"], "original_price": prices["3m_original"], "discounted": prices["3m_discounted"]})
     if prices["plan_1y_on"]:
-        plans.append({"code": "1y", "label": "1 yil", "days": 365, "price": prices["1y"]})
+        plans.append({"code": "1y", "label": "1 yil", "days": 365, "price": prices["1y"], "original_price": prices["1y_original"], "discounted": prices["1y_discounted"]})
 
     return web.json_response({
         "enabled": prices["enabled"],
@@ -6242,8 +6353,11 @@ async def webapp_premium_info(request):
         "days_left": premium.get("days_left", 0),
         "bot_username": BOT_USERNAME or "",
         "promo": {
-            "active": (promo_active or "0") == "1",
-            "end": promo_end or None,
+            # promo_effective — vaqt bilan tekshirilgan, ya'ni tugash vaqti
+            # o'tgan bo'lsa avtomatik False bo'ladi (frontend countdownni
+            # bekor qilish uchun alohida hisob-kitob qilishi shart emas).
+            "active": prices["promo_effective"],
+            "end": prices["promo_end"] if prices["promo_effective"] else None,
             "note": promo_note or "",
         },
     })
