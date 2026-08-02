@@ -44,6 +44,7 @@ _asyncio_bootstrap.set_event_loop(_MAIN_LOOP)
 from pyrogram import Client as PyroClient
 
 import database as db
+import ai_service
 
 # ===================== SOZLAMALAR =====================
 import os
@@ -351,6 +352,9 @@ class PremiumAdminState(StatesGroup):
 class SearchState(StatesGroup):
     query = State()
 
+class AIChatState(StatesGroup):
+    chatting = State()
+
 class BlockState(StatesGroup):
     user_id = State()
 
@@ -533,6 +537,7 @@ def main_keyboard():
             InlineKeyboardButton(text="📺 Anime Serial", callback_data="serials_0", style="primary"),
         ],
         [InlineKeyboardButton(text="🎲 Random", callback_data="random", style="success")],
+        [InlineKeyboardButton(text="🤖 AI Yordamchi", callback_data="ai_menu", style="primary")],
         [InlineKeyboardButton(text="💎 Premium", callback_data="premium_menu", style="success")],
     ])
 
@@ -2314,6 +2319,154 @@ async def main_menu_callback(call: CallbackQuery, state: FSMContext):
 async def noop_handler(call: CallbackQuery):
     await call.answer()
 
+# ===================== AI YORDAMCHI =====================
+def ai_menu_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 AI bilan suhbat", callback_data="ai_chat_start")],
+        [InlineKeyboardButton(text="🎯 Menga anime tavsiya qil", callback_data="ai_recommend")],
+        [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu")],
+    ])
+
+def ai_chat_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚪 Suhbatni tugatish", callback_data="ai_chat_stop")]
+    ])
+
+@dp.callback_query(F.data == "ai_menu")
+async def ai_menu_handler(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await guard_access(call):
+        return
+    await call.answer()
+    if not ai_service.AI_ENABLED:
+        await call.message.edit_text(
+            "🤖 AI xizmati hozircha sozlanmagan.\n\n"
+            "Admin uchun: Render'da Environment > GEMINI_API_KEY qo'shing "
+            "(bepul kalitni aistudio.google.com/apikey sahifasidan olish mumkin).",
+            reply_markup=back_to_main()
+        )
+        return
+    await call.message.edit_text(
+        "🤖 <b>AI Yordamchi</b>\n\nNima qilishni xohlaysiz?",
+        parse_mode="HTML",
+        reply_markup=ai_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "ai_chat_start")
+async def ai_chat_start(call: CallbackQuery, state: FSMContext):
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    await state.set_state(AIChatState.chatting)
+    await state.update_data(ai_history=[])
+    await call.message.edit_text(
+        "💬 Suhbat boshlandi — anime haqida yoki istalgan mavzuda savol yozing.\n\n"
+        "Chiqish uchun pastdagi tugmani bosing.",
+        reply_markup=ai_chat_keyboard()
+    )
+
+@dp.callback_query(F.data == "ai_chat_stop")
+async def ai_chat_stop(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.answer("Suhbat tugadi")
+    try:
+        await call.message.edit_text(
+            f"👋 Salom, {call.from_user.full_name}!\n"
+            f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
+            f"👇 Nimani qidiryapsiz?",
+            reply_markup=main_keyboard()
+        )
+    except Exception:
+        await bot.send_message(call.message.chat.id, "🏠 Bosh menu", reply_markup=main_keyboard())
+
+@dp.message(AIChatState.chatting, Command("stop"))
+async def ai_chat_stop_cmd(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("🚪 Suhbat tugatildi.", reply_markup=main_keyboard())
+
+@dp.message(AIChatState.chatting)
+async def ai_chat_message(message: Message, state: FSMContext):
+    if not await guard_access(message, is_callback=False):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Iltimos, matn ko'rinishida savol yozing.")
+        return
+    data = await state.get_data()
+    history = data.get("ai_history", [])
+    try:
+        await bot.send_chat_action(message.chat.id, "typing")
+    except Exception:
+        pass
+    reply = await ai_service.ask_ai(text, history=history)
+    if not reply:
+        await message.answer(
+            "😕 Hozircha javob bera olmadim, birozdan keyin qayta urinib ko'ring.",
+            reply_markup=ai_chat_keyboard()
+        )
+        return
+    history = history + [("user", text), ("model", reply)]
+    history = history[-10:]  # tokenlarni tejash uchun faqat oxirgi almashinuvlar saqlanadi
+    await state.update_data(ai_history=history)
+    await message.answer(reply, reply_markup=ai_chat_keyboard())
+
+@dp.callback_query(F.data == "ai_recommend")
+async def ai_recommend_handler(call: CallbackQuery, state: FSMContext):
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    user_id = call.from_user.id
+    try:
+        await call.message.edit_text("🤖 Sizga mos animelarni qidiryapman, biroz kuting...")
+    except Exception:
+        pass
+
+    animes = await asyncio.to_thread(db.get_animes, None, 0, 300)
+    if not animes:
+        await call.message.edit_text("Hozircha katalogda anime yo'q.", reply_markup=back_to_main())
+        return
+
+    id_to_title = {a["id"]: a["title"] for a in animes}
+    favorite_ids = await asyncio.to_thread(db.get_favorite_ids, user_id) or []
+    recent_ids = await asyncio.to_thread(db.get_recent_anime_ids, user_id, 8) or []
+    fav_titles = [id_to_title[i] for i in favorite_ids if i in id_to_title][:10]
+    recent_titles = [id_to_title[i] for i in recent_ids if i in id_to_title][:8]
+    user_context = (
+        f"Sevimlilari: {', '.join(fav_titles) if fav_titles else 'nomaʼlum'}. "
+        f"Yaqinda koʻrganlari: {', '.join(recent_titles) if recent_titles else 'nomaʼlum'}."
+    )
+
+    catalog_text = "\n".join(
+        f"ID:{a['id']} | {a['title']} | {a.get('genre','')} | {a.get('year','')}"
+        for a in animes
+    )
+
+    ids = await ai_service.recommend_anime_ids(catalog_text, user_context, max_picks=4)
+    valid_ids = set(id_to_title.keys())
+    ids = [i for i in ids if i in valid_ids][:4]
+
+    if not ids:
+        await call.message.edit_text(
+            "😕 Hozircha mos tavsiya topa olmadim. Tasodifiy animeni sinab ko'ring.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎲 Random", callback_data="random", style="success")],
+                [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu")],
+            ])
+        )
+        return
+
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await bot.send_message(call.message.chat.id, "🎯 Siz uchun AI tavsiyalari:")
+    for anime_id in ids:
+        anime = await asyncio.to_thread(db.get_anime, anime_id)
+        if anime:
+            await send_anime_card(call.message.chat.id, anime)
+
 # ===================== QIDIRUV =====================
 @dp.callback_query(F.data == "search")
 async def search_callback(call: CallbackQuery, state: FSMContext):
@@ -2774,13 +2927,41 @@ async def add_country(message: Message, state: FSMContext):
 async def add_genre(message: Message, state: FSMContext):
     await state.update_data(genre=message.text)
     await state.set_state(AddAnime.description)
-    await message.answer("📝 Qisqa malumot yozing:")
+    kb = None
+    if ai_service.AI_ENABLED:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 AI yordamida yaratish", callback_data="ai_gen_desc")]
+        ])
+    await message.answer("📝 Qisqa malumot yozing:", reply_markup=kb)
 
 @dp.message(AddAnime.description)
 async def add_desc(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await state.set_state(AddAnime.language)
     await message.answer("🗣 Tilini yozing (masalan: O'zbek, Rus, Yapon):")
+
+@dp.callback_query(AddAnime.description, F.data == "ai_gen_desc")
+async def ai_gen_desc(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI sozlanmagan", show_alert=True)
+        return
+    await call.answer("✍️ Yozilmoqda...")
+    data = await state.get_data()
+    desc = await ai_service.generate_anime_description(
+        data.get("title", ""), data.get("genre", ""),
+        data.get("year", ""), data.get("country", "")
+    )
+    if not desc:
+        await call.message.answer("😕 AI javob bermadi, iltimos tavsifni qo'lda yozing.")
+        return
+    await state.update_data(description=desc)
+    await state.set_state(AddAnime.language)
+    await call.message.answer(
+        f"📝 AI tavsifi:\n\n{desc}\n\n"
+        f"✅ Qabul qilindi. Endi tilini yozing (masalan: O'zbek, Rus, Yapon):"
+    )
 
 @dp.message(AddAnime.language)
 async def add_language(message: Message, state: FSMContext):
@@ -6675,6 +6856,14 @@ async def webapp_add_comment(request):
         return web.json_response({"error": "izoh taqiqlangan soʻz(lar) boʻlgani uchun yuborilmadi"}, status=400)
     if re.search(r"https?://|t\.me/|@\w{4,}", lowered):
         return web.json_response({"error": "izohda havola/reklama boʻlishi mumkin emas"}, status=400)
+
+    # AI moderatsiyasi: yuqoridagi oddiy filtrlardan o'tgan izohlarni ham
+    # haqorat/spam/nomaqbul kontent uchun AI orqali tekshiradi (GEMINI_API_KEY
+    # o'rnatilmagan bo'lsa, bu tekshiruv jim o'tkazib yuboriladi).
+    if ai_service.AI_ENABLED:
+        is_safe = await ai_service.moderate_comment(text)
+        if not is_safe:
+            return web.json_response({"error": "izoh nomaqbul kontent sababli yuborilmadi"}, status=400)
 
     new_id = await asyncio.to_thread(db.add_comment, anime_id, user_id, username, text, parent_id)
     return web.json_response({"ok": True, "id": new_id})
