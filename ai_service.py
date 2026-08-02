@@ -19,9 +19,33 @@ buzilmaydi.
 import os
 import json
 import logging
+import asyncio
 import aiohttp
 
 logger = logging.getLogger("ai_service")
+
+# Bitta umumiy aiohttp session butun bot hayoti davomida qayta ishlatiladi.
+# Avval har chaqiriqda "async with aiohttp.ClientSession()" bilan YANGI
+# session ochilar edi — bu har bir AI so'roviga qo'shimcha TCP/TLS handshake
+# vaqtini (~yuzlab ms) qo'shib, botni sekinlashtirar edi.
+_session = None
+_session_lock = asyncio.Lock()
+
+
+async def _get_session():
+    global _session
+    if _session is None or _session.closed:
+        async with _session_lock:
+            if _session is None or _session.closed:
+                _session = aiohttp.ClientSession()
+    return _session
+
+
+async def close_ai_session():
+    """Bot to'xtaganda chaqirish uchun (ixtiyoriy) — ochiq connection'larni tozalaydi."""
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # "gemini-3.6-flash" — Google'ning 2026-yil iyul oyida chiqargan eng yangi
@@ -52,48 +76,84 @@ def _model_url(model_name):
     return f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
 
 
+def _is_gemini3(model_name):
+    """Gemini 3.x modellari thinkingConfig.thinkingLevel qabul qiladi;
+    undan oldingi modellar (masalan gemini-2.5-flash) buni tushunmaydi va
+    o'rniga eski thinkingBudget parametrini kutadi."""
+    return model_name.startswith("gemini-3")
+
+
+def _apply_thinking_config(generation_config, model_name, thinking_level):
+    """MUHIM: gemini-3.6-flash standart holatda thinking_level='medium' bilan
+    ishlaydi — ya'ni HAR bir so'rovda (hatto oddiy 'OK'/'BAD' javob kerak
+    bo'lganda ham) model avval ichida fikrlaydi, bu esa javobni sezilarli
+    sekinlashtiradi. Shu sabab har bir chaqiruv o'ziga mos thinking darajasini
+    aniq ko'rsatishi kerak (murakkab vazifalarga ko'proq, oddiylariga kamroq)."""
+    if not thinking_level:
+        return
+    if _is_gemini3(model_name):
+        generation_config["thinkingConfig"] = {"thinkingLevel": thinking_level.upper()}
+    elif model_name == "gemini-2.5-flash":
+        # Gemini 3'dan oldingi modellarda thinking token-budjet bilan
+        # boshqariladi, level bilan emas. minimal/low -> eng kam budjet.
+        budget = 0 if thinking_level in ("minimal", "low") else -1  # -1 = avtomatik
+        generation_config["thinkingConfig"] = {"thinkingBudget": budget}
+    # gemini-3.5-flash va shunga o'xshash boshqa modellar uchun ham
+    # thinkingLevel ishlaydi (_is_gemini3 True qaytaradi).
+
+
 async def _call_gemini(contents, system_instruction=None, temperature=0.7,
-                        max_output_tokens=800, json_mode=False, timeout=25):
+                        max_output_tokens=800, json_mode=False, timeout=25,
+                        thinking_level="minimal"):
     """Gemini API'ga xom so'rov yuboradi. Asosiy model xato bersa (band,
     topilmadi va h.k.), zaxira modellar bilan qayta urinadi. Hammasi
-    muvaffaqiyatsiz bo'lsa None qaytaradi."""
+    muvaffaqiyatsiz bo'lsa None qaytaradi.
+
+    thinking_level: "minimal" | "low" | "medium" | "high" | None
+      Vazifa qanchalik oddiy bo'lsa, shuncha past daraja tanlanishi kerak —
+      bu javob tezligiga TO'G'RIDAN-TO'G'RI ta'sir qiladi. Masalan oddiy
+      OK/BAD moderatsiya yoki JSON ID ro'yxati tanlashda "minimal" yetarli;
+      faqat erkin, chuqurroq fikr talab qiladigan suhbatlarda "low"/"medium"
+      ishlatilsin."""
     if not AI_ENABLED:
         return None
 
-    payload = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_output_tokens,
-        },
+    base_generation_config = {
+        "temperature": temperature,
+        "maxOutputTokens": max_output_tokens,
     }
-    if system_instruction:
-        payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
     if json_mode:
-        payload["generationConfig"]["response_mime_type"] = "application/json"
+        base_generation_config["response_mime_type"] = "application/json"
 
     headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
 
     models_to_try = [GEMINI_MODEL] + [m for m in FALLBACK_MODELS if m != GEMINI_MODEL]
+    session = await _get_session()
 
     for model_name in models_to_try:
+        generation_config = dict(base_generation_config)
+        _apply_thinking_config(generation_config, model_name, thinking_level)
+
+        payload = {"contents": contents, "generationConfig": generation_config}
+        if system_instruction:
+            payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    _model_url(model_name), json=payload, headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=timeout)
-                ) as resp:
-                    data = await resp.json()
-                    if resp.status != 200:
-                        logger.warning("Gemini (%s) xato javob: %s - %s", model_name, resp.status, data)
-                        continue  # keyingi zaxira modelni sinab ko'ramiz
-                    candidates = data.get("candidates") or []
-                    if not candidates:
-                        continue
-                    parts = candidates[0].get("content", {}).get("parts", []) or []
-                    text = "".join(p.get("text", "") for p in parts).strip()
-                    if text:
-                        return text
+            async with session.post(
+                _model_url(model_name), json=payload, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    logger.warning("Gemini (%s) xato javob: %s - %s", model_name, resp.status, data)
+                    continue  # keyingi zaxira modelni sinab ko'ramiz
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    continue
+                parts = candidates[0].get("content", {}).get("parts", []) or []
+                text = "".join(p.get("text", "") for p in parts).strip()
+                if text:
+                    return text
         except Exception:
             logger.exception("Gemini (%s) so'rovida xatolik yuz berdi", model_name)
             continue  # keyingi zaxira modelni sinab ko'ramiz
@@ -119,7 +179,8 @@ async def ask_ai(user_text, history=None, system_instruction=None):
         "boʻlmagan savollarga ham xuddi shunday chuqur va foydali javob ber."
     )
     return await _call_gemini(contents, system_instruction=sys_prompt,
-                               temperature=0.85, max_output_tokens=1000)
+                               temperature=0.85, max_output_tokens=1000,
+                               thinking_level="low")
 
 
 async def moderate_comment(text):
@@ -453,7 +514,8 @@ async def chat_about_anime(question, anime_title, anime_description, history=Non
         "umumiy, spoylersiz tavsif ber."
     )
     return await _call_gemini(contents, system_instruction=sys_prompt,
-                               temperature=0.7, max_output_tokens=400)
+                               temperature=0.7, max_output_tokens=400,
+                               thinking_level="low")
 
 
 async def recommend_anime_ids(catalog_text, user_context, max_picks=4):
