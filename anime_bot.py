@@ -283,6 +283,8 @@ class PremiumAdminState(StatesGroup):
     card = State()
     early_hours = State()
     referral_bonus = State()
+    promo_end = State()
+    promo_note = State()
 
 class SearchState(StatesGroup):
     query = State()
@@ -849,6 +851,22 @@ async def _premium_admin_text():
     p1_state = "🟢 Yoqilgan" if p["plan_1m_on"] else "🔴 O'chirilgan"
     p3_state = "🟢 Yoqilgan" if p["plan_3m_on"] else "🔴 O'chirilgan"
     p12_state = "🟢 Yoqilgan" if p["plan_1y_on"] else "🔴 O'chirilgan"
+    promo_active, promo_end, promo_note = await asyncio.gather(
+        asyncio.to_thread(db.get_setting, "premium_promo_active"),
+        asyncio.to_thread(db.get_setting, "premium_promo_end"),
+        asyncio.to_thread(db.get_setting, "premium_promo_note"),
+    )
+    promo_on = (promo_active or "0") == "1"
+    if promo_on and promo_end:
+        try:
+            end_dt = datetime.fromisoformat(promo_end)
+            promo_line = f"🔥 Chegirma: <b>🟢 Faol</b> — tugash: {end_dt.strftime('%d.%m.%Y %H:%M')}"
+            if promo_note:
+                promo_line += f"\n📝 Izoh: {promo_note}"
+        except Exception:
+            promo_line = "🔥 Chegirma: <b>🟢 Faol</b> (sana noto'g'ri formatda)"
+    else:
+        promo_line = "🔥 Chegirma: 🔴 O'chirilgan"
     return (
         f"💎 <b>Premium sozlamalari</b>\n\n"
         f"⚙️ Tizim holati: <b>{sys_state}</b>\n\n"
@@ -858,7 +876,8 @@ async def _premium_admin_text():
         f"💳 Karta: <code>{card}</code>\n"
         f"👤 Karta egasi: {holder}\n\n"
         f"⏱ Oldinroq kirish: {p['early_hours']} soat\n"
-        f"🎁 Referal bonusi: {p['ref_bonus']} kun"
+        f"🎁 Referal bonusi: {p['ref_bonus']} kun\n\n"
+        f"{promo_line}"
     )
 
 def _premium_admin_kb():
@@ -867,6 +886,7 @@ def _premium_admin_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 Narxlar va rejalar", callback_data="padm_cat_pricing", style="primary")],
         [InlineKeyboardButton(text="⚙️ Umumiy sozlamalar", callback_data="padm_cat_general", style="primary")],
+        [InlineKeyboardButton(text="🔥 Chegirma / Countdown (WebApp)", callback_data="padm_cat_promo", style="primary")],
         [InlineKeyboardButton(text="🔓 Qulflarni ochish", callback_data="padm_cat_unlock", style="danger")],
         [InlineKeyboardButton(text="👑 Premium animelar", callback_data="padm_premium_animes", style="primary")],
         [InlineKeyboardButton(text="🎁 Foydalanuvchiga Premium berish", callback_data="padm_gift_start", style="success")],
@@ -906,6 +926,19 @@ def _padm_unlock_kb():
         [InlineKeyboardButton(text="🔙 Premium sozlamalari", callback_data="admin_premium")],
     ])
 
+def _padm_promo_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏱ 24 soat", callback_data="padm_promo_quick_24"),
+            InlineKeyboardButton(text="⏱ 48 soat", callback_data="padm_promo_quick_48"),
+            InlineKeyboardButton(text="⏱ 3 kun", callback_data="padm_promo_quick_72"),
+        ],
+        [InlineKeyboardButton(text="✏️ Sana/vaqtni qo'lda kiritish", callback_data="padm_promo_end", style="success")],
+        [InlineKeyboardButton(text="📝 Izoh matnini o'zgartirish", callback_data="padm_promo_note", style="success")],
+        [InlineKeyboardButton(text="🛑 Chegirmani to'xtatish", callback_data="padm_promo_off", style="danger")],
+        [InlineKeyboardButton(text="🔙 Premium sozlamalari", callback_data="admin_premium")],
+    ])
+
 # Har bir padm_* callback qaysi kichik boʻlimga tegishli ekanini bilib, amaldan
 # keyin foydalanuvchini bosh menyuga emas, oʻsha boʻlimga qaytarish uchun.
 _PADM_PRICING_KEYS = {"padm_toggle_1m", "padm_toggle_3m", "padm_toggle_1y", "padm_price_1m", "padm_price_3m", "padm_price_1y"}
@@ -935,6 +968,92 @@ async def padm_cat_unlock(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_unlock_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data == "padm_cat_promo")
+async def padm_cat_promo(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("padm_promo_quick_"))
+async def padm_promo_quick(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    hours = int(call.data.replace("padm_promo_quick_", ""))
+    end_dt = datetime.now() + timedelta(hours=hours)
+    await asyncio.gather(
+        asyncio.to_thread(db.set_setting, "premium_promo_active", "1"),
+        asyncio.to_thread(db.set_setting, "premium_promo_end", end_dt.isoformat()),
+    )
+    await call.answer(f"🔥 Chegirma yoqildi — {hours} soatlik countdown ishga tushdi!")
+    await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data == "padm_promo_off")
+async def padm_promo_off(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await asyncio.to_thread(db.set_setting, "premium_promo_active", "0")
+    await call.answer("🛑 Chegirma to'xtatildi")
+    await call.message.edit_text(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data == "padm_promo_end")
+async def padm_promo_end_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(PremiumAdminState.promo_end)
+    await call.message.edit_text(
+        "🗓 Chegirma tugash sanasi va vaqtini yuboring.\n\n"
+        "Format: <code>25.12.2026 20:00</code>\n"
+        "(WebApp'dagi Premium sahifasida shu vaqtgacha countdown ko'rsatiladi)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="padm_cat_promo")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.message(PremiumAdminState.promo_end)
+async def padm_promo_end_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    try:
+        end_dt = datetime.strptime(text, "%d.%m.%Y %H:%M")
+    except ValueError:
+        await message.answer("❌ Format noto'g'ri. Masalan: 25.12.2026 20:00 shaklida yuboring.")
+        return
+    if end_dt <= datetime.now():
+        await message.answer("❌ Sana kelajakda bo'lishi kerak. Qaytadan yuboring.")
+        return
+    await asyncio.gather(
+        asyncio.to_thread(db.set_setting, "premium_promo_active", "1"),
+        asyncio.to_thread(db.set_setting, "premium_promo_end", end_dt.isoformat()),
+    )
+    await state.clear()
+    await message.answer("✅ Saqlandi! Chegirma countdown yoqildi.")
+    await message.answer(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
+
+@dp.callback_query(F.data == "padm_promo_note")
+async def padm_promo_note_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(PremiumAdminState.promo_note)
+    await call.message.edit_text(
+        "📝 Chegirma uchun qisqa izoh matnini yuboring (masalan: <code>-20% chegirma faqat bugun!</code>):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="padm_cat_promo")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.message(PremiumAdminState.promo_note)
+async def padm_promo_note_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    note = (message.text or "").strip()[:120]
+    await asyncio.to_thread(db.set_setting, "premium_promo_note", note)
+    await state.clear()
+    await message.answer("✅ Saqlandi!")
+    await message.answer(await _premium_admin_text(), reply_markup=_padm_promo_kb(), parse_mode="HTML")
 
 _PADM_TOGGLE_MAP = {
     "padm_toggle_enabled": "premium_enabled",
@@ -1697,6 +1816,45 @@ async def start_handler(message: Message, state: FSMContext):
         text, kb = await build_premium_menu(message.from_user.id)
         await message.answer(text, reply_markup=kb, parse_mode="HTML")
         return
+
+    # Deep link: /start premium_1m / premium_3m / premium_1y (WebApp Premium
+    # sahifasida foydalanuvchi tarifni tanlaganda) — to'g'ridan-to'g'ri o'sha
+    # tarif uchun to'lov ko'rsatmasini ochamiz.
+    if len(args) > 1 and args[1].startswith('premium_'):
+        plan = args[1].replace('premium_', '', 1)
+        if plan in PLAN_LABELS:
+            u = await asyncio.to_thread(db.get_user, message.from_user.id)
+            if u and u.get("is_blocked"):
+                await message.answer("🚫 Siz bloklandingiz.")
+                return
+            status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
+            if status["is_premium"] and status["days_left"] > PREMIUM_RENEWAL_WINDOW_DAYS:
+                text, kb = await build_premium_menu(message.from_user.id)
+                await message.answer(text, reply_markup=kb, parse_mode="HTML")
+                return
+            prices = await premium_settings()
+            plan_flag = {"1m": "plan_1m_on", "3m": "plan_3m_on", "1y": "plan_1y_on"}.get(plan)
+            if not prices["enabled"] or (plan_flag and not prices[plan_flag]) or not prices["card"]:
+                text, kb = await build_premium_menu(message.from_user.id)
+                await message.answer(text, reply_markup=kb, parse_mode="HTML")
+                return
+            amount = prices.get(plan)
+            await state.set_state(PremiumState.waiting_screenshot)
+            await state.update_data(plan=plan, amount=amount)
+            card_line = f"💳 <code>{prices['card']}</code>"
+            holder_line = f"\n👤 {prices['holder']}" if prices["holder"] else ""
+            await message.answer(
+                f"💳 <b>{PLAN_LABELS[plan]} — {fmt_som(amount)}</b>\n"
+                f"Quyidagi kartaga to'lovni amalga oshiring:\n\n"
+                f"{card_line}{holder_line}\n\n"
+                f"💰 Summa: <b>{fmt_som(amount)}</b>\n\n"
+                f"To'lovni amalga oshirgach, chekni shu yerga yuboring.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="premium_menu")],
+                ]),
+                parse_mode="HTML"
+            )
+            return
 
     # Deep link: /start anime_45 (kanal e'lonidagi "Tomosha qilish" tugmasidan) —
     # shu animening BIRINCHI qismini avtomatik yuboradi.
@@ -5947,6 +6105,41 @@ async def webapp_profile(request):
         "app_version": app_version or "1.0.0",
     })
 
+async def webapp_premium_info(request):
+    """Webapp ichidagi Premium sahifasi uchun: tarif narxlari, imtiyozlar
+    solishtiruvi va (agar admin yoqqan bo'lsa) chegirma countdown ma'lumoti."""
+    user_id = _webapp_user_id(request)
+    prices, premium, promo_active, promo_end, promo_note = await asyncio.gather(
+        premium_settings(),
+        asyncio.to_thread(db.get_premium_status, user_id) if user_id else asyncio.sleep(0, result={"is_premium": False, "days_left": 0, "plan": None}),
+        asyncio.to_thread(db.get_setting, "premium_promo_active"),
+        asyncio.to_thread(db.get_setting, "premium_promo_end"),
+        asyncio.to_thread(db.get_setting, "premium_promo_note"),
+    )
+
+    plans = []
+    if prices["plan_1m_on"]:
+        plans.append({"code": "1m", "label": "1 oy", "days": 30, "price": prices["1m"]})
+    if prices["plan_3m_on"]:
+        plans.append({"code": "3m", "label": "3 oy", "days": 90, "price": prices["3m"]})
+    if prices["plan_1y_on"]:
+        plans.append({"code": "1y", "label": "1 yil", "days": 365, "price": prices["1y"]})
+
+    return web.json_response({
+        "enabled": prices["enabled"],
+        "plans": plans,
+        "early_hours": prices["early_hours"],
+        "ref_bonus": prices["ref_bonus"],
+        "is_premium": premium.get("is_premium", False),
+        "days_left": premium.get("days_left", 0),
+        "bot_username": BOT_USERNAME or "",
+        "promo": {
+            "active": (promo_active or "0") == "1",
+            "end": promo_end or None,
+            "note": promo_note or "",
+        },
+    })
+
 async def webapp_account_refresh(request):
     """"Hisobni yangilash" — Telegramdan kelgan joriy ism/username bilan
     foydalanuvchi yozuvini sinxronlaydi va yangilangan profilni qaytaradi."""
@@ -6694,6 +6887,7 @@ async def start_web_server():
     app.router.add_get("/webapp/{filename}", serve_webapp_file)
     app.router.add_get("/api/check_access", webapp_check_access)
     app.router.add_get("/api/profile", webapp_profile)
+    app.router.add_get("/api/premium-info", webapp_premium_info)
     app.router.add_post("/api/account/refresh", webapp_account_refresh)
     app.router.add_post("/api/account/delete", webapp_account_delete)
     app.router.add_get("/api/animes", webapp_animes_list)
