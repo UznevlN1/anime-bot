@@ -1752,3 +1752,33 @@ def mark_notifications_seen(user_id):
     c.execute("UPDATE users SET last_seen_notification_id=%s WHERE user_id=%s", (max_id, user_id))
     conn.commit()
     put_conn(conn)
+
+# ===== AVTOMATIK BACKUP =====
+def get_all_table_names():
+    """public sxemasidagi barcha jadval nomlarini qaytaradi. Yangi jadval
+    qo'shilsa ham, backup avtomatik uni ham qamrab oladi (hardcode qilinmagan)."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema='public' AND table_type='BASE TABLE'
+        ORDER BY table_name
+    """)
+    tables = [r[0] for r in c.fetchall()]
+    put_conn(conn)
+    return tables
+
+def export_backup():
+    """Barcha jadvallardagi hozirgi ma'lumotlarni {jadval_nomi: [qatorlar...]}
+    ko'rinishida qaytaradi. Natija JSON'ga to'g'ridan-to'g'ri serializatsiya
+    qilinishi mumkin (sana/vaqt kabi maxsus tiplar chaqiruvchi tomonda
+    json.dumps(..., default=str) bilan matnga aylantiriladi)."""
+    conn = get_conn()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    tables = get_all_table_names()
+    data = {}
+    for t in tables:
+        c.execute(f'SELECT * FROM "{t}"')
+        data[t] = [dict(row) for row in c.fetchall()]
+    put_conn(conn)
+    return data

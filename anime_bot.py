@@ -13,9 +13,10 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ChatMemberUpdated, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
-    WebAppInfo, FSInputFile
+    WebAppInfo, FSInputFile, BufferedInputFile
 )
 import json
+import gzip
 from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, KICKED
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -199,6 +200,64 @@ def _next_stream_client():
     client = _stream_clients[_stream_client_counter % len(_stream_clients)]
     _stream_client_counter += 1
     return client
+
+# Klient bo'yicha: FLOOD_WAIT tugaguncha qayta client.start() chaqirmaslik uchun.
+# MUHIM: FLOOD_WAIT paytida har bir so'rov qayta start() chaqiraversa, Telegram
+# buni yana shubhali harakat deb hisoblab, kutish muddatini yanada uzaytirib
+# yuboradi — aynan shu sabab avvalgi 880s -> 876s -> ... ketma-ket o'sib borgan
+# edi. Endi bitta klient flood-wait holatida bo'lsa, muddat tugaguniga qadar
+# boshqa urinishlar shu yerda to'xtatiladi.
+_pyro_flood_until = {}
+
+async def _ensure_pyro_ready(client):
+    """Pyrogram klienti ishga tushirilmagan yoki uzilib qolgan bo'lsa, uni qayta ishga
+    tushirishga urinadi. Bu ilgari uchragan xatoni bartaraf qiladi: agar dastur ishga
+    tushishida (masalan ikkita nusxa bir vaqtda ishlab ketganda) Pyrogram vaqtincha
+    ulanolmay qolsa, server baribir ishga tushib ketardi va /stream so'rovlari
+    abadiy 'Client has not been started yet' xatosi bilan tugardi — hech qachon
+    o'zi tuzalmasdi.
+    MUHIM: bu funksiya avval start_web_server() ichida (lokal) yozilgan edi va
+    faqat webapp_stream ichida ishlatilardi. Lekin admin_check_videos ("🔍
+    Videolarni tekshirish" tugmasi) ham unga muhtoj, shuning uchun modul
+    darajasiga ko'chirildi — aks holda tugma bosilganda "_ensure_pyro_ready
+    aniqlanmagan" xatosi bilan hech narsa qilmasdan to'xtab qolardi."""
+    if client is None:
+        return False
+    if getattr(client, "is_connected", False):
+        return True
+    now = time.time()
+    wait_until = _pyro_flood_until.get(id(client), 0)
+    if now < wait_until:
+        return False
+    try:
+        await client.start()
+        _pyro_flood_until.pop(id(client), None)
+        # Muvaffaqiyatli ulanishdan keyin sessiyani saqlab qo'yamiz (agar hali
+        # saqlanmagan yoki o'zgargan bo'lsa) — keyingi qayta ishga tushishda
+        # qaytadan auth.ImportBotAuthorization chaqirilmasligi uchun.
+        try:
+            idx = _stream_clients.index(client) + 1
+            sess = await client.export_session_string()
+            await asyncio.to_thread(db.set_setting, f"pyro_session_{idx}", sess)
+        except Exception:
+            pass
+        return True
+    except ConnectionError:
+        # Pyrogram "Client is already started" holatini ConnectionError qilib ko'taradi
+        return True
+    except Exception as e:
+        msg = str(e)
+        m = re.search(r"wait of (\d+) seconds", msg)
+        if m:
+            wait_s = int(m.group(1))
+            _pyro_flood_until[id(client)] = now + wait_s
+            logger.error(
+                f"[stream] FLOOD_WAIT: {wait_s}s kutish talab qilinadi. "
+                f"Shu muddat tugagunicha bu klient uchun qayta urinilmaydi."
+            )
+        else:
+            logger.error(f"[stream] klientni ishga tushirib bo'lmadi: {e}")
+        return False
 
 # ===================== STATES =====================
 class RegState(StatesGroup):
@@ -1599,6 +1658,9 @@ def admin_cat_settings_keyboard():
         ],
         [
             InlineKeyboardButton(text="🔒 Avtomatik bloklash", callback_data="admin_autoblock", style="danger"),
+        ],
+        [
+            InlineKeyboardButton(text="🗄 Backup olish", callback_data="admin_db_backup", style="success"),
         ],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
@@ -5679,6 +5741,52 @@ async def admin_remove_admin(call: CallbackQuery):
     )
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
 
+# ===================== BAZA BACKUP =====================
+async def send_db_backup(chat_id=None, reason="qoʻlda"):
+    """Bazadagi barcha jadvallarni JSON qilib, gzip bilan siqib, Telegram orqali
+    (fayl sifatida) yuboradi. Bu serverga alohida saqlash joyi yoki cron kerak
+    qilmaydi — backup to'g'ridan-to'g'ri adminning Telegram chatiga tushadi,
+    va u yerdan istalgan vaqt yuklab olish/saqlash mumkin."""
+    data = await asyncio.to_thread(db.export_backup)
+    raw = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+    compressed = gzip.compress(raw)
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    filename = f"anifilm_backup_{ts}.json.gz"
+    target = chat_id or ADMIN_ID
+    total_rows = sum(len(rows) for rows in data.values())
+    await bot.send_document(
+        target,
+        BufferedInputFile(compressed, filename=filename),
+        caption=(
+            f"🗄 <b>Baza backup</b> — {ts}\n"
+            f"Sabab: {reason}\n"
+            f"📊 {len(data)} ta jadval, {total_rows} ta qator\n"
+            f"📦 Hajmi: {len(compressed)//1024} KB"
+        ),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "admin_db_backup")
+async def admin_db_backup(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer("🗄 Backup tayyorlanmoqda...")
+    try:
+        await send_db_backup(chat_id=call.from_user.id, reason="qoʻlda (admin panel)")
+    except Exception as e:
+        logger.error(f"[admin_db_backup] xato: {e}")
+        await bot.send_message(call.from_user.id, f"❌ Backup olishda xatolik: {e}")
+
+async def db_backup_task():
+    """Har kuni bazaning to'liq nusxasini asosiy adminga avtomatik yuboradi —
+    ma'lumot tasodifan o'chirilib qolsa yoki server buzilsa, tiklash imkoni bo'lsin uchun."""
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            await send_db_backup(reason="avtomatik (kunlik)")
+        except Exception as e:
+            logger.error(f"Avtomatik backup xatosi: {e}")
+
 # ===================== DB "UYG'OQ" TUTISH =====================
 async def db_keepalive_task():
     """Neon (bepul reja) baza 5 daqiqa foydalanilmasa avtomatik "uxlab qoladi" va
@@ -6651,52 +6759,8 @@ async def start_web_server():
     # uzaytirib yuboradi — aynan shu sabab avvalgi 880s -> 876s -> ... ketma-ket
     # o'sib borgan edi. Endi bitta klient flood-wait holatida bo'lsa, muddat
     # tugaguniga qadar boshqa urinishlar shu yerda to'xtatiladi.
-    _pyro_flood_until = {}
-
-    async def _ensure_pyro_ready(client):
-        """Pyrogram klienti ishga tushirilmagan yoki uzilib qolgan bo'lsa, uni qayta ishga
-        tushirishga urinadi. Bu ilgari uchragan xatoni bartaraf qiladi: agar dastur ishga
-        tushishida (masalan ikkita nusxa bir vaqtda ishlab ketganda) Pyrogram vaqtincha
-        ulanolmay qolsa, server baribir ishga tushib ketardi va /stream so'rovlari
-        abadiy 'Client has not been started yet' xatosi bilan tugardi — hech qachon
-        o'zi tuzalmasdi."""
-        if client is None:
-            return False
-        if getattr(client, "is_connected", False):
-            return True
-        now = time.time()
-        wait_until = _pyro_flood_until.get(id(client), 0)
-        if now < wait_until:
-            return False
-        try:
-            await client.start()
-            _pyro_flood_until.pop(id(client), None)
-            # Muvaffaqiyatli ulanishdan keyin sessiyani saqlab qo'yamiz (agar hali
-            # saqlanmagan yoki o'zgargan bo'lsa) — keyingi qayta ishga tushishda
-            # qaytadan auth.ImportBotAuthorization chaqirilmasligi uchun.
-            try:
-                idx = _stream_clients.index(client) + 1
-                sess = await client.export_session_string()
-                await asyncio.to_thread(db.set_setting, f"pyro_session_{idx}", sess)
-            except Exception:
-                pass
-            return True
-        except ConnectionError:
-            # Pyrogram "Client is already started" holatini ConnectionError qilib ko'taradi
-            return True
-        except Exception as e:
-            msg = str(e)
-            m = re.search(r"wait of (\d+) seconds", msg)
-            if m:
-                wait_s = int(m.group(1))
-                _pyro_flood_until[id(client)] = now + wait_s
-                logger.error(
-                    f"[stream] FLOOD_WAIT: {wait_s}s kutish talab qilinadi. "
-                    f"Shu muddat tugagunicha bu klient uchun qayta urinilmaydi."
-                )
-            else:
-                logger.error(f"[stream] klientni ishga tushirib bo'lmadi: {e}")
-            return False
+    # (_pyro_flood_until va _ensure_pyro_ready endi modul darajasida, funksiya
+    # tashqarisida — chunki admin_check_videos kabi boshqa handlerlar ham ularga muhtoj edi.)
 
     async def webapp_stream(request):
         """Videoni Telegramdan (Pyrogram/MTProto orqali) to'g'ridan-to'g'ri brauzerga oqim qiladi.
@@ -7019,6 +7083,7 @@ async def main():
     asyncio.create_task(daily_report_task())
     asyncio.create_task(premium_maintenance_task())
     asyncio.create_task(db_keepalive_task())
+    asyncio.create_task(db_backup_task())
     try:
         await dp.start_polling(
             bot,
