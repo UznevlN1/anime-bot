@@ -734,9 +734,20 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <div class="detail-title" id="detailTitle"></div>
     <div class="detail-meta" id="detailMeta"></div>
     <div class="detail-desc" id="detailDesc"></div>
+    <button class="chip" id="aiReasonBtn" style="margin:6px 0;display:none;">🤖 Nega bu menga mos?</button>
+    <div id="aiReasonText" style="display:none;font-size:13px;color:var(--text-dim);margin-bottom:8px;"></div>
   </div>
   <h3 class="ep-head">Epizodlar</h3>
   <div class="ep-grid" id="epGrid"></div>
+
+  <h3 class="ep-head">🤖 AI'dan so'rash</h3>
+  <div class="comments-wrap">
+    <div id="aiChatLog"></div>
+    <div class="comment-input-row">
+      <input class="comment-input" id="aiChatInput" placeholder="Bu anime haqida savol bering..." maxlength="300">
+      <button class="comment-send" id="aiChatSend" aria-label="Yuborish">➤</button>
+    </div>
+  </div>
 
   <h3 class="ep-head">💬 Izohlar</h3>
   <div class="comments-wrap">
@@ -1383,7 +1394,16 @@ function renderAllGrid(){
   document.getElementById('recommendSection').style.display=isFiltering?'none':document.getElementById('recommendSection').dataset.has==='1'?'':'none';
   const g=document.getElementById('allGrid');g.innerHTML='';
   _gridSentinel=null;
-  if(!items.length){g.innerHTML='<div class="empty-msg">Hech narsa topilmadi</div>';_gridItems=[];_gridRendered=0;return;}
+  if(!items.length){
+    g.innerHTML=q.length>=2
+      ?'<div class="empty-msg">Hech narsa topilmadi<br><button id="aiSearchBtn" class="chip" style="margin-top:10px;">🤖 AI orqali qidirish</button></div>'
+      :'<div class="empty-msg">Hech narsa topilmadi</div>';
+    if(q.length>=2){
+      const btn=document.getElementById('aiSearchBtn');
+      if(btn)btn.addEventListener('click',()=>runAiSearch(q));
+    }
+    _gridItems=[];_gridRendered=0;return;
+  }
   _gridItems=items;_gridRendered=0;
   renderGridChunk();
 }
@@ -1422,6 +1442,27 @@ function renderRecommendations(){
   renderRow('recommendRow',scored);
 }
 function renderHome(list){renderHero(list);renderSponsorBanner();renderNewArrivals();renderPopular();renderCategoryChips();renderRecommendations();renderAllGrid();}
+
+async function runAiSearch(q){
+  const g=document.getElementById('allGrid');
+  g.innerHTML='<div class="empty-msg">🤖 AI qidiryapti...</div>';
+  try{
+    const res=await fetch(`${API}/ai/search?q=${encodeURIComponent(q)}&${initDataQS()}`);
+    const data=await res.json();
+    const results=data.results||[];
+    if(!results.length){
+      g.innerHTML='<div class="empty-msg">🤖 AI ham mos narsa topa olmadi</div>';
+      return;
+    }
+    document.getElementById('allSectionTitle').textContent=`🤖 "${q}" uchun AI natijalari`;
+    g.innerHTML='';
+    const frag=document.createDocumentFragment();
+    results.forEach(a=>frag.appendChild(renderCard(a)));
+    g.appendChild(frag);
+  }catch(e){
+    g.innerHTML='<div class="empty-msg">😕 AI qidiruvda xatolik yuz berdi</div>';
+  }
+}
 
 let sponsorLoaded=false;
 function renderSponsorBanner(){
@@ -1708,6 +1749,11 @@ async function openDetail(id){
   document.getElementById('detailMeta').textContent='';
   document.getElementById('epGrid').innerHTML='';
   document.getElementById('commentsList').innerHTML='';
+  document.getElementById('aiReasonBtn').style.display='none';
+  document.getElementById('aiReasonText').style.display='none';
+  document.getElementById('aiReasonText').textContent='';
+  document.getElementById('aiChatLog').innerHTML='';
+  AI_CHAT_HISTORY=[];
   try{
     const d=await fetchJSON(`${API}/animes/${id}?${initDataQS()}`);
     document.getElementById('detailImg').src=posterUrl(d);
@@ -1717,6 +1763,7 @@ async function openDetail(id){
     if(d.watched_today>0)metaHtml+=` • <span class="watch-stat">🔥 bugun ${d.watched_today} marta koʻrildi</span>`;
     document.getElementById('detailMeta').innerHTML=metaHtml;
     document.getElementById('detailDesc').textContent=d.description||'';
+    document.getElementById('aiReasonBtn').style.display='';
     const favBtn2=document.getElementById('detailFav');
     favBtn2.classList.toggle('active',isFav(d.id));
     favBtn2.textContent=isFav(d.id)?'♥':'♡';
@@ -1742,6 +1789,60 @@ async function openDetail(id){
   }catch(e){document.getElementById('detailTitle').textContent='Xatolik yuz berdi';}
 }
 document.getElementById('detailBack').addEventListener('click',()=>{closePlayer();showView('home');renderAllGrid();});
+
+document.getElementById('aiReasonBtn').addEventListener('click',async()=>{
+  if(!CURRENT_DETAIL_ID)return;
+  const btn=document.getElementById('aiReasonBtn');
+  const box=document.getElementById('aiReasonText');
+  btn.disabled=true;btn.textContent='🤖 O\'ylanyapti...';
+  try{
+    const r=await fetchJSON(`${API}/ai/reason?anime_id=${CURRENT_DETAIL_ID}&${initDataQS()}`);
+    box.textContent=r.reason?('💡 '+r.reason):'🤖 Hozircha sabab topa olmadim.';
+    box.style.display='';
+  }catch(e){
+    box.textContent='😕 AI javob bermadi.';box.style.display='';
+  }
+  btn.style.display='none';
+});
+
+let AI_CHAT_HISTORY=[];
+function appendAiChatBubble(role,text){
+  const log=document.getElementById('aiChatLog');
+  const el=document.createElement('div');
+  el.className='comment-item';
+  el.innerHTML=`<div class="comment-user">${role==='user'?'Siz':'🤖 AI'}</div><div class="comment-text"></div>`;
+  el.querySelector('.comment-text').textContent=text;
+  log.appendChild(el);
+  log.scrollTop=log.scrollHeight;
+}
+async function sendAiChat(){
+  const input=document.getElementById('aiChatInput');
+  const text=input.value.trim();
+  if(!text||!CURRENT_DETAIL_ID)return;
+  input.value='';
+  appendAiChatBubble('user',text);
+  const sendBtn=document.getElementById('aiChatSend');
+  sendBtn.disabled=true;
+  try{
+    const r=await fetch(`${API}/ai/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      init_data:getInitData(),anime_id:CURRENT_DETAIL_ID,question:text,history:AI_CHAT_HISTORY
+    })});
+    const res=await r.json();
+    if(res.answer){
+      appendAiChatBubble('model',res.answer);
+      AI_CHAT_HISTORY.push({role:'user',text});
+      AI_CHAT_HISTORY.push({role:'model',text:res.answer});
+      AI_CHAT_HISTORY=AI_CHAT_HISTORY.slice(-8);
+    }else{
+      appendAiChatBubble('model','😕 Hozircha javob bera olmadim.');
+    }
+  }catch(e){
+    appendAiChatBubble('model','😕 Xatolik yuz berdi.');
+  }
+  sendBtn.disabled=false;
+}
+document.getElementById('aiChatSend').addEventListener('click',sendAiChat);
+document.getElementById('aiChatInput').addEventListener('keydown',(e)=>{if(e.key==='Enter')sendAiChat();});
 
 let REPLY_TO=null;
 
