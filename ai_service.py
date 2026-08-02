@@ -134,29 +134,56 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
         generation_config = dict(base_generation_config)
         _apply_thinking_config(generation_config, model_name, thinking_level)
 
-        payload = {"contents": contents, "generationConfig": generation_config}
-        if system_instruction:
-            payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+        # MUHIM: Gemini 3.x modellarida maxOutputTokens — javob matni UCHUN
+        # emas, balki "thinking" (ichki fikrlash) tokenlari + javob matni
+        # BIRGALIKDA sarflaydigan umumiy byudjet. Agar thinking budjetning
+        # katta qismini yeb qo'ysa, javob matni yarim gapda kesilib qoladi
+        # (finishReason="MAX_TOKENS"). Shu sabab, shunday holat sodir bo'lsa,
+        # shu model bilan BIR MARTA kattaroq byudjet bilan qayta urinamiz —
+        # bekorga darhol keyingi (kuchsizroq) modelga o'tavermaslik uchun.
+        max_attempts_for_model = 2 if _is_gemini3(model_name) else 1
 
-        try:
-            async with session.post(
-                _model_url(model_name), json=payload, headers=headers,
-                timeout=aiohttp.ClientTimeout(total=timeout)
-            ) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    logger.warning("Gemini (%s) xato javob: %s - %s", model_name, resp.status, data)
-                    continue  # keyingi zaxira modelni sinab ko'ramiz
-                candidates = data.get("candidates") or []
-                if not candidates:
-                    continue
-                parts = candidates[0].get("content", {}).get("parts", []) or []
-                text = "".join(p.get("text", "") for p in parts).strip()
-                if text:
-                    return text
-        except Exception:
-            logger.exception("Gemini (%s) so'rovida xatolik yuz berdi", model_name)
-            continue  # keyingi zaxira modelni sinab ko'ramiz
+        for attempt in range(max_attempts_for_model):
+            payload = {"contents": contents, "generationConfig": generation_config}
+            if system_instruction:
+                payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+
+            try:
+                async with session.post(
+                    _model_url(model_name), json=payload, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=timeout)
+                ) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        logger.warning("Gemini (%s) xato javob: %s - %s", model_name, resp.status, data)
+                        break  # keyingi zaxira modelni sinab ko'ramiz
+                    candidates = data.get("candidates") or []
+                    if not candidates:
+                        break
+                    finish_reason = candidates[0].get("finishReason")
+                    parts = candidates[0].get("content", {}).get("parts", []) or []
+                    text = "".join(p.get("text", "") for p in parts).strip()
+
+                    if finish_reason == "MAX_TOKENS" and attempt == 0 and max_attempts_for_model > 1:
+                        # Thinking budjetni yeb qo'ygan bo'lishi mumkin — javob
+                        # matniga ko'proq joy qoldirib qayta urinamiz.
+                        logger.info(
+                            "Gemini (%s) MAX_TOKENS bilan kesildi (thinking token'lar "
+                            "byudjetni yegan bo'lishi mumkin) — kattaroq byudjet bilan qayta urinilyapti",
+                            model_name,
+                        )
+                        generation_config = dict(generation_config)
+                        generation_config["maxOutputTokens"] = min(
+                            8192, int(generation_config["maxOutputTokens"] * 2.5) + 500
+                        )
+                        continue  # shu model bilan yana bir bor urinib ko'ramiz
+
+                    if text:
+                        return text
+                    break  # bo'sh javob — keyingi zaxira modelga o'tamiz
+            except Exception:
+                logger.exception("Gemini (%s) so'rovida xatolik yuz berdi", model_name)
+                break  # keyingi zaxira modelni sinab ko'ramiz
 
     return None  # barcha modellar muvaffaqiyatsiz bo'ldi
 
@@ -179,7 +206,7 @@ async def ask_ai(user_text, history=None, system_instruction=None):
         "boʻlmagan savollarga ham xuddi shunday chuqur va foydali javob ber."
     )
     return await _call_gemini(contents, system_instruction=sys_prompt,
-                               temperature=0.85, max_output_tokens=1000,
+                               temperature=0.85, max_output_tokens=1800,
                                thinking_level="low")
 
 
@@ -198,7 +225,7 @@ async def moderate_comment(text):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.0, max_output_tokens=5,
+        temperature=0.0, max_output_tokens=20,
     )
     if result is None:
         return True
@@ -223,7 +250,7 @@ async def generate_anime_description(title, genre="", year="", country=""):
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.9, max_output_tokens=220,
+        temperature=0.9, max_output_tokens=450,
     )
 
 
@@ -240,7 +267,7 @@ async def generate_recommendation_reason(anime_title, user_context):
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.7, max_output_tokens=60,
+        temperature=0.7, max_output_tokens=180,
     )
 
 
@@ -256,7 +283,7 @@ async def generate_episode_announcement(anime_title, episode_number, genre=""):
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.9, max_output_tokens=200,
+        temperature=0.9, max_output_tokens=450,
     )
 
 
@@ -274,7 +301,7 @@ async def generate_ai_invite_message():
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.9, max_output_tokens=200,
+        temperature=0.9, max_output_tokens=450,
     )
 
 
@@ -296,7 +323,7 @@ async def answer_comment_question(question_text, anime_title, anime_description,
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.4, max_output_tokens=150,
+        temperature=0.4, max_output_tokens=350,
     )
 
 
@@ -326,7 +353,7 @@ async def analyze_stats(stats_context):
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.6, max_output_tokens=350,
+        temperature=0.6, max_output_tokens=700,
     )
 
 
@@ -344,7 +371,7 @@ async def suggest_anime_metadata(title):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.3, max_output_tokens=300, json_mode=True,
+        temperature=0.3, max_output_tokens=550, json_mode=True,
     )
     if not result:
         return {}
@@ -380,7 +407,7 @@ async def extract_payment_amount(image_base64, mime_type="image/jpeg"):
             {"text": prompt},
         ],
     }]
-    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=100, json_mode=True)
+    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=200, json_mode=True)
     if not result:
         return None
     try:
@@ -406,7 +433,7 @@ async def is_spoiler(text, anime_title=""):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.0, max_output_tokens=5,
+        temperature=0.0, max_output_tokens=20,
     )
     if result is None:
         return False
@@ -425,7 +452,7 @@ async def generate_weekly_report(stats_context):
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.6, max_output_tokens=400,
+        temperature=0.6, max_output_tokens=900,
     )
 
 
@@ -444,7 +471,7 @@ async def pick_anime_by_mood(mood_text, catalog_text, max_picks=3):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.6, max_output_tokens=200, json_mode=True,
+        temperature=0.6, max_output_tokens=400, json_mode=True,
     )
     if not result:
         return []
@@ -477,7 +504,7 @@ async def search_anime_ids(query, catalog_text, max_picks=10):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.4, max_output_tokens=250, json_mode=True,
+        temperature=0.4, max_output_tokens=450, json_mode=True,
     )
     if not result:
         return []
@@ -514,7 +541,7 @@ async def chat_about_anime(question, anime_title, anime_description, history=Non
         "umumiy, spoylersiz tavsif ber."
     )
     return await _call_gemini(contents, system_instruction=sys_prompt,
-                               temperature=0.7, max_output_tokens=400,
+                               temperature=0.7, max_output_tokens=700,
                                thinking_level="low")
 
 
@@ -534,7 +561,7 @@ async def recommend_anime_ids(catalog_text, user_context, max_picks=4):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.4, max_output_tokens=200, json_mode=True,
+        temperature=0.4, max_output_tokens=400, json_mode=True,
     )
     if not result:
         return []

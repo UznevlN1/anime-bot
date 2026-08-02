@@ -107,6 +107,48 @@ STREAM_ENABLED = bool(API_ID and API_HASH)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# AI (Gemini) javoblari ba'zan Markdown belgilari bilan qaytadi (**qalin**,
+# `kod`, va h.k.). Bot esa hamma joyda parse_mode="HTML" ishlatadi, shuning
+# uchun bu belgilar tirnoq ichida tom ma'noda ("**...**") chiqib qolar edi.
+# Quyidagi funksiya AI matnini avval xavfsiz HTML'ga escape qiladi (< > &),
+# so'ng oddiy Markdown belgilarini mos HTML teglariga aylantiradi.
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
+_MD_CODE_RE = re.compile(r"`([^`]+?)`")
+
+
+def ai_text_to_html(text: str) -> str:
+    """AI (Gemini) matnini Telegram parse_mode='HTML' uchun xavfsiz qiladi."""
+    if not text:
+        return text
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    escaped = _MD_CODE_RE.sub(r"<code>\1</code>", escaped)
+    escaped = _MD_BOLD_RE.sub(r"<b>\1</b>", escaped)
+    escaped = _MD_ITALIC_RE.sub(r"<i>\1</i>", escaped)
+    return escaped
+
+
+async def send_ai_text(target, text, **kwargs):
+    """AI javobini yuboradi: avval formatlangan HTML bilan, agar Telegram
+    biror sababga ko'ra uni qabul qilmasa (masalan noto'g'ri joylashgan teg),
+    formatlanmagan oddiy matn bilan qayta yuboradi — foydalanuvchi hech qachon
+    xatolik tufayli javobsiz qolmaydi.
+    `target` — Message (u holda target.answer chaqiriladi) yoki chat_id
+    (u holda bot.send_message chaqiriladi)."""
+    html_text = ai_text_to_html(text)
+    is_message_obj = hasattr(target, "answer")
+    try:
+        if is_message_obj:
+            return await target.answer(html_text, parse_mode="HTML", **kwargs)
+        return await bot.send_message(target, html_text, parse_mode="HTML", **kwargs)
+    except Exception:
+        logger.warning("AI matnini HTML bilan yuborib bo'lmadi, oddiy matn bilan qayta urinilyapti")
+        if is_message_obj:
+            return await target.answer(text, **kwargs)
+        return await bot.send_message(target, text, **kwargs)
+
+
 _extra_admin_cache = {"ids": set(), "loaded_at": 0}
 _EXTRA_ADMIN_TTL = 60
 
@@ -2428,7 +2470,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
     history = history + [("user", text), ("model", reply)]
     history = history[-10:]  # tokenlarni tejash uchun faqat oxirgi almashinuvlar saqlanadi
     await state.update_data(ai_history=history)
-    await message.answer(reply, reply_markup=ai_chat_keyboard())
+    await send_ai_text(message, reply, reply_markup=ai_chat_keyboard())
     await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
@@ -3303,7 +3345,7 @@ async def addepi_done(message: Message, state: FSMContext):
                 ai_text = await ai_service.generate_episode_announcement(
                     anime_row["title"], data["next_ep"], anime_row.get("genre", "")
                 )
-            body = ai_text.strip() if ai_text else f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!"
+            body = ai_text_to_html(ai_text.strip()) if ai_text else f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!"
             asyncio.create_task(notify_anime_subscribers(
                 data["episode_anime_id"],
                 f"{body}\n\n👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
@@ -5186,6 +5228,8 @@ async def admin_ai_stats(call: CallbackQuery):
     analysis = await ai_service.analyze_stats(stats_context)
     if not analysis:
         analysis = "😕 AI tahlil bera olmadi, birozdan keyin qayta urinib ko'ring."
+    else:
+        analysis = ai_text_to_html(analysis)
     await call.message.edit_text(
         f"🤖 <b>AI tahlil</b>\n\n{analysis}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -5357,6 +5401,7 @@ async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
     if not text:
         await call.message.edit_text("😕 AI xabar yoza olmadi, birozdan keyin qayta urinib ko'ring.", reply_markup=admin_back())
         return
+    text = ai_text_to_html(text)
     users = await asyncio.to_thread(db.get_users_never_used_ai)
     await state.update_data(ai_invite_text=text, ai_invite_users=users)
     await call.message.edit_text(
@@ -5385,7 +5430,7 @@ async def bc_ai_invite_send(call: CallbackQuery, state: FSMContext):
     for user_id in users:
         for attempt in range(2):
             try:
-                await bot.send_message(user_id, text, reply_markup=kb)
+                await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
                 sent += 1
                 break
             except TelegramForbiddenError:
@@ -6438,7 +6483,7 @@ async def weekly_ai_report_task():
             report = await ai_service.generate_weekly_report(stats_context)
             if report:
                 await bot.send_message(
-                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{report}", parse_mode="HTML"
+                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{ai_text_to_html(report)}", parse_mode="HTML"
                 )
         except Exception as e:
             logger.error(f"Haftalik AI-hisobot xatosi: {e}")
