@@ -2645,11 +2645,11 @@ async def addepi_video(message: Message, state: FSMContext):
     data = await state.get_data()
     msg_ids = data.get("episode_msg_ids", [])
     ep_num = data["next_ep"] + len(msg_ids)
-    sent = await bot.copy_message(
-        STORAGE_CHANNEL, message.chat.id, message.message_id,
-        caption=episode_caption(ep_num), parse_mode=None
+    new_msg_id = await _upload_episode_to_storage(
+        message.chat.id, message.message_id,
+        episode_caption(ep_num), status_message=message
     )
-    msg_ids.append(sent.message_id)
+    msg_ids.append(new_msg_id)
     await state.update_data(episode_msg_ids=msg_ids)
     await message.answer(f"✅ {ep_num}-qism kanalga saqlandi.")
 
@@ -3300,11 +3300,11 @@ async def epact_new_video(message: Message, state: FSMContext):
     data = await state.get_data()
     old_ep = await asyncio.to_thread(db.get_episode, data["edit_ep_id"])
     ep_num = old_ep["episode_number"] if old_ep else None
-    sent = await bot.copy_message(
-        STORAGE_CHANNEL, message.chat.id, message.message_id,
-        caption=episode_caption(ep_num) if ep_num else None, parse_mode=None
+    new_msg_id = await _upload_episode_to_storage(
+        message.chat.id, message.message_id,
+        episode_caption(ep_num) if ep_num else None, status_message=message
     )
-    await asyncio.to_thread(db.update_episode, data["edit_ep_id"], sent.message_id)
+    await asyncio.to_thread(db.update_episode, data["edit_ep_id"], new_msg_id)
     await state.clear()
     await message.answer("✅ Qism yangilandi!", reply_markup=admin_keyboard())
 
@@ -3320,6 +3320,7 @@ async def epact_new_video(message: Message, state: FSMContext):
 # qo'shish kerak bo'ladi, aks holda quyidagi funksiyalar xato beradi).
 
 CLIP_TMP_DIR = "/tmp/anime_clips"
+EPISODE_TMP_DIR = "/tmp/anime_episodes"
 # job_id -> asyncio.Task — hozir ishlayotgan klip jarayonlari, "Bekor qilish"
 # tugmasi bosilganda mos Task topilib .cancel() qilinishi uchun.
 _clip_jobs = {}
@@ -3352,6 +3353,102 @@ def _ffprobe_duration(path):
         return float(out.stdout.strip())
     except Exception:
         return None
+
+async def _probe_video_codec(path):
+    """Faylning birinchi video oqimi kodek nomini qaytaradi (masalan 'h264',
+    'hevc'). Aniqlab bo'lmasa (fayl buzilgan/ffprobe topa olmadi) None qaytaradi."""
+    try:
+        out = await asyncio.to_thread(
+            subprocess.run,
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True
+        )
+    except Exception:
+        return None
+    codec = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
+    return codec or None
+
+# Brauzerning <video> tegi ishonchli o'ynata oladigan video kodeklar. Agar
+# yuklangan qism shulardan birida bo'lmasa (masalan HEVC/H.265 — Telegram
+# ilovasida yaxshi o'ynaydi, lekin Chrome kabi brauzerlarda odatda ishlamaydi),
+# webapp pleer "Videoni yuklab bo'lmadi" xatosini beradi. Shu sabab bunday
+# holatda avtomatik H.264/AAC'ga o'tkazamiz.
+_BROWSER_SAFE_VIDEO_CODECS = {"h264", "vp9", "vp8", "av1"}
+
+async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None):
+    """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi. Video kodeki
+    brauzer bilan mos kelmasa (H.264 emas — eng ko'p uchraydigani HEVC/H.265),
+    avtomatik ravishda H.264/AAC'ga o'tkazadi, shundan keyingina saqlaydi —
+    aks holda webapp pleer videoni umuman ochira olmaydi (garchi Telegram
+    ilovasining o'zida muammosiz o'ynasa ham).
+    Har doim STORAGE_CHANNEL'dagi YAKUNIY xabar message_id'sini qaytaradi.
+    Tekshirish/o'tkazish jarayonida kutilmagan xato yuz bersa, asl (o'tkazilmagan)
+    video saqlab qolinadi — admin oqimi hech qachon butunlay to'xtamaydi."""
+    sent = await bot.copy_message(
+        STORAGE_CHANNEL, orig_chat_id, orig_message_id,
+        caption=caption, parse_mode=None
+    )
+
+    await asyncio.to_thread(os.makedirs, EPISODE_TMP_DIR, exist_ok=True)
+    ts = int(time.time() * 1000)
+    src_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_src.mp4")
+    out_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_h264.mp4")
+
+    try:
+        channel_msg = await pyro.get_messages(STORAGE_CHANNEL, sent.message_id)
+        media = channel_msg.video or channel_msg.document or channel_msg.animation
+        if not media:
+            return sent.message_id
+
+        dl_client = _next_stream_client() if _stream_clients else pyro
+        await dl_client.download_media(channel_msg, file_name=src_path)
+
+        codec = await _probe_video_codec(src_path)
+        if codec is None or codec in _BROWSER_SAFE_VIDEO_CODECS:
+            # h264/vp9 va h.k. — brauzer bilan mos, hech narsa qilmaymiz.
+            # Kodekni aniqlab bo'lmasa ham xavfsiz tomondan qolib, o'zgartirmaymiz.
+            return sent.message_id
+
+        if status_message:
+            try:
+                await status_message.answer(
+                    f"🎞 Format ({codec}) ba'zi brauzerlarda ishlamasligi mumkin — "
+                    f"avtomatik H.264'ga o'tkazilmoqda. Fayl hajmiga qarab bu bir necha "
+                    f"daqiqa vaqt olishi mumkin, iltimos kuting..."
+                )
+            except Exception:
+                pass
+
+        total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
+        await _run_ffmpeg_progress(
+            ["ffmpeg", "-y", "-i", src_path,
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+             "-c:a", "aac", "-b:a", "160k",
+             "-movflags", "+faststart", out_path],
+            total_dur or 0, stall_timeout=180
+        )
+
+        new_sent = await pyro.send_video(STORAGE_CHANNEL, out_path, caption=caption or "")
+        try:
+            await bot.delete_message(STORAGE_CHANNEL, sent.message_id)
+        except Exception:
+            logger.warning(f"Eski (transkodlanmagan) xabar {sent.message_id} o'chirilmadi — qo'lda tozalash kerak bo'lishi mumkin.")
+        return new_sent.id
+    except Exception:
+        logger.exception(
+            "Epizod formatini avtomatik tekshirish/o'tkazishda xato — "
+            f"asl video (msg_id={sent.message_id}) o'zgarishsiz saqlab qolindi."
+        )
+        return sent.message_id
+    finally:
+        for p in (src_path, out_path):
+            try:
+                if os.path.exists(p):
+                    await asyncio.to_thread(os.remove, p)
+            except Exception:
+                pass
 
 async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpass_hz=None):
     """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
