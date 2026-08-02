@@ -354,6 +354,7 @@ class SearchState(StatesGroup):
 
 class AIChatState(StatesGroup):
     chatting = State()
+    mood = State()
 
 class BlockState(StatesGroup):
     user_id = State()
@@ -787,11 +788,27 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
     await message.answer("✅ Chek qabul qilindi! Admin tomonidan tekshirilib, tez orada tasdiqlanadi.")
     u = message.from_user
     uname = f"@{u.username}" if u.username else u.full_name
+    ai_line = ""
+    if ai_service.AI_ENABLED:
+        try:
+            file = await bot.get_file(file_id)
+            file_bytes = await bot.download_file(file.file_path)
+            img_b64 = base64.b64encode(file_bytes.read()).decode("ascii")
+            ocr = await ai_service.extract_payment_amount(img_b64)
+            if ocr and (ocr.get("amount") or ocr.get("card_last4")):
+                ai_line = (
+                    f"\n\n🤖 AI o'qigani (tekshirib ko'ring): "
+                    f"{ocr.get('amount') or '—'}"
+                    + (f", karta •{ocr['card_last4']}" if ocr.get("card_last4") else "")
+                )
+        except Exception:
+            logger.exception("[premium_screenshot_received] AI OCR xatosi")
     caption = (
         f"💎 <b>Yangi Premium to'lovi</b>\n\n"
         f"👤 {uname} (ID: <code>{u.id}</code>)\n"
         f"📦 Tarif: {PLAN_LABELS.get(plan, plan)}\n"
         f"💰 Summa: {fmt_som(amount)}"
+        f"{ai_line}"
     )
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -1752,6 +1769,7 @@ def admin_cat_comm_keyboard():
         [
             InlineKeyboardButton(text="📢 Sponsor baner", callback_data="admin_sponsor", style="primary"),
         ],
+        [InlineKeyboardButton(text="🤖 AI push-tavsiya", callback_data="admin_ai_push", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -2324,6 +2342,7 @@ def ai_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 AI bilan suhbat", callback_data="ai_chat_start")],
         [InlineKeyboardButton(text="🎯 Menga anime tavsiya qil", callback_data="ai_recommend")],
+        [InlineKeyboardButton(text="🎭 Kayfiyatimga mos tanla", callback_data="ai_mood_start")],
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu")],
     ])
 
@@ -2410,6 +2429,9 @@ async def ai_chat_message(message: Message, state: FSMContext):
     history = history[-10:]  # tokenlarni tejash uchun faqat oxirgi almashinuvlar saqlanadi
     await state.update_data(ai_history=history)
     await message.answer(reply, reply_markup=ai_chat_keyboard())
+    await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
+    await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
+    await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
 
 @dp.callback_query(F.data == "ai_recommend")
 async def ai_recommend_handler(call: CallbackQuery, state: FSMContext):
@@ -2446,6 +2468,8 @@ async def ai_recommend_handler(call: CallbackQuery, state: FSMContext):
     ids = await ai_service.recommend_anime_ids(catalog_text, user_context, max_picks=4)
     valid_ids = set(id_to_title.keys())
     ids = [i for i in ids if i in valid_ids][:4]
+    if ids:
+        await asyncio.to_thread(db.mark_ai_used, user_id)
 
     if not ids:
         await call.message.edit_text(
@@ -2466,6 +2490,58 @@ async def ai_recommend_handler(call: CallbackQuery, state: FSMContext):
         anime = await asyncio.to_thread(db.get_anime, anime_id)
         if anime:
             await send_anime_card(call.message.chat.id, anime)
+
+@dp.callback_query(F.data == "ai_mood_start")
+async def ai_mood_start(call: CallbackQuery, state: FSMContext):
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    await state.set_state(AIChatState.mood)
+    await call.message.edit_text(
+        "🎭 Hozirgi kayfiyatingiz yoki nima ko'rgingiz kelayotganini yozing "
+        "(masalan: \"kulgili va yengil narsa\", \"kayfiyatim yo'q, hissiy narsa "
+        "kerak\", \"qisqa va action\"):",
+        reply_markup=back_to_main()
+    )
+
+@dp.message(AIChatState.mood)
+async def ai_mood_message(message: Message, state: FSMContext):
+    if not await guard_access(message, is_callback=False):
+        return
+    mood_text = (message.text or "").strip()
+    if not mood_text:
+        await message.answer("Iltimos, matn yozing.")
+        return
+    await state.clear()
+    user_id = message.from_user.id
+    try:
+        await bot.send_chat_action(message.chat.id, "typing")
+    except Exception:
+        pass
+    animes = await asyncio.to_thread(db.get_animes, None, 0, 300)
+    if not animes:
+        await message.answer("Hozircha katalogda anime yo'q.", reply_markup=back_to_main())
+        return
+    id_to_title = {a["id"]: a["title"] for a in animes}
+    catalog_text = "\n".join(
+        f"ID:{a['id']} | {a['title']} | {a.get('genre','')} | {a.get('year','')}"
+        for a in animes
+    )
+    ids = await ai_service.pick_anime_by_mood(mood_text, catalog_text, max_picks=3)
+    ids = [i for i in ids if i in id_to_title][:3]
+    if not ids:
+        await message.answer(
+            "😕 Mos anime topa olmadim, boshqacha yozib ko'ring.",
+            reply_markup=back_to_main()
+        )
+        return
+    await asyncio.to_thread(db.mark_ai_used, user_id)
+    await message.answer("🎭 Kayfiyatingizga mos tavsiyalar:")
+    for anime_id in ids:
+        anime = await asyncio.to_thread(db.get_anime, anime_id)
+        if anime:
+            await send_anime_card(message.chat.id, anime)
 
 # ===================== QIDIRUV =====================
 @dp.callback_query(F.data == "search")
@@ -2909,7 +2985,41 @@ async def add_photo(message: Message, state: FSMContext):
 async def add_title(message: Message, state: FSMContext):
     await state.update_data(title=message.text)
     await state.set_state(AddAnime.year)
-    await message.answer("📅 Yilini yozing:")
+    kb = None
+    if ai_service.AI_ENABLED:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 AI: yil/davlat/janr/tavsifni to'ldirish", callback_data="ai_autofill_meta")]
+        ])
+    await message.answer("📅 Yilini yozing:", reply_markup=kb)
+
+@dp.callback_query(AddAnime.year, F.data == "ai_autofill_meta")
+async def ai_autofill_meta(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI sozlanmagan", show_alert=True)
+        return
+    await call.answer("🤖 Qidirilmoqda...")
+    data = await state.get_data()
+    meta = await ai_service.suggest_anime_metadata(data.get("title", ""))
+    if not meta or not any(meta.values()):
+        await call.message.answer("😕 AI bu anime haqida ma'lumot topa olmadi, iltimos qo'lda kiriting.")
+        return
+    await state.update_data(
+        year=meta.get("year") or "", country=meta.get("country") or "",
+        genre=meta.get("genre") or "", description=meta.get("description") or "",
+    )
+    await state.set_state(AddAnime.language)
+    await call.message.answer(
+        "🤖 <b>AI to'ldirdi:</b>\n\n"
+        f"📅 Yil: {meta.get('year') or '—'}\n"
+        f"🌍 Davlat: {meta.get('country') or '—'}\n"
+        f"🎭 Janr: {meta.get('genre') or '—'}\n"
+        f"📝 Tavsif: {meta.get('description') or '—'}\n\n"
+        "✅ Qabul qilindi (noto'g'ri bo'lsa keyinroq \"Tahrirlash\"dan tuzatasiz). "
+        "Endi tilini yozing (masalan: O'zbek, Rus, Yapon):",
+        parse_mode="HTML"
+    )
 
 @dp.message(AddAnime.year)
 async def add_year(message: Message, state: FSMContext):
@@ -3188,10 +3298,15 @@ async def addepi_done(message: Message, state: FSMContext):
         eps = await asyncio.to_thread(db.get_episodes, data["episode_anime_id"])
         new_ep = next((e for e in eps if e["episode_number"] == data["next_ep"]), None)
         if new_ep:
+            ai_text = None
+            if ai_service.AI_ENABLED:
+                ai_text = await ai_service.generate_episode_announcement(
+                    anime_row["title"], data["next_ep"], anime_row.get("genre", "")
+                )
+            body = ai_text.strip() if ai_text else f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!"
             asyncio.create_task(notify_anime_subscribers(
                 data["episode_anime_id"],
-                f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!\n\n"
-                f"👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
+                f"{body}\n\n👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
             ))
         # Webapp 🔔 paneli uchun bildirishnoma
         await asyncio.to_thread(
@@ -5042,7 +5157,39 @@ async def admin_stats(call: CallbackQuery):
         f"🔥 <b>Eng kop korilgan:</b>\n{top_text}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📈 O'sish grafigi", callback_data="admin_growth_chart", style="primary")],
+            [InlineKeyboardButton(text="🤖 AI tahlil", callback_data="admin_ai_stats", style="primary")],
             [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "admin_ai_stats")
+async def admin_ai_stats(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    await call.message.edit_text("🤖 Tahlil qilinmoqda...")
+    s = await asyncio.to_thread(db.get_stats)
+    growth = await asyncio.to_thread(db.get_growth_stats, 7)
+    top_text = ", ".join(f"{a['title']} ({a['views']})" for a in s["top"][:5])
+    stats_context = (
+        f"Jami foydalanuvchi: {s['total']}, faol: {s['active']}, bloklangan: {s['blocked']}. "
+        f"Jami anime: {s['total_animes']} (film: {s['films']}, serial: {s['serials']}). "
+        f"Yangi foydalanuvchi: bugun {s['today']}, hafta {s['week']}, oy {s['month']}. "
+        f"Eng ko'p ko'rilganlar: {top_text}. "
+        f"Oxirgi 7 kun (sana: yangi foydalanuvchi, ko'rish): "
+        + "; ".join(f"{g['date']}: {g['new_users']} yangi, {g['views']} ko'rish" for g in growth)
+    )
+    analysis = await ai_service.analyze_stats(stats_context)
+    if not analysis:
+        analysis = "😕 AI tahlil bera olmadi, birozdan keyin qayta urinib ko'ring."
+    await call.message.edit_text(
+        f"🤖 <b>AI tahlil</b>\n\n{analysis}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
         ]),
         parse_mode="HTML"
     )
@@ -5107,8 +5254,154 @@ async def admin_broadcast(call: CallbackQuery, state: FSMContext):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📝 Oddiy xabar", callback_data="bc_simple")],
             [InlineKeyboardButton(text="🔘 Inline tugmali xabar", callback_data="bc_inline")],
+            [InlineKeyboardButton(text="🤖 AI foydalanmaganlarga taklif", callback_data="bc_ai_invite")],
             [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
         ])
+    )
+
+AI_PUSH_USER_CAP = 150  # bepul Gemini kvotasini tejash uchun bitta yugurishda yuboriladigan maksimal user soni
+
+async def _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text):
+    favorite_ids = await asyncio.to_thread(db.get_favorite_ids, user_id) or []
+    recent_ids = await asyncio.to_thread(db.get_recent_anime_ids, user_id, 8) or []
+    fav_titles = [id_to_title[i] for i in favorite_ids if i in id_to_title][:10]
+    recent_titles = [id_to_title[i] for i in recent_ids if i in id_to_title][:8]
+    if not fav_titles and not recent_titles:
+        return False  # tarixi bo'lmagan userga tavsiya AI uchun mazmunsiz, o'tkazib yuboramiz
+    user_context = (
+        f"Sevimlilari: {', '.join(fav_titles) if fav_titles else 'nomaʼlum'}. "
+        f"Yaqinda koʻrganlari: {', '.join(recent_titles) if recent_titles else 'nomaʼlum'}."
+    )
+    ids = await ai_service.recommend_anime_ids(catalog_text, user_context, max_picks=1)
+    ids = [i for i in ids if i in id_to_title]
+    if not ids:
+        return False
+    anime_id = ids[0]
+    title = id_to_title[anime_id]
+    reason = await ai_service.generate_recommendation_reason(title, user_context)
+    reason_text = f"\n\n💡 {reason.strip()}" if reason else ""
+    try:
+        await bot.send_message(
+            user_id,
+            f"🤖 Senga maxsus tavsiya: <b>{title}</b>{reason_text}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="▶️ Ko'rish", callback_data=f"anime_{anime_id}")]
+            ])
+        )
+        await asyncio.to_thread(db.mark_ai_used, user_id)
+        return True
+    except TelegramForbiddenError:
+        await mark_user_left(user_id)
+        return False
+    except Exception:
+        return False
+
+async def _run_ai_push_job(status_message):
+    animes = await asyncio.to_thread(db.get_animes, None, 0, 300)
+    id_to_title = {a["id"]: a["title"] for a in animes}
+    catalog_text = "\n".join(
+        f"ID:{a['id']} | {a['title']} | {a.get('genre','')} | {a.get('year','')}"
+        for a in animes
+    )
+    users = await asyncio.to_thread(db.get_all_active_users)
+    users = users[:AI_PUSH_USER_CAP]
+    sent = 0
+    for user_id in users:
+        ok = await _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text)
+        if ok:
+            sent += 1
+        await asyncio.sleep(BROADCAST_DELAY)
+    try:
+        await status_message.edit_text(f"✅ AI push-tavsiya yuborildi: {sent}/{len(users)} foydalanuvchiga.")
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "admin_ai_push")
+async def admin_ai_push(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    await call.message.edit_text(
+        f"🤖 Eng faol {AI_PUSH_USER_CAP} tagacha foydalanuvchiga, ularning tarixiga "
+        "qarab AI shaxsiy tavsiya yuboradi (tarixi bo'lmaganlar o'tkazib yuboriladi). "
+        "Boshlaymizmi?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Boshlash", callback_data="admin_ai_push_go")],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+        ])
+    )
+
+@dp.callback_query(F.data == "admin_ai_push_go")
+async def admin_ai_push_go(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer()
+    await call.message.edit_text("🤖 AI push-tavsiya boshlandi, bu biroz vaqt olishi mumkin...")
+    asyncio.create_task(_run_ai_push_job(call.message))
+
+@dp.callback_query(F.data == "bc_ai_invite")
+async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
+    """AI-yordamchidan hali foydalanmagan foydalanuvchilarga, AI o'zi
+    yozgan taklif xabarini yuboradi (admin oldindan ko'rib, tasdiqlaydi)."""
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await state.clear()
+    await call.answer()
+    await call.message.edit_text("🤖 Taklif xabari va foydalanuvchilar ro'yxati tayyorlanmoqda...")
+    text = await ai_service.generate_ai_invite_message()
+    if not text:
+        await call.message.edit_text("😕 AI xabar yoza olmadi, birozdan keyin qayta urinib ko'ring.", reply_markup=admin_back())
+        return
+    users = await asyncio.to_thread(db.get_users_never_used_ai)
+    await state.update_data(ai_invite_text=text, ai_invite_users=users)
+    await call.message.edit_text(
+        f"🤖 <b>Tayyor xabar</b> ({len(users)} ta foydalanuvchiga yuboriladi):\n\n{text}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Yuborish", callback_data="bc_ai_invite_send")],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+        ])
+    )
+
+@dp.callback_query(F.data == "bc_ai_invite_send")
+async def bc_ai_invite_send(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    text = data.get("ai_invite_text")
+    users = data.get("ai_invite_users") or []
+    if not text or not users:
+        await call.message.edit_text("❌ Ma'lumot topilmadi, qaytadan urinib ko'ring.", reply_markup=admin_back())
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤖 AI Yordamchini sinab ko'rish", callback_data="ai_menu")]
+    ])
+    sent = 0
+    failed = 0
+    for user_id in users:
+        for attempt in range(2):
+            try:
+                await bot.send_message(user_id, text, reply_markup=kb)
+                sent += 1
+                break
+            except TelegramForbiddenError:
+                await mark_user_left(user_id)
+                failed += 1
+                break
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception:
+                failed += 1
+                break
+        await asyncio.sleep(BROADCAST_DELAY)
+    await call.message.edit_text(
+        f"✅ AI taklif xabari yuborildi.\n📨 Yuborildi: {sent}\n❌ Yuborilmadi: {failed}",
+        reply_markup=admin_back()
     )
 
 @dp.callback_query(F.data == "bc_simple")
@@ -6124,6 +6417,32 @@ async def premium_maintenance_task():
         except Exception as e:
             logger.error(f"Premium eslatma xatosi: {e}")
 
+async def weekly_ai_report_task():
+    """Har 7 kunda bir marta, oxirgi haftalik statistikani AI orqali tahlil
+    qilib, adminga qisqa hisobot yuboradi."""
+    while True:
+        await asyncio.sleep(7 * 24 * 3600)
+        if not ai_service.AI_ENABLED:
+            continue
+        try:
+            s = await asyncio.to_thread(db.get_stats)
+            growth = await asyncio.to_thread(db.get_growth_stats, 7)
+            top_text = ", ".join(f"{a['title']} ({a['views']})" for a in s["top"][:5])
+            stats_context = (
+                f"Jami foydalanuvchi: {s['total']}, faol: {s['active']}, bloklangan: {s['blocked']}. "
+                f"Jami anime: {s['total_animes']}. Eng ko'p ko'rilganlar: {top_text}. "
+                f"Oxirgi 7 kun: " + "; ".join(
+                    f"{g['date']}: {g['new_users']} yangi, {g['views']} ko'rish" for g in growth
+                )
+            )
+            report = await ai_service.generate_weekly_report(stats_context)
+            if report:
+                await bot.send_message(
+                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{report}", parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.error(f"Haftalik AI-hisobot xatosi: {e}")
+
 async def daily_report_task():
     while True:
         await asyncio.sleep(86400)
@@ -6607,6 +6926,102 @@ async def webapp_anime_detail(request):
             ep["is_locked"] = _episode_locked(ep, user_id, prices, is_premium, anime=data)
     return web.json_response(data)
 
+async def webapp_ai_search(request):
+    """GET /api/ai/search?q=...&init_data=... — erkin matn boʻyicha AI qidiruv."""
+    user_id = _webapp_user_id(request)
+    status = await webapp_access_status(user_id)
+    if status["maintenance"]:
+        return web.json_response({"error": "maintenance"}, status=503)
+    if not status["subscribed"]:
+        return web.json_response({"error": "not_subscribed", "channels": status["channels"]}, status=403)
+    if not ai_service.AI_ENABLED:
+        return web.json_response({"error": "ai_disabled"}, status=503)
+    query = (request.query.get("q") or "").strip()
+    if not query:
+        return web.json_response({"error": "boʻsh soʻrov"}, status=400)
+    animes = await asyncio.to_thread(db.get_animes_for_webapp)
+    if not animes:
+        return web.json_response({"results": []})
+    id_to_anime = {a["id"]: a for a in animes}
+    catalog_text = "\n".join(
+        f"ID:{a['id']} | {a['title']} | {a.get('genre','')} | {a.get('year','')} | {(a.get('description') or '')[:80]}"
+        for a in animes
+    )
+    ids = await ai_service.search_anime_ids(query, catalog_text, max_picks=10)
+    results = [id_to_anime[i] for i in ids if i in id_to_anime]
+    if results and user_id:
+        await asyncio.to_thread(db.mark_ai_used, user_id)
+    return web.json_response({"results": results})
+
+async def webapp_ai_reason(request):
+    """GET /api/ai/reason?anime_id=...&init_data=... — 'Nega tavsiya qilindi?'."""
+    user_id = _webapp_user_id(request)
+    status = await webapp_access_status(user_id)
+    if status["maintenance"] or not status["subscribed"]:
+        return web.json_response({"reason": None})
+    if not ai_service.AI_ENABLED:
+        return web.json_response({"reason": None})
+    try:
+        anime_id = int(request.query.get("anime_id"))
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    if not anime:
+        return web.json_response({"reason": None})
+    fav_titles, recent_titles = [], []
+    if user_id:
+        favorite_ids = await asyncio.to_thread(db.get_favorite_ids, user_id) or []
+        recent_ids = await asyncio.to_thread(db.get_recent_anime_ids, user_id, 8) or []
+        id_to_title = {a["id"]: a["title"] for a in await asyncio.to_thread(db.get_animes_for_webapp)}
+        fav_titles = [id_to_title[i] for i in favorite_ids if i in id_to_title][:10]
+        recent_titles = [id_to_title[i] for i in recent_ids if i in id_to_title][:8]
+    user_context = (
+        f"Sevimlilari: {', '.join(fav_titles) if fav_titles else 'nomaʼlum'}. "
+        f"Yaqinda koʻrganlari: {', '.join(recent_titles) if recent_titles else 'nomaʼlum'}."
+    )
+    reason = await ai_service.generate_recommendation_reason(anime["title"], user_context)
+    return web.json_response({"reason": reason.strip() if reason else None})
+
+async def webapp_ai_chat(request):
+    """POST /api/ai/chat {init_data, anime_id, question, history?} — anime
+    detail sahifasidagi spoylersiz mini-chat."""
+    try:
+        data = await request.json()
+        anime_id = int(data.get("anime_id"))
+        question = (data.get("question") or "").strip()
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
+    user = _verified_post_user(data)
+    if not user:
+        return web.json_response({"error": "ruxsat yoq"}, status=403)
+    user_id = int(user["id"])
+    status = await webapp_access_status(user_id)
+    if status["maintenance"]:
+        return web.json_response({"error": "maintenance"}, status=503)
+    if not status["subscribed"]:
+        return web.json_response({"error": "not_subscribed", "channels": status["channels"]}, status=403)
+    if not ai_service.AI_ENABLED:
+        return web.json_response({"error": "ai_disabled"}, status=503)
+    if not question:
+        return web.json_response({"error": "boʻsh savol"}, status=400)
+    if len(question) > 300:
+        return web.json_response({"error": "savol juda uzun (max 300)"}, status=400)
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    if not anime:
+        return web.json_response({"error": "topilmadi"}, status=404)
+    raw_history = data.get("history") or []
+    history = []
+    for turn in raw_history[-8:]:
+        role = turn.get("role")
+        text = turn.get("text")
+        if role in ("user", "model") and text:
+            history.append((role, str(text)[:1000]))
+    answer = await ai_service.chat_about_anime(question, anime["title"], anime.get("description", ""), history)
+    if not answer:
+        return web.json_response({"error": "ai_no_response"}, status=502)
+    await asyncio.to_thread(db.mark_ai_used, user_id)
+    return web.json_response({"answer": answer.strip()})
+
 async def webapp_send_episode(request):
     try:
         data = await request.json()
@@ -6865,8 +7280,39 @@ async def webapp_add_comment(request):
         if not is_safe:
             return web.json_response({"error": "izoh nomaqbul kontent sababli yuborilmadi"}, status=400)
 
-    new_id = await asyncio.to_thread(db.add_comment, anime_id, user_id, username, text, parent_id)
-    return web.json_response({"ok": True, "id": new_id})
+    anime_row = await asyncio.to_thread(db.get_anime, anime_id)
+    spoiler_flag = False
+    if ai_service.AI_ENABLED and anime_row:
+        try:
+            spoiler_flag = await ai_service.is_spoiler(text, anime_row.get("title", ""))
+        except Exception:
+            spoiler_flag = False
+
+    new_id = await asyncio.to_thread(db.add_comment, anime_id, user_id, username, text, parent_id, spoiler_flag)
+
+    # AI orqali savolga avtomatik javob (masalan "qachon davomi chiqadi?")
+    # — asenkron fon vazifasi sifatida, foydalanuvchi javobini kutmasin
+    if ai_service.AI_ENABLED and anime_row and ai_service.looks_like_question(text):
+        asyncio.create_task(_ai_answer_comment(anime_id, new_id, anime_row, text))
+
+    return web.json_response({"ok": True, "id": new_id, "is_spoiler": spoiler_flag})
+
+async def _ai_answer_comment(anime_id, parent_comment_id, anime_row, question_text):
+    """Foydalanuvchi savol-izoh yozganda, mavjud anime ma'lumotlariga
+    asoslanib AI javobini alohida ('🤖 AI Yordamchi' nomidan) izoh sifatida
+    qo'shadi."""
+    try:
+        episodes = await asyncio.to_thread(db.get_episodes, anime_id)
+        answer = await ai_service.answer_comment_question(
+            question_text, anime_row.get("title", ""), anime_row.get("description", ""),
+            anime_row.get("total_episodes"), len(episodes), anime_row.get("status", "")
+        )
+        if answer:
+            await asyncio.to_thread(
+                db.add_comment, anime_id, 0, "🤖 AI Yordamchi", answer.strip(), parent_comment_id
+            )
+    except Exception:
+        logger.exception("[_ai_answer_comment] xato")
 
 async def webapp_toggle_like(request):
     try:
@@ -7259,6 +7705,9 @@ async def start_web_server():
     app.router.add_post("/api/account/delete", webapp_account_delete)
     app.router.add_get("/api/animes", webapp_animes_list)
     app.router.add_get("/api/animes/{anime_id}", webapp_anime_detail)
+    app.router.add_get("/api/ai/search", webapp_ai_search)
+    app.router.add_get("/api/ai/reason", webapp_ai_reason)
+    app.router.add_post("/api/ai/chat", webapp_ai_chat)
     app.router.add_get("/api/photo/{photo_id}", webapp_photo)
     app.router.add_get("/api/sponsor", webapp_sponsor)
     app.router.add_post("/api/send_episode", webapp_send_episode)
@@ -7384,6 +7833,7 @@ async def main():
 
     await start_web_server()
     asyncio.create_task(daily_report_task())
+    asyncio.create_task(weekly_ai_report_task())
     asyncio.create_task(premium_maintenance_task())
     asyncio.create_task(db_keepalive_task())
     asyncio.create_task(db_backup_task())

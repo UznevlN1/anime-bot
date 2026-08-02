@@ -96,6 +96,10 @@ def init_db():
     # Webapp 🔔 bildirishnoma paneli — foydalanuvchi oxirgi ko'rgan bildirishnoma
     # id'si (shundan katta id'li bildirishnomalar "o'qilmagan" hisoblanadi).
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_notification_id INTEGER DEFAULT 0")
+    # AI funksiyalaridan (chat, tavsiya) hech boʻlmasa bir marta foydalanganmi
+    # — foydalanmaganlarga maxsus taklif xabari yuborish uchun.
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_used INTEGER DEFAULT 0")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_used_at TEXT")
 
     # Animlar
     c.execute("""
@@ -144,6 +148,9 @@ def init_db():
         created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
     )""")
     c.execute("ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id INTEGER")
+    # AI orqali spoiler deb aniqlangan izohlar — webapp'da "⚠️ Spoiler" deb
+    # yashirilgan holda ko'rsatilishi mumkin (bosilganda ochiladi)
+    c.execute("ALTER TABLE comments ADD COLUMN IF NOT EXISTS is_spoiler INTEGER DEFAULT 0")
 
     # Izohlarga bosilgan "like"lar
     c.execute("""
@@ -309,6 +316,19 @@ def init_db():
         created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
         processed_at TEXT
     )""")
+
+    # AI suhbat tarixi (ask_ai uchun) — foydalanuvchi bilan oldingi
+    # xabarlarni saqlab, kontekstli suhbat berish uchun. Har foydalanuvchi
+    # uchun faqat oxirgi bir necha xabar saqlanadi (eskilari tozalanadi).
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ai_chat_history (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        role TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ai_chat_history_user ON ai_chat_history(user_id, id DESC)")
 
     # Webapp 🔔 bildirishnoma paneli — yangi qism/anime va admin e'lonlari
     # shu jadvalga yoziladi, webapp uni /api/notifications orqali o'qiydi.
@@ -1360,12 +1380,12 @@ def get_categories():
     return rows
 
 # ===== IZOHLAR =====
-def add_comment(anime_id, user_id, username, text, parent_id=None):
+def add_comment(anime_id, user_id, username, text, parent_id=None, is_spoiler=False):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO comments (anime_id, user_id, username, text, parent_id) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-        (anime_id, user_id, username, text, parent_id)
+        "INSERT INTO comments (anime_id, user_id, username, text, parent_id, is_spoiler) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+        (anime_id, user_id, username, text, parent_id, 1 if is_spoiler else 0)
     )
     new_id = c.fetchone()[0]
     conn.commit()
@@ -1782,3 +1802,67 @@ def export_backup():
         data[t] = [dict(row) for row in c.fetchall()]
     put_conn(conn)
     return data
+
+# ===== AI FUNKSIYALARI =====
+def mark_ai_used(user_id):
+    """Foydalanuvchi AI funksiyasidan (chat yoki tavsiya) birinchi/keyingi
+    marta foydalanganda chaqiriladi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE users SET ai_used=1, ai_used_at=to_char(NOW(),'YYYY-MM-DD HH24:MI:SS') WHERE user_id=%s",
+        (user_id,)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def get_users_never_used_ai():
+    """AI funksiyalaridan hech qachon foydalanmagan, hozir faol (bloklamagan/
+    tark etmagan) foydalanuvchilar ro'yxati — maxsus taklif xabari uchun."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT user_id FROM users
+        WHERE COALESCE(ai_used,0)=0 AND is_blocked=0 AND is_active=1
+    """)
+    rows = [r[0] for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+def add_ai_chat_message(user_id, role, text):
+    """AI suhbat tarixiga bitta xabar qo'shadi va shu foydalanuvchi uchun
+    faqat oxirgi 12 ta xabarni (6 juftlik) saqlab qoladi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO ai_chat_history (user_id, role, text) VALUES (%s,%s,%s)",
+        (user_id, role, text[:4000])
+    )
+    c.execute("""
+        DELETE FROM ai_chat_history WHERE user_id=%s AND id NOT IN (
+            SELECT id FROM ai_chat_history WHERE user_id=%s
+            ORDER BY id DESC LIMIT 12
+        )
+    """, (user_id, user_id))
+    conn.commit()
+    put_conn(conn)
+
+def get_ai_chat_history(user_id, limit=12):
+    """Oxirgi xabarlarni eskisidan yangisiga qarab [(role, text), ...]
+    tartibida qaytaradi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "SELECT role, text FROM ai_chat_history WHERE user_id=%s ORDER BY id DESC LIMIT %s",
+        (user_id, limit)
+    )
+    rows = c.fetchall()
+    put_conn(conn)
+    return list(reversed(rows))
+
+def clear_ai_chat_history(user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM ai_chat_history WHERE user_id=%s", (user_id,))
+    conn.commit()
+    put_conn(conn)
