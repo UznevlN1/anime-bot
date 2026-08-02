@@ -3356,7 +3356,8 @@ def _ffprobe_duration(path):
 
 async def _probe_video_codec(path):
     """Faylning birinchi video oqimi kodek nomini qaytaradi (masalan 'h264',
-    'hevc'). Aniqlab bo'lmasa (fayl buzilgan/ffprobe topa olmadi) None qaytaradi."""
+    'hevc'). Aniqlab bo'lmasa (fayl buzilgan/ffprobe topa olmadi) None qaytaradi
+    va SABABINI logga yozadi (jim qolib ketmaslik uchun)."""
     try:
         out = await asyncio.to_thread(
             subprocess.run,
@@ -3365,31 +3366,56 @@ async def _probe_video_codec(path):
              "-of", "default=noprint_wrappers=1:nokey=1", path],
             capture_output=True, text=True
         )
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[epizod-format] ffprobe (video) ishga tushmadi: {e!r}")
+        return None
+    if out.returncode != 0:
+        logger.warning(f"[epizod-format] ffprobe (video) xato qaytardi: {out.stderr.strip()[:300]}")
+    codec = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
+    return codec or None
+
+async def _probe_audio_codec(path):
+    """Faylning birinchi audio oqimi kodek nomini qaytaradi (masalan 'aac',
+    'ac3'). Audio oqim umuman bo'lmasa yoki aniqlab bo'lmasa None qaytaradi."""
+    try:
+        out = await asyncio.to_thread(
+            subprocess.run,
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "stream=codec_name",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True
+        )
+    except Exception as e:
+        logger.warning(f"[epizod-format] ffprobe (audio) ishga tushmadi: {e!r}")
         return None
     codec = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
     return codec or None
 
-# Brauzerning <video> tegi ishonchli o'ynata oladigan video kodeklar. Agar
-# yuklangan qism shulardan birida bo'lmasa (masalan HEVC/H.265 — Telegram
-# ilovasida yaxshi o'ynaydi, lekin Chrome kabi brauzerlarda odatda ishlamaydi),
-# webapp pleer "Videoni yuklab bo'lmadi" xatosini beradi. Shu sabab bunday
-# holatda avtomatik H.264/AAC'ga o'tkazamiz.
+# Brauzerning <video> tegi ishonchli o'ynata oladigan video/audio kodeklar.
+# Agar yuklangan qismning video YOKI audio oqimi shulardan birida bo'lmasa
+# (eng ko'p uchraydigani: video HEVC/H.265, yoki audio AC3/EAC3/DTS — bularning
+# barchasi Telegram ilovasida yaxshi o'ynaydi, lekin Chrome kabi brauzerlarda
+# odatda ishlamaydi), webapp pleer "Videoni yuklab bo'lmadi" xatosini beradi.
+# Shu sabab bunday holatda avtomatik H.264/AAC'ga o'tkazamiz.
 _BROWSER_SAFE_VIDEO_CODECS = {"h264", "vp9", "vp8", "av1"}
+_BROWSER_SAFE_AUDIO_CODECS = {"aac", "mp3"}
 
 async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None):
-    """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi. Video kodeki
-    brauzer bilan mos kelmasa (H.264 emas — eng ko'p uchraydigani HEVC/H.265),
+    """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi. Video yoki
+    audio kodeki brauzer bilan mos kelmasa (masalan video HEVC yoki audio AC3),
     avtomatik ravishda H.264/AAC'ga o'tkazadi, shundan keyingina saqlaydi —
     aks holda webapp pleer videoni umuman ochira olmaydi (garchi Telegram
     ilovasining o'zida muammosiz o'ynasa ham).
     Har doim STORAGE_CHANNEL'dagi YAKUNIY xabar message_id'sini qaytaradi.
     Tekshirish/o'tkazish jarayonida kutilmagan xato yuz bersa, asl (o'tkazilmagan)
-    video saqlab qolinadi — admin oqimi hech qachon butunlay to'xtamaydi."""
+    video saqlab qolinadi — admin oqimi hech qachon butunlay to'xtamaydi.
+    Har bir bosqich [epizod-format] prefiksi bilan logga yoziladi — Render
+    log qidiruvida shu so'z bo'yicha butun jarayonni kuzatish mumkin."""
     sent = await bot.copy_message(
         STORAGE_CHANNEL, orig_chat_id, orig_message_id,
         caption=caption, parse_mode=None
     )
+    logger.info(f"[epizod-format] boshlandi: STORAGE_CHANNEL xabari={sent.message_id}")
 
     await asyncio.to_thread(os.makedirs, EPISODE_TMP_DIR, exist_ok=True)
     ts = int(time.time() * 1000)
@@ -3400,28 +3426,42 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
         channel_msg = await pyro.get_messages(STORAGE_CHANNEL, sent.message_id)
         media = channel_msg.video or channel_msg.document or channel_msg.animation
         if not media:
+            logger.warning(f"[epizod-format] xabar {sent.message_id}'da media topilmadi — o'zgarishsiz qoldirildi.")
             return sent.message_id
 
+        logger.info(f"[epizod-format] yuklab olinmoqda (hajm={getattr(media, 'file_size', '?')} bayt)...")
         dl_client = _next_stream_client() if _stream_clients else pyro
         await dl_client.download_media(channel_msg, file_name=src_path)
+        logger.info(f"[epizod-format] yuklab olindi: {src_path}")
 
-        codec = await _probe_video_codec(src_path)
-        if codec is None or codec in _BROWSER_SAFE_VIDEO_CODECS:
-            # h264/vp9 va h.k. — brauzer bilan mos, hech narsa qilmaymiz.
-            # Kodekni aniqlab bo'lmasa ham xavfsiz tomondan qolib, o'zgartirmaymiz.
+        v_codec = await _probe_video_codec(src_path)
+        a_codec = await _probe_audio_codec(src_path)
+        logger.info(f"[epizod-format] aniqlangan kodeklar: video={v_codec!r}, audio={a_codec!r}")
+
+        video_ok = v_codec is not None and v_codec in _BROWSER_SAFE_VIDEO_CODECS
+        audio_ok = a_codec is None or a_codec in _BROWSER_SAFE_AUDIO_CODECS
+        if video_ok and audio_ok:
+            logger.info(f"[epizod-format] kodeklar brauzer bilan mos — o'tkazish shart emas.")
+            return sent.message_id
+        if v_codec is None:
+            # ffprobe video oqimini aniqlay olmadi (masalan ffmpeg/ffprobe
+            # o'rnatilmagan yoki fayl buzilgan) — xavfsiz tomondan qolib,
+            # o'zgartirmaymiz, lekin buni ANIQ logga yozamiz.
+            logger.warning(f"[epizod-format] video kodekini aniqlab bo'lmadi — o'tkazishdan voz kechildi (o'zgarishsiz qoldirildi).")
             return sent.message_id
 
         if status_message:
             try:
                 await status_message.answer(
-                    f"🎞 Format ({codec}) ba'zi brauzerlarda ishlamasligi mumkin — "
-                    f"avtomatik H.264'ga o'tkazilmoqda. Fayl hajmiga qarab bu bir necha "
-                    f"daqiqa vaqt olishi mumkin, iltimos kuting..."
+                    f"🎞 Format (video={v_codec}, audio={a_codec}) ba'zi brauzerlarda "
+                    f"ishlamasligi mumkin — avtomatik H.264/AAC'ga o'tkazilmoqda. "
+                    f"Fayl hajmiga qarab bu bir necha daqiqa vaqt olishi mumkin, iltimos kuting..."
                 )
             except Exception:
                 pass
 
         total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
+        logger.info(f"[epizod-format] transkodlash boshlandi (davomiylik={total_dur}s)...")
         await _run_ffmpeg_progress(
             ["ffmpeg", "-y", "-i", src_path,
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -3429,8 +3469,10 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
              "-movflags", "+faststart", out_path],
             total_dur or 0, stall_timeout=180
         )
+        logger.info(f"[epizod-format] transkodlash tugadi: {out_path}")
 
         new_sent = await pyro.send_video(STORAGE_CHANNEL, out_path, caption=caption or "")
+        logger.info(f"[epizod-format] yangi H.264 fayl saqlandi: msg_id={new_sent.id}")
         try:
             await bot.delete_message(STORAGE_CHANNEL, sent.message_id)
         except Exception:
@@ -3438,7 +3480,7 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
         return new_sent.id
     except Exception:
         logger.exception(
-            "Epizod formatini avtomatik tekshirish/o'tkazishda xato — "
+            "[epizod-format] tekshirish/o'tkazishda kutilmagan xato — "
             f"asl video (msg_id={sent.message_id}) o'zgarishsiz saqlab qolindi."
         )
         return sent.message_id
