@@ -302,6 +302,35 @@ async def _ensure_pyro_ready(client):
             logger.error(f"[stream] klientni ishga tushirib bo'lmadi: {e}")
         return False
 
+async def _warmup_stream_clients(channel_msg_id):
+    """Yangi yuklangan/tahrirlangan qism xabarini BARCHA striming ishchi
+    klientlari (_stream_clients, round-robin uchun) darhol "ko'rishini"
+    ta'minlaydi.
+    MUAMMO: video yuklanganda faqat BITTA klient (kodek tekshiruvi uchun
+    ishlatilgan dl_client) orqali o'qilardi. Keyinroq haqiqiy tomoshabin
+    so'rovi round-robin bo'yicha hali bu xabarni ko'rmagan boshqa klientga
+    tushib qolsa, Telegram tomonidagi yangi xabar/fayl-reference propatsiyasi
+    ulgurmasdan xato berardi — ayniqsa YANGI qo'shilgan yoki TAHRIRLANGAN
+    qismlarda ko'p uchraydigan "stream ishlamayapti" holati aynan shundan
+    edi (eski qismlar barcha klientlar allaqachon "ko'rgani" uchun ishlagan).
+    Yechim: yuklashdan darhol keyin har bir klient bilan xabarni va uning
+    birinchi kichik parchasini so'rab, kechikishni tomoshabin o'rniga shu
+    yerda (fonda, admin oqimini bloklamasdan) yutamiz."""
+    if not STREAM_ENABLED or not _stream_clients:
+        return
+    for client in _stream_clients:
+        try:
+            if not await _ensure_pyro_ready(client):
+                continue
+            msg = await client.get_messages(STORAGE_CHANNEL, channel_msg_id)
+            media = (msg.video or msg.document or msg.animation) if msg else None
+            if not media:
+                continue
+            async for _chunk in client.stream_media(msg, limit=1):
+                break
+        except Exception as e:
+            logger.warning(f"[warmup] klient sinxronlanmadi (msg_id={channel_msg_id}): {e}")
+
 # ===================== STATES =====================
 class RegState(StatesGroup):
     phone = State()
@@ -3264,6 +3293,7 @@ async def add_video(message: Message, state: FSMContext):
     )
     video_ids.append(new_msg_id)
     await state.update_data(video_ids=video_ids)
+    asyncio.create_task(_warmup_stream_clients(new_msg_id))
     await message.answer(f"✅ {len(video_ids)}-video kanalga saqlandi. /done yozing yoki davom eting.")
 
 @dp.message(AddAnime.videos, Command("done"))
@@ -3395,6 +3425,7 @@ async def addepi_video(message: Message, state: FSMContext):
     )
     msg_ids.append(new_msg_id)
     await state.update_data(episode_msg_ids=msg_ids)
+    asyncio.create_task(_warmup_stream_clients(new_msg_id))
     await message.answer(f"✅ {ep_num}-qism kanalga saqlandi.")
 
 @dp.message(AddEpisode.videos, Command("done"))
@@ -4149,6 +4180,7 @@ async def epact_new_video(message: Message, state: FSMContext):
     )
     await asyncio.to_thread(db.update_episode, data["edit_ep_id"], new_msg_id)
     await state.clear()
+    asyncio.create_task(_warmup_stream_clients(new_msg_id))
     await message.answer("✅ Qism yangilandi!", reply_markup=admin_keyboard())
 
 # ===================== QIZIQARLI JOY KESISH (AUTO-HIGHLIGHT) =====================
@@ -7986,7 +8018,7 @@ async def start_web_server():
         except (ConnectionResetError, asyncio.CancelledError):
             pass
         except Exception as e:
-            logger.error(f"[stream] kutilmagan xato: {e}")
+            logger.exception(f"[stream] kutilmagan xato: {e}")
         if give_up:
             # Javobni Content-Length'da va'da qilingandan kamroq bayt bilan "tinch"
             # tugatish o'rniga ulanishni ataylab keskin uzamiz. Aks holda ba'zi
