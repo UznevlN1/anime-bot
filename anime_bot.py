@@ -3253,11 +3253,16 @@ async def add_video(message: Message, state: FSMContext):
     data = await state.get_data()
     video_ids = data.get("video_ids", [])
     ep_num = len(video_ids) + 1
-    sent = await bot.copy_message(
-        STORAGE_CHANNEL, message.chat.id, message.message_id,
-        caption=episode_caption(ep_num), parse_mode=None
+    # MUHIM: avval bu yerda to'g'ridan-to'g'ri bot.copy_message ishlatilib,
+    # kodek moslik tekshiruvi (H.264/AAC'ga o'tkazish) butunlay o'tkazib
+    # yuborilar edi — shuning uchun HEVC/AC3 kabi formatdagi raw fayllar
+    # webapp brauzer pleerida umuman ochilmas edi. Endi AddEpisode/EditEpisode
+    # oqimlari bilan bir xil _upload_episode_to_storage ishlatiladi.
+    new_msg_id = await _upload_episode_to_storage(
+        message.chat.id, message.message_id,
+        episode_caption(ep_num), status_message=message
     )
-    video_ids.append(sent.message_id)
+    video_ids.append(new_msg_id)
     await state.update_data(video_ids=video_ids)
     await message.answer(f"✅ {len(video_ids)}-video kanalga saqlandi. /done yozing yoki davom eting.")
 
@@ -7846,29 +7851,45 @@ async def start_web_server():
         if not await _ensure_pyro_ready(pyro):
             return web.Response(text="Onlayn ko'rish vaqtincha ishlamayapti, birozdan so'ng qayta urinib ko'ring", status=503)
 
-        try:
-            msg = await pyro.get_messages(STORAGE_CHANNEL, ep["channel_message_id"])
-        except Exception as e:
-            logger.warning(f"[stream] birinchi urinish muvaffaqiyatsiz ({e}), sinxronlash signali orqali qayta urinilmoqda...")
+        msg = None
+        last_err = None
+        # Yangi yuklangan/tahrirlangan xabar Telegram serverlari o'rtasida
+        # (bot API va Pyrogram/MTProto sessiyasi ba'zan turli data-markazlarga
+        # ulanadi) darhol tarqalmasligi mumkin — shu sabab bitta urinish
+        # ba'zan yetarli emas edi. Endi bir necha marta, ortib boruvchi kutish
+        # bilan qayta uriniladi; faqat birinchi muvaffaqiyatsizlikdan keyin
+        # sinxronlash signali yuboriladi (keraksiz floodni oldini olish uchun).
+        _GET_MSG_RETRIES = 5
+        _GET_MSG_DELAYS = [0.5, 1, 2, 3, 4]
+        for attempt in range(_GET_MSG_RETRIES):
             try:
-                async with _sync_signal_lock:
-                    now = time.time()
-                    if now - _last_sync_signal_ts[0] > _SYNC_SIGNAL_COOLDOWN:
-                        sync_msg = await bot.send_message(STORAGE_CHANNEL, "🔄")
-                        _last_sync_signal_ts[0] = now
-                        await asyncio.sleep(2)
-                        try:
-                            await sync_msg.delete()
-                        except Exception:
-                            pass
-                    else:
-                        # Yaqinda boshqa so'rov allaqachon sinxronlash signali yuborgan —
-                        # takror yubormaymiz, faqat qisqa kutib qayta urinamiz.
-                        await asyncio.sleep(0.5)
                 msg = await pyro.get_messages(STORAGE_CHANNEL, ep["channel_message_id"])
-            except Exception as e2:
-                logger.error(f"[stream] get_messages xato: {e2}")
-                return web.Response(text="Video topilmadi", status=404)
+                if msg and (msg.video or msg.document or msg.animation):
+                    break
+                msg = None
+                raise RuntimeError("xabarda hali media ko'rinmayapti")
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    logger.warning(f"[stream] {attempt+1}-urinish muvaffaqiyatsiz ({e}), sinxronlash signali orqali qayta urinilmoqda...")
+                    try:
+                        async with _sync_signal_lock:
+                            now = time.time()
+                            if now - _last_sync_signal_ts[0] > _SYNC_SIGNAL_COOLDOWN:
+                                sync_msg = await bot.send_message(STORAGE_CHANNEL, "🔄")
+                                _last_sync_signal_ts[0] = now
+                                await asyncio.sleep(2)
+                                try:
+                                    await sync_msg.delete()
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                if attempt < _GET_MSG_RETRIES - 1:
+                    await asyncio.sleep(_GET_MSG_DELAYS[attempt])
+        if not msg:
+            logger.error(f"[stream] get_messages xato (barcha urinishlar tugadi): {last_err}")
+            return web.Response(text="Video topilmadi", status=404)
 
         media = msg.video or msg.document or msg.animation
         if not media:

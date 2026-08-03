@@ -1017,6 +1017,7 @@ def update_episode(episode_id, channel_message_id):
     c.execute("UPDATE episodes SET channel_message_id=%s WHERE id=%s", (channel_message_id, episode_id))
     conn.commit()
     put_conn(conn)
+    _invalidate_animes_cache()
 
 def get_all_episodes_with_anime():
     """Barcha qismlarni tegishli anime nomi bilan birga qaytaradi (video havolalarini
