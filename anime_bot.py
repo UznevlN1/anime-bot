@@ -309,6 +309,7 @@ class RegState(StatesGroup):
 class AddAnime(StatesGroup):
     photo = State()
     title = State()
+    dup_check = State()
     year = State()
     country = State()
     genre = State()
@@ -1812,6 +1813,7 @@ def admin_cat_comm_keyboard():
             InlineKeyboardButton(text="📢 Sponsor baner", callback_data="admin_sponsor", style="primary"),
         ],
         [InlineKeyboardButton(text="🤖 AI push-tavsiya", callback_data="admin_ai_push", style="primary")],
+        [InlineKeyboardButton(text="🔁 Qaytmagan userlarga xabar", callback_data="admin_comeback", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -2446,6 +2448,25 @@ async def ai_chat_stop_cmd(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🚪 Suhbat tugatildi.", reply_markup=main_keyboard())
 
+def _looks_like_catalog_question(text):
+    """Savol botning anime katalogi haqidami — arzon kalit-so'z tekshiruvi
+    (AI chaqirilmasdan oldin). True bo'lsagina katalog AI'ga yuboriladi —
+    aks holda umuman aloqasiz savollarga ham AI "mana bunday animelar bor"
+    deb bekorchi tavsiya qo'shib yubormaydi."""
+    if not text:
+        return False
+    t = text.lower()
+    keywords = [
+        "qanaqa anime", "qanday anime", "qaysi anime", "nima anime",
+        "anime bor", "animelar bor", "anime borm", "animeng",
+        "ro'yxat", "royxat", "roʻyxat", "katalog",
+        "nima ko'r", "nima kor", "nima koʻr", "nimalar bor",
+        "tavsiya qil", "nima tavsiya", "qaysi birini",
+        "sizda bor", "botda bor", "bazangizda", "bazada",
+    ]
+    return any(k in t for k in keywords)
+
+
 @dp.message(AIChatState.chatting)
 async def ai_chat_message(message: Message, state: FSMContext):
     if not await guard_access(message, is_callback=False):
@@ -2460,7 +2481,20 @@ async def ai_chat_message(message: Message, state: FSMContext):
         await bot.send_chat_action(message.chat.id, "typing")
     except Exception:
         pass
-    reply = await ai_service.ask_ai(text, history=history)
+    # Katalogni FAQAT savol shunga aloqador bo'lganda yuboramiz (arzon
+    # kalit-so'z filtri, AI chaqirmasdan) — aks holda AI har bir umuman
+    # aloqasiz savolga ham "mana bunday animelar bor" deb bekorchi
+    # tavsiyalar qo'shib yubormasligi uchun, hamda tokenlarni tejash uchun.
+    catalog_text = None
+    if _looks_like_catalog_question(text):
+        animes = await asyncio.to_thread(db.get_animes_for_webapp)
+        catalog_text = "\n".join(
+            f"{a['title']} ({a.get('year') or 'yil nomaʼlum'}, "
+            f"{a.get('genre') or 'janr nomaʼlum'}, "
+            f"{'film' if a.get('media_type') == 'film' else 'serial'})"
+            for a in animes[:300]
+        )
+    reply = await ai_service.ask_ai(text, history=history, catalog_text=catalog_text)
     if not reply:
         await message.answer(
             "😕 Hozircha javob bera olmadim, birozdan keyin qayta urinib ko'ring.",
@@ -3025,14 +3059,53 @@ async def add_photo(message: Message, state: FSMContext):
 
 @dp.message(AddAnime.title)
 async def add_title(message: Message, state: FSMContext):
-    await state.update_data(title=message.text)
+    title = message.text.strip()
+    await state.update_data(title=title)
+
+    # Dublikatlarni oldini olish: bazadagi nomi o'xshash animelarni topib,
+    # aynan bir xil bo'lishi mumkinligini tekshiramiz (aniq mos kelish
+    # darhol, boshqacha yozilishlar esa AI orqali).
+    candidates = await asyncio.to_thread(db.search_anime, title)
+    candidates = [c for c in candidates if c.get("title")][:5]
+    duplicate_title = None
+    if candidates:
+        cand_titles = [c["title"] for c in candidates]
+        exact = next((t for t in cand_titles if t.strip().lower() == title.lower()), None)
+        if exact:
+            duplicate_title = exact
+        elif ai_service.AI_ENABLED:
+            duplicate_title = await ai_service.find_duplicate_anime(title, cand_titles)
+
+    if duplicate_title:
+        await state.set_state(AddAnime.dup_check)
+        await message.answer(
+            f"⚠️ Bazada shunga o'xshash anime allaqachon bor: \"{duplicate_title}\".\n\n"
+            "Baribir davom etasizmi? (Agar bu yangi fasl yoki boshqa dublyaj bo'lsa, "
+            "davom eting)",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Baribir davom etish", callback_data="adddup_continue")],
+                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_back")],
+            ])
+        )
+        return
+
+    await _add_anime_ask_year(message, state)
+
+async def _add_anime_ask_year(target, state: FSMContext):
     await state.set_state(AddAnime.year)
     kb = None
     if ai_service.AI_ENABLED:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🤖 AI: yil/davlat/janr/tavsifni to'ldirish", callback_data="ai_autofill_meta")]
         ])
-    await message.answer("📅 Yilini yozing:", reply_markup=kb)
+    await target.answer("📅 Yilini yozing:", reply_markup=kb)
+
+@dp.callback_query(AddAnime.dup_check, F.data == "adddup_continue")
+async def add_title_dup_continue(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer()
+    await _add_anime_ask_year(call.message, state)
 
 @dp.callback_query(AddAnime.year, F.data == "ai_autofill_meta")
 async def ai_autofill_meta(call: CallbackQuery, state: FSMContext):
@@ -3667,6 +3740,14 @@ async def banner_delete(call: CallbackQuery):
 class ModerateComment(StatesGroup):
     search_query = State()
 
+class AdminReplyComment(StatesGroup):
+    text = State()
+
+# Admin uchun AI tomonidan taklif qilingan izoh javoblarini vaqtincha
+# saqlaydi (callback_data uzunligi cheklangani uchun to'liq matnni ichida
+# saqlab bo'lmaydi). Kalit — comment_id, qiymat — taklif matnlari ro'yxati.
+_comment_reply_suggestions = {}
+
 @dp.callback_query(F.data == "admin_comments_anime")
 async def admin_comments_anime(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
@@ -3686,11 +3767,15 @@ async def admin_comments_result(message: Message, state: FSMContext):
         await message.answer(f"💬 \"{anime['title']}\" uchun izohlar yo'q.")
         await state.clear()
         return
-    buttons = [[InlineKeyboardButton(
-        text=f"🗑 {(c['username'] or c['user_id'])}: {c['text'][:25]}", callback_data=f"cdel_{c['id']}"
-    )] for c in comments]
+    buttons = []
+    for c in comments:
+        label = f"{(c['username'] or c['user_id'])}: {c['text'][:25]}"
+        row = [InlineKeyboardButton(text=f"🗑 {label}", callback_data=f"cdel_{c['id']}")]
+        if c.get("user_id"):  # botning o'z AI javoblariga (user_id=0) javob berilmaydi
+            row.append(InlineKeyboardButton(text="💬 Javob", callback_data=f"creply_{c['id']}"))
+        buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
-    await message.answer(f"💬 \"{anime['title']}\" izohlari (o'chirish uchun bosing):", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await message.answer(f"💬 \"{anime['title']}\" izohlari (o'chirish yoki javob yozish uchun bosing):", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await state.clear()
 
 @dp.callback_query(F.data.startswith("cdel_"))
@@ -3700,6 +3785,88 @@ async def comment_delete(call: CallbackQuery):
     comment_id = int(call.data.split("_")[1])
     await asyncio.to_thread(db.delete_comment, comment_id)
     await call.answer("✅ Izoh o'chirildi")
+
+@dp.callback_query(F.data.startswith("creply_"))
+async def comment_reply_suggest(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    comment_id = int(call.data.split("_")[1])
+    comment = await asyncio.to_thread(db.get_comment_by_id, comment_id)
+    if not comment:
+        await call.answer("Izoh topilmadi", show_alert=True)
+        return
+    buttons = [[InlineKeyboardButton(text="✍️ O'zim yozaman", callback_data=f"cwrite_{comment_id}")]]
+    if ai_service.AI_ENABLED:
+        await call.answer("🤖 Takliflar tayyorlanmoqda...")
+        suggestions = await ai_service.suggest_comment_replies(
+            comment.get("text") or "", comment.get("anime_title") or ""
+        )
+        _comment_reply_suggestions[comment_id] = suggestions
+        for idx, s in enumerate(suggestions):
+            label = s if len(s) <= 55 else s[:52] + "..."
+            buttons.insert(idx, [InlineKeyboardButton(text=f"💬 {label}", callback_data=f"csend_{comment_id}_{idx}")])
+    else:
+        await call.answer()
+    buttons.append([InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")])
+    text = f"💬 Izoh: \"{(comment.get('text') or '')[:200]}\"\n\nJavob variantini tanlang:"
+    await call.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+@dp.callback_query(F.data.startswith("csend_"))
+async def comment_reply_send(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    _, comment_id_s, idx_s = call.data.split("_")
+    comment_id, idx = int(comment_id_s), int(idx_s)
+    suggestions = _comment_reply_suggestions.get(comment_id) or []
+    if idx >= len(suggestions):
+        await call.answer("Bu taklif eskirgan, qayta urinib ko'ring", show_alert=True)
+        return
+    await call.answer()
+    await _admin_send_comment_reply(call, comment_id, suggestions[idx])
+
+@dp.callback_query(F.data.startswith("cwrite_"))
+async def comment_reply_write(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    comment_id = int(call.data.split("_")[1])
+    await state.set_state(AdminReplyComment.text)
+    await state.update_data(reply_comment_id=comment_id)
+    await call.answer()
+    await call.message.answer("✍️ Javob matnini yozing:")
+
+@dp.message(AdminReplyComment.text)
+async def comment_reply_write_result(message: Message, state: FSMContext):
+    data = await state.get_data()
+    comment_id = data.get("reply_comment_id")
+    await state.clear()
+    if not comment_id:
+        return
+    await _admin_send_comment_reply(message, comment_id, message.text)
+
+async def _admin_send_comment_reply(event, comment_id, reply_text):
+    """Admin javobini izoh sifatida saqlaydi va, imkon bo'lsa, asl izoh
+    egasiga bildirishnoma yuboradi. `event` CallbackQuery yoki Message
+    bo'lishi mumkin — ikkalasida ham javob yozish uchun ishlatiladi."""
+    comment = await asyncio.to_thread(db.get_comment_by_id, comment_id)
+    if not comment:
+        target = event.message if isinstance(event, CallbackQuery) else event
+        await target.answer("❌ Izoh topilmadi (o'chirilgan bo'lishi mumkin).")
+        return
+    await asyncio.to_thread(
+        db.add_comment, comment["anime_id"], ADMIN_ID, "🛡 Admin", reply_text, comment_id
+    )
+    _comment_reply_suggestions.pop(comment_id, None)
+    target = event.message if isinstance(event, CallbackQuery) else event
+    await target.answer(f"✅ Javob yuborildi:\n\n{reply_text}")
+    owner_id = comment.get("user_id")
+    if owner_id and owner_id != ADMIN_ID:
+        try:
+            await bot.send_message(
+                owner_id,
+                f"💬 \"{comment.get('anime_title') or ''}\" ostidagi izohingizga admin javob berdi:\n\n{reply_text}"
+            )
+        except Exception:
+            pass
 
 # ---- O'CHIRISH ----
 @dp.callback_query(F.data == "admin_delete")
@@ -5404,6 +5571,86 @@ async def admin_ai_push_go(call: CallbackQuery):
     await call.answer()
     await call.message.edit_text("🤖 AI push-tavsiya boshlandi, bu biroz vaqt olishi mumkin...")
     asyncio.create_task(_run_ai_push_job(call.message))
+
+# ---- UZOQ VAQT KELMAGAN USERLARGA "QAYTIB KEL" XABARI ----
+COMEBACK_USER_CAP = 150  # bitta yugurishda AI/Telegram limitlarini tejash uchun maksimal user soni
+
+async def _send_comeback_message_to_user(user_id):
+    fav_titles = await asyncio.to_thread(db.get_favorite_titles, user_id, 3)
+    user_context = ", ".join(fav_titles) if fav_titles else ""
+    text = await ai_service.generate_comeback_message(user_context)
+    if not text:
+        return False
+    try:
+        await bot.send_message(user_id, f"🔁 {ai_text_to_html(text.strip())}", parse_mode="HTML")
+        return True
+    except TelegramForbiddenError:
+        await mark_user_left(user_id)
+        return False
+    except Exception:
+        return False
+
+async def _run_comeback_job(status_message, days):
+    users = await asyncio.to_thread(db.get_inactive_users, days, COMEBACK_USER_CAP)
+    sent = 0
+    for u in users:
+        ok = await _send_comeback_message_to_user(u["user_id"])
+        if ok:
+            sent += 1
+        await asyncio.sleep(BROADCAST_DELAY)
+    try:
+        await status_message.edit_text(f"✅ \"Qaytib kel\" xabari yuborildi: {sent}/{len(users)} foydalanuvchiga.")
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "admin_comeback")
+async def admin_comeback(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    await call.message.edit_text(
+        "🔁 Necha kundan beri ko'rinmagan foydalanuvchilarga xabar yuborilsin?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="7 kun", callback_data="comeback_days_7"),
+                InlineKeyboardButton(text="14 kun", callback_data="comeback_days_14"),
+                InlineKeyboardButton(text="30 kun", callback_data="comeback_days_30"),
+            ],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+        ])
+    )
+
+@dp.callback_query(F.data.startswith("comeback_days_"))
+async def admin_comeback_days(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    days = int(call.data.split("_")[-1])
+    await call.answer("🔎 Hisoblanmoqda...")
+    users = await asyncio.to_thread(db.get_inactive_users, days, COMEBACK_USER_CAP)
+    if not users:
+        await call.message.edit_text(f"😕 So'ngi {days} kunda kelmagan foydalanuvchi topilmadi.", reply_markup=admin_back())
+        return
+    await call.message.edit_text(
+        f"🔁 So'ngi {days} kunda ko'rinmagan {len(users)} ta foydalanuvchi topildi "
+        f"(maksimal {COMEBACK_USER_CAP} tagacha shu yugurishda yuboriladi).\n\n"
+        "Har biriga AI shaxsiylashtirilgan \"qaytib kel\" xabarini yozib yuboradi. Boshlaymizmi?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Boshlash", callback_data=f"comeback_go_{days}")],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+        ])
+    )
+
+@dp.callback_query(F.data.startswith("comeback_go_"))
+async def admin_comeback_go(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    days = int(call.data.split("_")[-1])
+    await call.answer()
+    await call.message.edit_text("🔁 \"Qaytib kel\" xabarlari yuborilmoqda, bu biroz vaqt olishi mumkin...")
+    asyncio.create_task(_run_comeback_job(call.message, days))
 
 @dp.callback_query(F.data == "bc_ai_invite")
 async def bc_ai_invite(call: CallbackQuery, state: FSMContext):

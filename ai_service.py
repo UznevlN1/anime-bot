@@ -340,9 +340,12 @@ async def _call_groq(contents, system_instruction=None, temperature=0.7,
         return None
 
 
-async def ask_ai(user_text, history=None, system_instruction=None):
+async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=None):
     """Erkin suhbat uchun javob qaytaradi.
-    history: [("user"|"model", matn), ...] — oldingi xabarlar (ixtiyoriy)."""
+    history: [("user"|"model", matn), ...] — oldingi xabarlar (ixtiyoriy).
+    catalog_text: botdagi haqiqiy animelar ro'yxati (ixtiyoriy) — berilsa,
+    AI 'qanaqa anime bor' kabi savollarga OʻYLAB TOPMASDAN, shu roʻyxatga
+    asoslanib javob beradi."""
     contents = []
     for role, text in (history or []):
         contents.append({"role": role, "parts": [{"text": text}]})
@@ -357,6 +360,21 @@ async def ask_ai(user_text, history=None, system_instruction=None):
         "faktlar, nomlar va tavsiyalar bilan javob ber. Anime bilan bogʻliq "
         "boʻlmagan savollarga ham xuddi shunday chuqur va foydali javob ber."
     )
+    if catalog_text:
+        sys_prompt += (
+            "\n\nBotning HAQIQIY kataloridagi animelar roʻyxati (FAQAT "
+            "shular botda mavjud — bu roʻyxatdan tashqari hech qanday "
+            "animeni \"bizda bor\" deb aytma, oʻylab ham topma):\n"
+            + catalog_text +
+            "\n\nAgar foydalanuvchi \"qanaqa anime bor\", \"nima koʻrsam "
+            "boʻladi\", \"roʻyxat\" kabi savol bersa — shu roʻyxatdan mavzuga "
+            "yoki janrga mos bir nechta nomni aniq aytib ber (ixtiyoriy "
+            "ravishda yil/janrini ham qoʻsh), va 🔍 Qidiruv yoki 📚 Katalog "
+            "tugmasidan toʻliq roʻyxatni koʻrishni maslahat ber. Agar roʻyxat "
+            "boʻsh boʻlsa yoki mos nom topa olmasang, buni rostgoʻylik bilan "
+            "ayt — hech qachon mavjud boʻlmagan sarlavha oʻylab topma."
+        )
+
     return await _call_gemini(contents, system_instruction=sys_prompt,
                                temperature=0.85, max_output_tokens=1800,
                                thinking_level="low")
@@ -537,6 +555,99 @@ async def suggest_anime_metadata(title):
         }
     except Exception:
         return {}
+
+
+async def suggest_comment_replies(comment_text, anime_title="", anime_description=""):
+    """Admin izohga javob yozayotganda tanlashi uchun 2-3 ta tayyor javob
+    varianti taklif qiladi. AI ishlamasa yoki xato bersa, bo'sh ro'yxat
+    qaytariladi — admin baribir qo'lda yozishi mumkin."""
+    context = f"Anime: {anime_title}." if anime_title else ""
+    if anime_description:
+        context += f" Tavsif: {anime_description}"
+    prompt = (
+        f"{context}\n\nFoydalanuvchi anime ostiga shu izohni qoldirdi: "
+        f"\"{comment_text}\"\n\n"
+        "Anime kanali admini nomidan shu izohga javob sifatida yozish "
+        "mumkin bo'lgan 2-3 ta QISQA (1-2 gap), turli ohangdagi (masalan: "
+        "samimiy/rasmiy/hazil-mutoyiba aralash) javob variantini o'zbek "
+        "tilida taklif qil. FAQAT quyidagi JSON formatda javob ber, boshqa "
+        "hech narsa yozma: {\"replies\": [\"...\", \"...\", \"...\"]}"
+    )
+    result = await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.8, max_output_tokens=500, json_mode=True,
+        thinking_level="low",
+    )
+    if not result:
+        return []
+    try:
+        data = json.loads(result)
+        replies = data.get("replies") or []
+        return [str(r).strip() for r in replies if str(r).strip()][:3]
+    except Exception:
+        return []
+
+
+async def generate_comeback_message(user_context):
+    """Uzoq vaqtdan beri botga kirmagan foydalanuvchiga yuboriladigan
+    shaxsiylashtirilgan 'qaytib kel' xabarini yozadi. user_context —
+    foydalanuvchining sevimli animelari haqida qisqa matn (bo'lishi
+    shart emas)."""
+    fav_text = (
+        f"Foydalanuvchining sevimli animelari: {user_context}."
+        if user_context else
+        "Foydalanuvchining sevimli animelari haqida ma'lumot yo'q."
+    )
+    prompt = (
+        "Anime Telegram botida foydalanuvchi ancha vaqtdan beri ko'rinmayapti. "
+        f"{fav_text}\n\n"
+        "Uni botga qaytishga undaydigan, qisqa (2-3 gap), samimiy va "
+        "sog'inch ohangidagi xabar yoz (o'zbek tilida, mos joyda emoji "
+        "bilan). Agar sevimli animelari berilgan bo'lsa, ularga ishora "
+        "qil (masalan yangi qismlar chiqqan bo'lishi mumkinligini "
+        "eslat), lekin aniq raqam yoki sana o'ylab topma. Faqat xabar "
+        "matnini yoz."
+    )
+    return await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.9, max_output_tokens=350, thinking_level="low",
+    )
+
+
+async def find_duplicate_anime(new_title, candidate_titles):
+    """Admin yangi anime qo'shayotganda, DB'da nomi o'xshash animelar
+    topilsa, shulardan qay biri HAQIQATDA bir xil anime ekanini (masalan
+    faqat yozilishi boshqacha yoki fasl/qism raqami qo'shilgan) AI orqali
+    tekshiradi. Aniq bo'lmasa yoki AI ishlamasa, dublikat topilmagan deb
+    hisoblanadi (admin baribir ro'yxatni o'zi ko'radi)."""
+    if not candidate_titles:
+        return None
+    candidates_text = "\n".join(f"- {t}" for t in candidate_titles)
+    prompt = (
+        f"Botga yangi anime qo'shilmoqchi: \"{new_title}\"\n\n"
+        f"Bazada allaqachon mavjud, nomi o'xshash animelar:\n{candidates_text}\n\n"
+        "Shulardan biri yangi qo'shilayotgan anime bilan AYNAN BIR XIL "
+        "(masalan faqat imlo farqi, translit farqi yoki bo'sh joy/tinish "
+        "belgisi farqi bor) ekanligini tekshir. Fasllari yoki qismlari "
+        "boshqa bo'lsa (masalan '2-fasl', 'Season 2'), bu dublikat "
+        "HISOBLANMAYDI. FAQAT quyidagi JSON formatda javob ber, boshqa "
+        "hech narsa yozma: {\"is_duplicate\": true/false, \"matched_title\": "
+        "\"...\" yoki \"\"}"
+    )
+    result = await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.0, max_output_tokens=200, json_mode=True,
+        thinking_level="minimal",
+    )
+    if not result:
+        return None
+    try:
+        data = json.loads(result)
+        if data.get("is_duplicate") and str(data.get("matched_title") or "").strip():
+            return str(data["matched_title"]).strip()
+        return None
+    except Exception:
+        return None
 
 
 async def extract_payment_amount(image_base64, mime_type="image/jpeg"):

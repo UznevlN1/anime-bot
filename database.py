@@ -1077,6 +1077,52 @@ def get_favorite_ids(user_id):
     put_conn(conn)
     return ids
 
+def get_favorite_titles(user_id, limit=3):
+    """Foydalanuvchining eng oxirgi qo'shgan sevimli animelari nomlari —
+    AI'ga shaxsiylashtirilgan xabar (masalan 'qaytib kel') yozdirish uchun
+    kontekst sifatida ishlatiladi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT a.title FROM favorites f
+        JOIN animes a ON a.id = f.anime_id
+        WHERE f.user_id=%s
+        ORDER BY f.created_at DESC
+        LIMIT %s
+        """,
+        (user_id, limit)
+    )
+    titles = [r[0] for r in c.fetchall()]
+    put_conn(conn)
+    return titles
+
+def get_inactive_users(days, limit=200):
+    """Kamida `days` kundan beri hech qanday tomosha faolligi (watch_activity)
+    qayd etilmagan, hali bloklanmagan/tark etmagan foydalanuvchilarni
+    qaytaradi. Faollik bo'lmagan userlar uchun ro'yxatdan o'tgan sana
+    (joined_at) oxirgi faollik sifatida hisoblanadi. Eng uzoq vaqt
+    ko'rinmaganlar birinchi bo'lib qaytariladi."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        """
+        SELECT u.user_id, u.username, u.full_name,
+               COALESCE(MAX(wa.activity_date), u.joined_at::date) AS last_seen
+        FROM users u
+        LEFT JOIN watch_activity wa ON wa.user_id = u.user_id
+        WHERE u.is_active=1 AND u.is_blocked=0
+        GROUP BY u.user_id, u.username, u.full_name, u.joined_at
+        HAVING COALESCE(MAX(wa.activity_date), u.joined_at::date) <= (CURRENT_DATE - %s::int)
+        ORDER BY last_seen ASC
+        LIMIT %s
+        """,
+        (days, limit)
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
 def record_watch_activity(user_id, anime_id):
     conn = get_conn()
     c = conn.cursor()
@@ -1433,6 +1479,24 @@ def toggle_comment_like(comment_id, user_id):
     count = c.fetchone()[0]
     put_conn(conn)
     return liked, count
+
+def get_comment_by_id(comment_id):
+    """Bitta izohni (anime nomi bilan birga) qaytaradi — admin AI-javob
+    takliflarini generatsiya qilishda izoh matni/kontekstiga kerak bo'ladi."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        """
+        SELECT c.*, a.title AS anime_title
+        FROM comments c
+        LEFT JOIN animes a ON a.id = c.anime_id
+        WHERE c.id=%s
+        """,
+        (comment_id,)
+    )
+    row = c.fetchone()
+    put_conn(conn)
+    return dict(row) if row else None
 
 def get_last_comment_at(user_id):
     conn = get_conn()
