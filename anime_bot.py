@@ -5305,25 +5305,40 @@ async def admin_broadcast(call: CallbackQuery, state: FSMContext):
 
 AI_PUSH_USER_CAP = 150  # bepul Gemini kvotasini tejash uchun bitta yugurishda yuboriladigan maksimal user soni
 
-async def _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text):
+async def _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text, popular_ids):
     favorite_ids = await asyncio.to_thread(db.get_favorite_ids, user_id) or []
     recent_ids = await asyncio.to_thread(db.get_recent_anime_ids, user_id, 8) or []
     fav_titles = [id_to_title[i] for i in favorite_ids if i in id_to_title][:10]
     recent_titles = [id_to_title[i] for i in recent_ids if i in id_to_title][:8]
+    seen_ids = set(favorite_ids) | set(recent_ids)
+
     if not fav_titles and not recent_titles:
-        return False  # tarixi bo'lmagan userga tavsiya AI uchun mazmunsiz, o'tkazib yuboramiz
-    user_context = (
-        f"Sevimlilari: {', '.join(fav_titles) if fav_titles else 'nomaʼlum'}. "
-        f"Yaqinda koʻrganlari: {', '.join(recent_titles) if recent_titles else 'nomaʼlum'}."
-    )
-    ids = await ai_service.recommend_anime_ids(catalog_text, user_context, max_picks=1)
-    ids = [i for i in ids if i in id_to_title]
-    if not ids:
-        return False
-    anime_id = ids[0]
-    title = id_to_title[anime_id]
-    reason = await ai_service.generate_recommendation_reason(title, user_context)
-    reason_text = f"\n\n💡 {reason.strip()}" if reason else ""
+        # Tarixi yo'q user — AI'ga shaxsiylashtirish uchun ma'lumot yo'q, shuning
+        # uchun bekorga AI so'rovi (va Gemini kvotasi) sarflamasdan, eng
+        # mashhur (views bo'yicha) animelardan birini tavsiya qilamiz. Avval bu
+        # holatda user butunlay o'tkazib yuborilar edi. Hammasiga bir xil
+        # anime tushib qolmasligi uchun top-5 orasidan user_id bo'yicha tanlaymiz.
+        top_candidates = [i for i in popular_ids[:5] if i in id_to_title]
+        if not top_candidates:
+            return False
+        anime_id = top_candidates[user_id % len(top_candidates)]
+        title = id_to_title[anime_id]
+        reason_text = "\n\n💡 Botimizdagi eng mashhur va ko'p tomosha qilinayotgan animelardan biri!"
+    else:
+        user_context = (
+            f"Sevimlilari: {', '.join(fav_titles) if fav_titles else 'nomaʼlum'}. "
+            f"Yaqinda koʻrganlari: {', '.join(recent_titles) if recent_titles else 'nomaʼlum'}."
+        )
+        ids = await ai_service.recommend_anime_ids(catalog_text, user_context, max_picks=3)
+        # Foydalanuvchi allaqachon sevimliga qo'shgan/ko'rgan animeni qayta
+        # tavsiya qilmaslik uchun filtrlaymiz.
+        ids = [i for i in ids if i in id_to_title and i not in seen_ids]
+        if not ids:
+            return False
+        anime_id = ids[0]
+        title = id_to_title[anime_id]
+        reason = await ai_service.generate_recommendation_reason(title, user_context)
+        reason_text = f"\n\n💡 {ai_text_to_html(reason.strip())}" if reason else ""
     try:
         await bot.send_message(
             user_id,
@@ -5348,11 +5363,14 @@ async def _run_ai_push_job(status_message):
         f"ID:{a['id']} | {a['title']} | {a.get('genre','')} | {a.get('year','')}"
         for a in animes
     )
+    # Tarixi/sevimlisi yo'q userlar uchun zaxira ro'yxat — eng ko'p ko'rilgan
+    # animelar, views bo'yicha kamayish tartibida.
+    popular_ids = [a["id"] for a in sorted(animes, key=lambda a: a.get("views") or 0, reverse=True)]
     users = await asyncio.to_thread(db.get_all_active_users)
     users = users[:AI_PUSH_USER_CAP]
     sent = 0
     for user_id in users:
-        ok = await _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text)
+        ok = await _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text, popular_ids)
         if ok:
             sent += 1
         await asyncio.sleep(BROADCAST_DELAY)
