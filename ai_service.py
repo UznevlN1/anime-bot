@@ -57,12 +57,48 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # mumkin (ular ozroq "aqlli", lekin yengilroq va tezroq).
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
-AI_ENABLED = bool(GEMINI_API_KEY)
+# ===================== GROQ — ZAXIRA (FALLBACK) XIZMATI =====================
+# Gemini (asosiy model + barcha FALLBACK_MODELS) muvaffaqiyatsiz bo'lsa —
+# masalan kvota tugasa, Google tomonidan xizmat vaqtincha to'xtatilsa yoki
+# tarmoq xatosi bo'lsa — so'rov avtomatik ravishda Groq'ga (boshqa provayder,
+# boshqa infratuzilma) yuboriladi. Ikkalasi ham ishlamasa, funksiya baribir
+# xavfsiz "bo'sh" natija qaytaradi.
+#
+# Kalitni https://console.groq.com/keys sahifasidan BEPUL olish mumkin.
+# GROQ_API_KEY o'rnatilmagan bo'lsa, Groq zaxirasi shunchaki chetlab
+# o'tiladi — hech narsa buzilmaydi.
+#
+# Model ID'lar 2026-yil avgust holatiga ko'ra: "llama-3.3-70b-versatile"
+# 2026-08-16'da butunlay o'chiriladi (Groq'ning rasmiy deprecation sahifasi),
+# shu sabab undan foydalanilmadi. O'rniga:
+#   - matn uchun: "openai/gpt-oss-120b" (Groq tavsiya qilgan joriy model)
+#   - rasm (vision, masalan to'lov cheki) uchun: "qwen/qwen3.6-27b"
+#     (hozircha Groq'dagi yagona vision-qo'llovchi model, "preview" holatida —
+#     kelajakda Groq buni ham almashtirishi mumkin, shu sabab environment
+#     variable orqali osongina yangilash imkoni qoldirildi)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_ENABLED = bool(GROQ_API_KEY)
+GROQ_TEXT_MODEL = os.environ.get("GROQ_TEXT_MODEL", "openai/gpt-oss-120b")
+GROQ_VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+AI_ENABLED = bool(GEMINI_API_KEY) or GROQ_ENABLED
 
 if not AI_ENABLED:
     logger.warning(
-        "GEMINI_API_KEY o'rnatilmagan — AI funksiyalari o'chirilgan holda ishlaydi. "
-        "Yoqish uchun Render > Environment > GEMINI_API_KEY qo'shing."
+        "GEMINI_API_KEY ham, GROQ_API_KEY ham o'rnatilmagan — AI funksiyalari "
+        "o'chirilgan holda ishlaydi. Yoqish uchun Render > Environment'ga "
+        "kamida bittasini qo'shing."
+    )
+elif not GEMINI_API_KEY:
+    logger.warning(
+        "GEMINI_API_KEY o'rnatilmagan — faqat Groq orqali ishlaydi "
+        "(asosiy AI xizmati emas, faqat zaxira sifatida mo'ljallangan)."
+    )
+elif not GROQ_ENABLED:
+    logger.info(
+        "GROQ_API_KEY o'rnatilmagan — Gemini butunlay ishlamay qolsa, "
+        "zaxira xizmati bo'lmaydi. Qo'shish uchun: console.groq.com/keys"
     )
 
 
@@ -117,6 +153,15 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
       ishlatilsin."""
     if not AI_ENABLED:
         return None
+
+    if not GEMINI_API_KEY:
+        # Gemini kaliti umuman yo'q — Gemini modellarini sinab ko'rishning
+        # ma'nosi yo'q, to'g'ridan-to'g'ri Groq'ga o'tamiz.
+        return await _call_groq(
+            contents, system_instruction=system_instruction,
+            temperature=temperature, max_output_tokens=max_output_tokens,
+            json_mode=json_mode, timeout=timeout,
+        )
 
     base_generation_config = {
         "temperature": temperature,
@@ -185,7 +230,114 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
                 logger.exception("Gemini (%s) so'rovida xatolik yuz berdi", model_name)
                 break  # keyingi zaxira modelni sinab ko'ramiz
 
-    return None  # barcha modellar muvaffaqiyatsiz bo'ldi
+    # Gemini (asosiy + barcha zaxira modellari) muvaffaqiyatsiz bo'ldi —
+    # oxirgi chora sifatida Groq'ni sinab ko'ramiz (agar ulangan bo'lsa).
+    if GROQ_ENABLED:
+        logger.warning(
+            "Gemini'ning barcha modellari ishlamadi — Groq (%s) zaxira "
+            "sifatida sinalyapti", GROQ_TEXT_MODEL,
+        )
+        groq_result = await _call_groq(
+            contents, system_instruction=system_instruction,
+            temperature=temperature, max_output_tokens=max_output_tokens,
+            json_mode=json_mode, timeout=timeout,
+        )
+        if groq_result:
+            return groq_result
+
+    return None  # Gemini va Groq — ikkalasi ham muvaffaqiyatsiz bo'ldi
+
+
+def _contents_has_image(contents):
+    """contents ichida rasm (inline_data) bor-yo'qligini tekshiradi — Groq'da
+    matn va vision modellari alohida bo'lgani uchun to'g'ri modelni tanlash
+    kerak."""
+    for item in contents:
+        for part in item.get("parts", []):
+            if "inline_data" in part:
+                return True
+    return False
+
+
+def _gemini_contents_to_groq_messages(contents, system_instruction=None):
+    """Gemini formatidagi contents ({"role", "parts": [...]})ni Groq/OpenAI
+    formatidagi messages ({"role", "content": ...})ga o'giradi. Rasm bo'lsa,
+    OpenAI-uslubidagi image_url (data URI) blokiga aylantiradi."""
+    messages = []
+    if system_instruction:
+        messages.append({"role": "system", "content": system_instruction})
+
+    for item in contents:
+        # Gemini'da AI javobi "model" deb ataladi, OpenAI/Groq'da "assistant"
+        role = "assistant" if item.get("role") == "model" else "user"
+        parts = item.get("parts", []) or []
+
+        if len(parts) == 1 and "text" in parts[0] and "inline_data" not in parts[0]:
+            messages.append({"role": role, "content": parts[0]["text"]})
+            continue
+
+        content_blocks = []
+        for part in parts:
+            if "text" in part:
+                content_blocks.append({"type": "text", "text": part["text"]})
+            elif "inline_data" in part:
+                mime = part["inline_data"].get("mime_type", "image/jpeg")
+                data = part["inline_data"].get("data", "")
+                content_blocks.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{data}"},
+                })
+        messages.append({"role": role, "content": content_blocks})
+
+    return messages
+
+
+async def _call_groq(contents, system_instruction=None, temperature=0.7,
+                      max_output_tokens=800, json_mode=False, timeout=25):
+    """Groq (OpenAI-uslubidagi chat completions) API'ga so'rov yuboradi.
+    _call_gemini ichidan ZAXIRA sifatida (yoki GEMINI_API_KEY yo'q bo'lsa
+    to'g'ridan-to'g'ri) chaqiriladi. Xatolik bo'lsa None qaytaradi — bu holda
+    chaqiruvchi funksiyalar (ask_ai, moderate_comment va h.k.) allaqachon
+    xavfsiz "bo'sh natija" bilan ishlashga moslashtirilgan."""
+    if not GROQ_ENABLED:
+        return None
+
+    has_image = _contents_has_image(contents)
+    model_name = GROQ_VISION_MODEL if has_image else GROQ_TEXT_MODEL
+    messages = _gemini_contents_to_groq_messages(contents, system_instruction)
+
+    payload = {
+        "model": model_name,
+        "messages": messages,
+        "temperature": temperature,
+        "max_completion_tokens": max_output_tokens,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+    }
+
+    session = await _get_session()
+    try:
+        async with session.post(
+            GROQ_API_URL, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            data = await resp.json()
+            if resp.status != 200:
+                logger.warning("Groq (%s) xato javob: %s - %s", model_name, resp.status, data)
+                return None
+            choices = data.get("choices") or []
+            if not choices:
+                return None
+            text = (choices[0].get("message", {}).get("content") or "").strip()
+            return text or None
+    except Exception:
+        logger.exception("Groq (%s) so'rovida xatolik yuz berdi", model_name)
+        return None
 
 
 async def ask_ai(user_text, history=None, system_instruction=None):
