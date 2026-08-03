@@ -313,18 +313,31 @@ async def _warmup_stream_clients(channel_msg_id):
     ulgurmasdan xato berardi — ayniqsa YANGI qo'shilgan yoki TAHRIRLANGAN
     qismlarda ko'p uchraydigan "stream ishlamayapti" holati aynan shundan
     edi (eski qismlar barcha klientlar allaqachon "ko'rgani" uchun ishlagan).
-    Yechim: yuklashdan darhol keyin har bir klient bilan xabarni va uning
-    birinchi kichik parchasini so'rab, kechikishni tomoshabin o'rniga shu
-    yerda (fonda, admin oqimini bloklamasdan) yutamiz."""
-    if not STREAM_ENABLED or not _stream_clients:
+    MUHIM (birinchi versiyada xato bo'lgan joy): har bir klient bilan ALOHIDA
+    get_messages chaqirilsa, "channels.GetMessages" metodi uchun Telegram
+    flood-limitiga tez tegib ketiladi — shunda pyrogram butun klientni
+    o'nlab soniyaga "uxlatib" qo'yadi va AYNI SHU VAQTDA boshqa
+    foydalanuvchilarning striming so'rovlari ham osilib qoladi (webapp_stream
+    ichida ham ayni shu klient ishlatiladi). Buning oldini olish uchun
+    get_messages FAQAT BIR MARTA chaqiriladi (webapp_stream'dagi kabi),
+    olingan xabar esa har bir klientning stream_media()'siga qayta
+    ishlatiladi — bu metod GetMessages emas, boshqa (fayl yuklash) so'rovidan
+    foydalanadi, shuning uchun bu yerda floodga olib kelmaydi."""
+    if not STREAM_ENABLED or not _stream_clients or not pyro:
+        return
+    try:
+        if not await _ensure_pyro_ready(pyro):
+            return
+        msg = await pyro.get_messages(STORAGE_CHANNEL, channel_msg_id)
+        media = (msg.video or msg.document or msg.animation) if msg else None
+        if not media:
+            return
+    except Exception as e:
+        logger.warning(f"[warmup] xabarni olib bo'lmadi (msg_id={channel_msg_id}): {e}")
         return
     for client in _stream_clients:
         try:
             if not await _ensure_pyro_ready(client):
-                continue
-            msg = await client.get_messages(STORAGE_CHANNEL, channel_msg_id)
-            media = (msg.video or msg.document or msg.animation) if msg else None
-            if not media:
                 continue
             async for _chunk in client.stream_media(msg, limit=1):
                 break
