@@ -140,7 +140,7 @@ def _apply_thinking_config(generation_config, model_name, thinking_level):
 
 async def _call_gemini(contents, system_instruction=None, temperature=0.7,
                         max_output_tokens=800, json_mode=False, timeout=25,
-                        thinking_level="minimal"):
+                        thinking_level="minimal", is_admin=True):
     """Gemini API'ga xom so'rov yuboradi. Asosiy model xato bersa (band,
     topilmadi va h.k.), zaxira modellar bilan qayta urinadi. Hammasi
     muvaffaqiyatsiz bo'lsa None qaytaradi.
@@ -150,9 +150,36 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
       bu javob tezligiga TO'G'RIDAN-TO'G'RI ta'sir qiladi. Masalan oddiy
       OK/BAD moderatsiya yoki JSON ID ro'yxati tanlashda "minimal" yetarli;
       faqat erkin, chuqurroq fikr talab qiladigan suhbatlarda "low"/"medium"
-      ishlatilsin."""
+      ishlatilsin.
+
+    is_admin: True (standart) — bu so'rov admin uchun (yoki admin panel/
+      backend jarayoni uchun) ekanini bildiradi, bunday holda Gemini
+      ASOSIY model bo'lib qoladi (Groq faqat Gemini butunlay ishlamasa
+      zaxira sifatida ishlatiladi).
+      False — bu oddiy foydalanuvchiga real vaqtda ko'rsatiladigan AI
+      javobi ekanini bildiradi. Bunday holda, agar Groq ulangan bo'lsa,
+      SO'ROV AVVAL GROQ'GA yuboriladi (Gemini kvotasi/resursi admin
+      funksiyalari uchun asrab qolinishi uchun) — Groq ishlamasa yoki
+      bo'sh javob qaytarsa, xavfsizlik uchun baribir Gemini'ga
+      o'tiladi (pastdagi odatiy yo'l)."""
     if not AI_ENABLED:
         return None
+
+    if not is_admin and GROQ_ENABLED:
+        # Oddiy foydalanuvchi so'rovi — Gemini o'rniga birinchi navbatda
+        # Groq sinaladi. Groq muvaffaqiyatsiz bo'lsa, pastdagi odatiy
+        # Gemini yo'liga (zaxira sifatida) o'tiladi.
+        groq_first_result = await _call_groq(
+            contents, system_instruction=system_instruction,
+            temperature=temperature, max_output_tokens=max_output_tokens,
+            json_mode=json_mode, timeout=timeout,
+        )
+        if groq_first_result:
+            return groq_first_result
+        logger.info(
+            "Oddiy foydalanuvchi so'rovi uchun Groq ishlamadi — "
+            "zaxira sifatida Gemini'ga o'tilyapti"
+        )
 
     if not GEMINI_API_KEY:
         # Gemini kaliti umuman yo'q — Gemini modellarini sinab ko'rishning
@@ -377,7 +404,7 @@ async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=
 
     return await _call_gemini(contents, system_instruction=sys_prompt,
                                temperature=0.85, max_output_tokens=1800,
-                               thinking_level="low")
+                               thinking_level="low", is_admin=False)
 
 
 async def moderate_comment(text):
@@ -395,7 +422,7 @@ async def moderate_comment(text):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.0, max_output_tokens=20,
+        temperature=0.0, max_output_tokens=20, is_admin=False,
     )
     if result is None:
         return True
@@ -424,6 +451,37 @@ async def generate_anime_description(title, genre="", year="", country=""):
     )
 
 
+async def translate_description_to_uz(text, anime_title=""):
+    """AniList/Jikan kabi tashqi manbadan kelgan INGLIZCHA anime tavsifini
+    o'zbek tiliga ANIQ (so'zma-so'zga yaqin) tarjima qiladi.
+
+    MUHIM: bu funksiya generate_anime_description'dan farqli — u yangi
+    tavsif "ijod qiladi", bu esa mavjud matnni FAQAT tarjima qiladi.
+    Shu sabab temperature juda past (0.2) qo'yilgan — AI o'zidan gap
+    qo'shib yubormasligi, faktlarni o'zgartirmasligi uchun."""
+    if not text or not text.strip():
+        return ""
+    prompt = (
+        "Quyidagi matn anime tavsifi (ingliz tilida). Uni o'zbek tiliga "
+        "ANIQ va TO'G'RI tarjima qil. Qoidalar:\n"
+        "1. Hech qanday yangi ma'lumot qo'shma, hech narsani o'zgartirma "
+        "yoki qisqartirma — faqat asl matnni tarjima qil.\n"
+        "2. Anime, personaj, joy nomlarini (masalan shaxs ismlari) "
+        "tarjima qilma — asl holida qoldir.\n"
+        "3. HTML teglari (<br>, <i>, <b> va h.k.) bo'lsa, ularni olib "
+        "tashla, faqat toza matn qoldir.\n"
+        "4. Faqat tarjima qilingan matnni yoz — kirish so'zi, izoh yoki "
+        "\"Mana tarjima:\" kabi qo'shimcha yozma.\n\n"
+        f"Anime nomi (kontekst uchun, tarjima qilma): {anime_title or '—'}\n\n"
+        f"Tavsif:\n{text[:2000]}"
+    )
+    result = await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.2, max_output_tokens=900, thinking_level="low",
+    )
+    return (result or "").strip()
+
+
 async def generate_recommendation_reason(anime_title, user_context):
     """Webapp'da 'Nega tavsiya qilindi?' uchun bitta qisqa (5-10 so'zli)
     sabab yozadi. AI ishlamasa yoki xato bersa, None qaytaradi — chaqiruvchi
@@ -437,7 +495,7 @@ async def generate_recommendation_reason(anime_title, user_context):
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.7, max_output_tokens=180,
+        temperature=0.7, max_output_tokens=180, is_admin=False,
     )
 
 
@@ -493,7 +551,7 @@ async def answer_comment_question(question_text, anime_title, anime_description,
     )
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.4, max_output_tokens=350,
+        temperature=0.4, max_output_tokens=350, is_admin=False,
     )
 
 
@@ -696,7 +754,7 @@ async def is_spoiler(text, anime_title=""):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.0, max_output_tokens=20,
+        temperature=0.0, max_output_tokens=20, is_admin=False,
     )
     if result is None:
         return False
@@ -734,7 +792,7 @@ async def pick_anime_by_mood(mood_text, catalog_text, max_picks=3):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.6, max_output_tokens=400, json_mode=True,
+        temperature=0.6, max_output_tokens=400, json_mode=True, is_admin=False,
     )
     if not result:
         return []
@@ -767,7 +825,7 @@ async def search_anime_ids(query, catalog_text, max_picks=10):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.4, max_output_tokens=450, json_mode=True,
+        temperature=0.4, max_output_tokens=450, json_mode=True, is_admin=False,
     )
     if not result:
         return []
@@ -805,7 +863,7 @@ async def chat_about_anime(question, anime_title, anime_description, history=Non
     )
     return await _call_gemini(contents, system_instruction=sys_prompt,
                                temperature=0.7, max_output_tokens=700,
-                               thinking_level="low")
+                               thinking_level="low", is_admin=False)
 
 
 async def recommend_anime_ids(catalog_text, user_context, max_picks=4):
@@ -824,7 +882,7 @@ async def recommend_anime_ids(catalog_text, user_context, max_picks=4):
     )
     result = await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
-        temperature=0.4, max_output_tokens=400, json_mode=True,
+        temperature=0.4, max_output_tokens=400, json_mode=True, is_admin=False,
     )
     if not result:
         return []

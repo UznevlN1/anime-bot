@@ -45,6 +45,7 @@ from pyrogram import Client as PyroClient
 
 import database as db
 import ai_service
+import anime_api
 
 # ===================== SOZLAMALAR =====================
 import os
@@ -3135,11 +3136,9 @@ async def add_title(message: Message, state: FSMContext):
 
 async def _add_anime_ask_year(target, state: FSMContext):
     await state.set_state(AddAnime.year)
-    kb = None
-    if ai_service.AI_ENABLED:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🤖 AI: yil/davlat/janr/tavsifni to'ldirish", callback_data="ai_autofill_meta")]
-        ])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔎 AniList'dan avtomatik to'ldirish", callback_data="ai_autofill_meta")]
+    ])
     await target.answer("📅 Yilini yozing:", reply_markup=kb)
 
 @dp.callback_query(AddAnime.dup_check, F.data == "adddup_continue")
@@ -3153,14 +3152,65 @@ async def add_title_dup_continue(call: CallbackQuery, state: FSMContext):
 async def ai_autofill_meta(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
-    if not ai_service.AI_ENABLED:
-        await call.answer("AI sozlanmagan", show_alert=True)
-        return
-    await call.answer("🤖 Qidirilmoqda...")
+    await call.answer("🔎 AniList'dan qidirilmoqda...")
     data = await state.get_data()
-    meta = await ai_service.suggest_anime_metadata(data.get("title", ""))
+    title = data.get("title", "")
+
+    result = await anime_api.search_anilist(title)
+
+    if result:
+        # AniList'dan HAQIQIY ma'lumot topildi — tavsifni faqat aniq
+        # tarjima qilamiz (o'zimizdan hech narsa qo'shmaymiz/o'ylab
+        # topmaymiz), qolgan maydonlar (yil/janr/mamlakat) to'g'ridan
+        # to'g'ri AniList'dan olinadi.
+        description_uz = ""
+        if result.get("description_en") and ai_service.AI_ENABLED:
+            description_uz = await ai_service.translate_description_to_uz(
+                result["description_en"], anime_title=result.get("title", title)
+            )
+        if not description_uz:
+            description_uz = result.get("description_en", "")
+
+        genre_text = ", ".join(result.get("genres") or [])
+
+        await state.update_data(
+            year=str(result.get("year") or ""),
+            country=result.get("country") or "",
+            genre=genre_text,
+            description=description_uz,
+        )
+        await state.set_state(AddAnime.language)
+        await call.message.answer(
+            "✅ <b>AniList'dan topildi:</b>\n\n"
+            f"📌 Nom: {result.get('title')}\n"
+            f"📅 Yil: {result.get('year') or '—'}\n"
+            f"🌍 Davlat: {result.get('country') or '—'}\n"
+            f"🎭 Janr: {genre_text or '—'}\n"
+            f"⭐️ Reyting: {result.get('score') or '—'}\n"
+            f"📝 Tavsif:\n{description_uz or '—'}\n\n"
+            "✅ Qabul qilindi (noto'g'ri bo'lsa keyinroq \"Tahrirlash\"dan tuzatasiz). "
+            "Endi tilini yozing (masalan: O'zbek, Rus, Yapon):",
+            parse_mode="HTML"
+        )
+        return
+
+    # AniList'da topilmadi — agar AI yoqilgan bo'lsa, eski usul (AI'ning
+    # o'z bilimidan taxmin qilishi) bilan zaxira variantga o'tamiz, lekin
+    # bu holat admin uchun ANIQ ko'rsatiladi (bu ma'lumot tasdiqlanmagan,
+    # ehtiyotkorlik bilan tekshirilishi kerak).
+    if not ai_service.AI_ENABLED:
+        await call.message.answer(
+            "😕 AniList'da bu nom bo'yicha hech narsa topilmadi. "
+            "Iltimos, ma'lumotlarni qo'lda kiriting."
+        )
+        return
+
+    meta = await ai_service.suggest_anime_metadata(title)
     if not meta or not any(meta.values()):
-        await call.message.answer("😕 AI bu anime haqida ma'lumot topa olmadi, iltimos qo'lda kiriting.")
+        await call.message.answer(
+            "😕 AniList'da ham, AI orqali ham bu anime haqida ma'lumot "
+            "topilmadi, iltimos qo'lda kiriting."
+        )
         return
     await state.update_data(
         year=meta.get("year") or "", country=meta.get("country") or "",
@@ -3168,12 +3218,12 @@ async def ai_autofill_meta(call: CallbackQuery, state: FSMContext):
     )
     await state.set_state(AddAnime.language)
     await call.message.answer(
-        "🤖 <b>AI to'ldirdi:</b>\n\n"
+        "⚠️ AniList'da topilmadi, shuning uchun <b>AI taxminiga</b> ko'ra "
+        "to'ldirildi (tekshirib chiqing, xato bo'lishi mumkin):\n\n"
         f"📅 Yil: {meta.get('year') or '—'}\n"
         f"🌍 Davlat: {meta.get('country') or '—'}\n"
         f"🎭 Janr: {meta.get('genre') or '—'}\n"
         f"📝 Tavsif: {meta.get('description') or '—'}\n\n"
-        "✅ Qabul qilindi (noto'g'ri bo'lsa keyinroq \"Tahrirlash\"dan tuzatasiz). "
         "Endi tilini yozing (masalan: O'zbek, Rus, Yapon):",
         parse_mode="HTML"
     )
@@ -4199,7 +4249,7 @@ async def epact_new_video(message: Message, state: FSMContext):
 # ===================== QIZIQARLI JOY KESISH (AUTO-HIGHLIGHT) =====================
 # Ovoz balandligi (RMS) tahliliga asoslanib videoning eng "qiziqarli" (energiyaga
 # eng boy — jang/kulgi/musiqa avjida odatda ovoz balandroq bo'ladi) qismini avtomatik
-# topib, 15/30 soniyalik klip qilib kesib beradi. Chinakam video-tushunish (nima
+# topib, 1 daqiqa/30 soniyalik klip qilib kesib beradi. Chinakam video-tushunish (nima
 # tasvirlanganini "ko'rish") emas — bu audio energiyasiga asoslangan amaliy evristika,
 # lekin jang/kulgi/musiqiy avj kabi joylarni yetarlicha yaxshi topadi.
 #
@@ -5246,7 +5296,7 @@ async def _auto_generate_highlight_clip(message, channel_msg_id):
 def _clip_duration_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="15 soniya", callback_data="clipdur_15"),
+            InlineKeyboardButton(text="1 daqiqa", callback_data="clipdur_60"),
             InlineKeyboardButton(text="30 soniya", callback_data="clipdur_30"),
         ],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
@@ -5260,7 +5310,7 @@ async def clip_start(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         "✂️ <b>Qiziqarli video kesish</b>\n\n"
         "Bot videoning eng \"qiziqarli\" (ovozi eng baland/energiyaga boy — jang, "
-        "kulgi, musiqa avji kabi) joyini avtomatik topib, 15 yoki 30 soniyalik klip "
+        "kulgi, musiqa avji kabi) joyini avtomatik topib, 1 daqiqa yoki 30 soniyalik klip "
         "qilib sizga yuboradi.\n\n"
         "Video qayerdan olinsin?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -5357,7 +5407,7 @@ async def clip_upload_video(message: Message, state: FSMContext):
     await state.set_state(None)
     await message.answer("⏱ Klip davomiyligini tanlang:", reply_markup=_clip_duration_keyboard())
 
-@dp.callback_query(F.data.regexp(r"^clipdur_(15|30)$"))
+@dp.callback_query(F.data.regexp(r"^clipdur_(60|30)$"))
 async def clipdur_selected(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
