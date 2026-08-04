@@ -887,6 +887,13 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
                     f"{ocr.get('amount') or '—'}"
                     + (f", karta •{ocr['card_last4']}" if ocr.get("card_last4") else "")
                 )
+            if ocr and ocr.get("suspicious"):
+                reason = ocr.get("suspicion_reason") or "sabab aniqlanmadi"
+                ai_line += (
+                    f"\n\n⚠️ <b>AI shubha bildirmoqda:</b> ushbu chek "
+                    f"tahrirlangan/qalbaki bo'lishi mumkin — {reason}. "
+                    f"Tasdiqlashdan oldin diqqat bilan tekshiring."
+                )
         except Exception:
             logger.exception("[premium_screenshot_received] AI OCR xatosi")
     caption = (
@@ -1857,6 +1864,7 @@ def admin_cat_comm_keyboard():
         ],
         [InlineKeyboardButton(text="🤖 AI push-tavsiya", callback_data="admin_ai_push", style="primary")],
         [InlineKeyboardButton(text="🔁 Qaytmagan userlarga xabar", callback_data="admin_comeback", style="primary")],
+        [InlineKeyboardButton(text="💎 Premium taklif (faol userlarga)", callback_data="admin_premium_pitch", style="primary")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -3086,6 +3094,25 @@ async def admin_cat_settings(call: CallbackQuery):
         return
     await call.message.edit_text("⚙️ <b>Sozlamalar</b>", reply_markup=admin_cat_settings_keyboard(), parse_mode="HTML")
 
+async def _moderate_uploaded_photo(file_id, status_message=None):
+    """Admin yuklagan rasmni (poster/banner) OMMAGA chiqishdan oldin AI
+    orqali NSFW/nomaqbul kontentga tekshiradi. True qaytarsa — rasm
+    xavfsiz (yoki AI ishlamayapti/xato berdi — bu holda ham xavfsiz deb
+    hisoblanadi, admin oqimi hech qachon AI tufayli butunlay to'xtamasligi
+    kerak). False qaytarsa — rasm rad etilishi kerak, ikkinchi qiymat
+    sabab matni (bo'lishi shart emas)."""
+    if not ai_service.AI_ENABLED:
+        return True, ""
+    try:
+        file = await bot.get_file(file_id)
+        file_bytes = await bot.download_file(file.file_path)
+        img_b64 = base64.b64encode(file_bytes.read()).decode("ascii")
+        safe, reason = await ai_service.moderate_image(img_b64)
+        return safe, reason
+    except Exception:
+        logger.exception("[_moderate_uploaded_photo] tekshiruvda xato — rasm o'zgarishsiz qabul qilindi.")
+        return True, ""
+
 # ---- ANIME QO'SHISH ----
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(call: CallbackQuery, state: FSMContext):
@@ -3096,7 +3123,16 @@ async def admin_add(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AddAnime.photo, F.photo)
 async def add_photo(message: Message, state: FSMContext):
-    await state.update_data(photo_id=message.photo[-1].file_id)
+    file_id = message.photo[-1].file_id
+    safe, reason = await _moderate_uploaded_photo(file_id)
+    if not safe:
+        await message.answer(
+            f"🚫 Bu rasm AI tomonidan nomaqbul deb topildi"
+            + (f" ({reason})" if reason else "")
+            + ".\nIltimos, boshqa rasm yuboring."
+        )
+        return
+    await state.update_data(photo_id=file_id)
     await state.set_state(AddAnime.title)
     await message.answer("📌 Anime nomini yozing:")
 
@@ -3752,7 +3788,16 @@ async def banner_add(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AddBanner.photo, F.photo)
 async def banner_photo(message: Message, state: FSMContext):
-    await state.update_data(photo_id=message.photo[-1].file_id)
+    file_id = message.photo[-1].file_id
+    safe, reason = await _moderate_uploaded_photo(file_id)
+    if not safe:
+        await message.answer(
+            f"🚫 Bu rasm AI tomonidan nomaqbul deb topildi"
+            + (f" ({reason})" if reason else "")
+            + ".\nIltimos, boshqa rasm yuboring."
+        )
+        return
+    await state.update_data(photo_id=file_id)
     await state.set_state(AddBanner.title)
     await message.answer("📌 Banner sarlavhasini yozing:")
 
@@ -5467,6 +5512,7 @@ async def admin_stats(call: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📈 O'sish grafigi", callback_data="admin_growth_chart", style="primary")],
             [InlineKeyboardButton(text="🤖 AI tahlil", callback_data="admin_ai_stats", style="primary")],
+            [InlineKeyboardButton(text="💬 Izohlar trendi (AI)", callback_data="admin_comment_trends", style="primary")],
             [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
         ]),
         parse_mode="HTML"
@@ -5499,6 +5545,47 @@ async def admin_ai_stats(call: CallbackQuery):
         analysis = ai_text_to_html(analysis)
     await call.message.edit_text(
         f"🤖 <b>AI tahlil</b>\n\n{analysis}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "admin_comment_trends")
+async def admin_comment_trends(call: CallbackQuery):
+    """Oxirgi 7 kunlik izohlarga qarab, qaysi anime(lar) haqida shikoyat/
+    maqtov ko'pligini AI orqali tahlil qiladi (haftalik avtomatik hisobotdagi
+    bilan bir xil funksiya, lekin istalgan vaqtda qo'lda ishga tushiriladi)."""
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer()
+    await call.message.edit_text("💬 Izohlar tahlil qilinmoqda...")
+    trend_data = await asyncio.to_thread(db.get_comment_trend_data, 7, 15, 12)
+    if not trend_data:
+        await call.message.edit_text(
+            "😕 Oxirgi 7 kunda tahlil qilish uchun yetarli izoh topilmadi.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
+            ])
+        )
+        return
+    comments_context = "\n\n".join(
+        f"{item['title']} ({item['comment_count']} izoh):\n" +
+        "\n".join(f"- {(t or '')[:200]}" for t in item["comments"])
+        for item in trend_data
+    )
+    trend = await ai_service.analyze_comment_trends(comments_context)
+    if not trend:
+        trend = "😕 AI aniq trend chiqara olmadi, birozdan keyin qayta urinib ko'ring."
+    else:
+        trend = ai_text_to_html(trend)
+    animes_line = ", ".join(f"{item['title']} ({item['comment_count']})" for item in trend_data[:8])
+    await call.message.edit_text(
+        f"💬 <b>Izohlar trendi (so'nggi 7 kun)</b>\n\n{trend}\n\n"
+        f"📋 <i>Eng ko'p izohlangan animelar: {animes_line}</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
         ]),
@@ -5751,6 +5838,90 @@ async def admin_comeback_go(call: CallbackQuery):
     await call.answer()
     await call.message.edit_text("🔁 \"Qaytib kel\" xabarlari yuborilmoqda, bu biroz vaqt olishi mumkin...")
     asyncio.create_task(_run_comeback_job(call.message, days))
+
+# ---- FAOL, LEKIN PREMIUM BO'LMAGAN USERLARGA AI TAKLIF XABARI ----
+PREMIUM_PITCH_USER_CAP = 150  # bitta yugurishda AI/Telegram limitlarini tejash uchun maksimal user soni
+PREMIUM_PITCH_ACTIVE_DAYS = 7  # shu necha kun ichida faol bo'lganlar "issiq auditoriya" hisoblanadi
+
+async def _premium_plan_summary():
+    """AI promptiga beriladigan qisqa narxlar matni — chegirma amalda
+    bo'lsa, chegirmali (effektiv) narx ko'rsatiladi."""
+    prices = await premium_settings()
+    parts = []
+    if prices.get("plan_1m_on"):
+        parts.append(f"1 oy - {fmt_som(prices['1m'])}")
+    if prices.get("plan_3m_on"):
+        parts.append(f"3 oy - {fmt_som(prices['3m'])}")
+    if prices.get("plan_1y_on"):
+        parts.append(f"1 yil - {fmt_som(prices['1y'])}")
+    return ", ".join(parts) + " (reklamasiz tomosha + eksklyuziv qismlarga tezroq kirish)"
+
+async def _send_premium_pitch_to_user(user_id, plan_summary):
+    fav_titles = await asyncio.to_thread(db.get_favorite_titles, user_id, 3)
+    user_context = ", ".join(fav_titles) if fav_titles else ""
+    text = await ai_service.generate_premium_pitch_message(user_context, plan_summary)
+    if not text:
+        return False
+    try:
+        await bot.send_message(
+            user_id, f"💎 {ai_text_to_html(text.strip())}", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Premium haqida", callback_data="premium_menu")]
+            ])
+        )
+        return True
+    except TelegramForbiddenError:
+        await mark_user_left(user_id)
+        return False
+    except Exception:
+        return False
+
+async def _run_premium_pitch_job(status_message):
+    users = await asyncio.to_thread(db.get_active_non_premium_users, PREMIUM_PITCH_ACTIVE_DAYS, PREMIUM_PITCH_USER_CAP)
+    plan_summary = await _premium_plan_summary()
+    sent = 0
+    for u in users:
+        ok = await _send_premium_pitch_to_user(u["user_id"], plan_summary)
+        if ok:
+            sent += 1
+        await asyncio.sleep(BROADCAST_DELAY)
+    try:
+        await status_message.edit_text(f"✅ Premium taklif xabari yuborildi: {sent}/{len(users)} foydalanuvchiga.")
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "admin_premium_pitch")
+async def admin_premium_pitch(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    await call.answer("🔎 Hisoblanmoqda...")
+    users = await asyncio.to_thread(db.get_active_non_premium_users, PREMIUM_PITCH_ACTIVE_DAYS, PREMIUM_PITCH_USER_CAP)
+    if not users:
+        await call.message.edit_text(
+            f"😕 So'ngi {PREMIUM_PITCH_ACTIVE_DAYS} kunda faol bo'lgan, Premium bo'lmagan foydalanuvchi topilmadi.",
+            reply_markup=admin_back()
+        )
+        return
+    await call.message.edit_text(
+        f"💎 So'ngi {PREMIUM_PITCH_ACTIVE_DAYS} kunda faol bo'lgan, Premium bo'lmagan {len(users)} ta "
+        f"foydalanuvchi topildi (maksimal {PREMIUM_PITCH_USER_CAP} tagacha shu yugurishda yuboriladi).\n\n"
+        "Har biriga AI shaxsiylashtirilgan Premium taklifini yozib yuboradi. Boshlaymizmi?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Boshlash", callback_data="premium_pitch_go")],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
+        ])
+    )
+
+@dp.callback_query(F.data == "premium_pitch_go")
+async def admin_premium_pitch_go(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer()
+    await call.message.edit_text("💎 Premium taklif xabarlari yuborilmoqda, bu biroz vaqt olishi mumkin...")
+    asyncio.create_task(_run_premium_pitch_job(call.message))
 
 @dp.callback_query(F.data == "bc_ai_invite")
 async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
@@ -6829,7 +7000,10 @@ async def premium_maintenance_task():
 
 async def weekly_ai_report_task():
     """Har 7 kunda bir marta, oxirgi haftalik statistikani AI orqali tahlil
-    qilib, adminga qisqa hisobot yuboradi."""
+    qilib, adminga qisqa hisobot yuboradi. Shu bilan birga, oxirgi hafta
+    izohlariga qarab qaysi anime(lar) haqida shikoyat/maqtov ko'pligini
+    ham AI orqali tahlil qilib, hisobotga QO'SHIMCHA bo'lim sifatida
+    qo'shadi (izoh yetarli bo'lmasa bu bo'lim o'tkazib yuboriladi)."""
     while True:
         await asyncio.sleep(7 * 24 * 3600)
         if not ai_service.AI_ENABLED:
@@ -6846,9 +7020,23 @@ async def weekly_ai_report_task():
                 )
             )
             report = await ai_service.generate_weekly_report(stats_context)
+            trend_text = ""
+            try:
+                trend_data = await asyncio.to_thread(db.get_comment_trend_data, 7, 15, 12)
+                if trend_data:
+                    comments_context = "\n\n".join(
+                        f"{item['title']} ({item['comment_count']} izoh):\n" +
+                        "\n".join(f"- {(t or '')[:200]}" for t in item["comments"])
+                        for item in trend_data
+                    )
+                    trend = await ai_service.analyze_comment_trends(comments_context)
+                    if trend:
+                        trend_text = f"\n\n💬 <b>Izohlar trendi</b>\n\n{ai_text_to_html(trend)}"
+            except Exception as e:
+                logger.warning(f"Haftalik izohlar trendi tahlili xatosi: {e}")
             if report:
                 await bot.send_message(
-                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{ai_text_to_html(report)}", parse_mode="HTML"
+                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{ai_text_to_html(report)}{trend_text}", parse_mode="HTML"
                 )
         except Exception as e:
             logger.error(f"Haftalik AI-hisobot xatosi: {e}")

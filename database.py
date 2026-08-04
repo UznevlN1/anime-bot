@@ -1098,6 +1098,33 @@ def get_favorite_titles(user_id, limit=3):
     put_conn(conn)
     return titles
 
+def get_active_non_premium_users(days=7, limit=150):
+    """So'nggi `days` kun ichida tomosha faolligi (watch_activity) qayd
+    etilgan, hali Premium bo'lmagan (yoki muddati o'tgan) foydalanuvchilarni
+    qaytaradi — AI Premium-taklif xabari uchun. Eng yaqinda faol bo'lganlar
+    birinchi bo'lib qaytariladi (eng "issiq" auditoriya)."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        """
+        SELECT u.user_id, u.username, u.full_name,
+               MAX(wa.activity_date) AS last_seen
+        FROM users u
+        JOIN watch_activity wa ON wa.user_id = u.user_id
+        WHERE u.is_active=1 AND u.is_blocked=0
+          AND (u.is_premium=0 OR u.is_premium IS NULL
+               OR u.premium_until IS NULL OR u.premium_until < NOW())
+        GROUP BY u.user_id, u.username, u.full_name
+        HAVING MAX(wa.activity_date) >= (CURRENT_DATE - %s::int)
+        ORDER BY last_seen DESC
+        LIMIT %s
+        """,
+        (days, limit)
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
 def get_inactive_users(days, limit=200):
     """Kamida `days` kundan beri hech qanday tomosha faolligi (watch_activity)
     qayd etilmagan, hali bloklanmagan/tark etmagan foydalanuvchilarni
@@ -1462,6 +1489,52 @@ def get_comments(anime_id, limit=50, viewer_id=None):
     rows = [dict(r) for r in c.fetchall()]
     put_conn(conn)
     return rows
+
+def get_comment_trend_data(days=7, max_animes=15, max_comments_per_anime=12):
+    """Oxirgi `days` kun ichida eng ko'p izoh olgan `max_animes` ta animeni
+    va har biridan (eng yangi) `max_comments_per_anime` tagacha izoh
+    matnini qaytaradi — AI'ga haftalik "trend" tahlili (qaysi animega
+    shikoyat/maqtov ko'p) uchun material sifatida. Natija: 
+    [{"anime_id":, "title":, "comment_count":, "comments": [...]}], eng ko'p
+    izoh olgandan kamiga qarab tartiblangan."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        """
+        WITH recent AS (
+            SELECT c.anime_id, c.text,
+                   ROW_NUMBER() OVER (PARTITION BY c.anime_id ORDER BY c.id DESC) AS rn
+            FROM comments c
+            WHERE c.is_deleted = 0
+              AND c.created_at >= to_char(NOW() - (%s || ' days')::interval, 'YYYY-MM-DD')
+        ),
+        counts AS (
+            SELECT anime_id, COUNT(*) AS cnt FROM recent GROUP BY anime_id
+            ORDER BY cnt DESC LIMIT %s
+        )
+        SELECT r.anime_id, a.title, counts.cnt AS comment_count, r.text
+        FROM recent r
+        JOIN counts ON counts.anime_id = r.anime_id
+        JOIN animes a ON a.id = r.anime_id
+        WHERE r.rn <= %s
+        ORDER BY counts.cnt DESC, r.anime_id, r.rn
+        """,
+        (str(days), max_animes, max_comments_per_anime)
+    )
+    rows = c.fetchall()
+    put_conn(conn)
+    grouped = {}
+    order = []
+    for r in rows:
+        aid = r["anime_id"]
+        if aid not in grouped:
+            grouped[aid] = {
+                "anime_id": aid, "title": r["title"],
+                "comment_count": r["comment_count"], "comments": [],
+            }
+            order.append(aid)
+        grouped[aid]["comments"].append(r["text"])
+    return [grouped[aid] for aid in order]
 
 def toggle_comment_like(comment_id, user_id):
     """Like bosilgan/bosilmagan holatini almashtiradi. Yangi holatni (True=liked) qaytaradi."""

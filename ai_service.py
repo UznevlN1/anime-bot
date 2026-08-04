@@ -672,6 +672,78 @@ async def generate_comeback_message(user_context):
     )
 
 
+async def generate_premium_pitch_message(user_context, plan_summary=""):
+    """FAOL, lekin hali Premium sotib olmagan foydalanuvchiga yuboriladigan
+    shaxsiylashtirilgan sotuv taklifini yozadi. generate_comeback_message'dan
+    farqi — bu foydalanuvchi allaqachon botdan faol foydalanmoqda, shuning
+    uchun ohang "qaytib kel" emas, balki "sen bunga loyiqsan, keyingi qadam
+    shu" ruhida bo'lishi kerak. `plan_summary` — narxlar/imkoniyatlar haqida
+    qisqa matn (masalan "1 oy - 15000 so'm, reklamasiz + eksklyuziv
+    qismlar"), bo'lmasa umumiy tarzda yozadi."""
+    fav_text = (
+        f"Foydalanuvchining sevimli animelari: {user_context}."
+        if user_context else
+        "Foydalanuvchining sevimli animelari haqida ma'lumot yo'q."
+    )
+    plan_text = f"\n\nPremium imkoniyatlari: {plan_summary}." if plan_summary else ""
+    prompt = (
+        "Anime Telegram botida foydalanuvchi FAOL (tez-tez kirib turadi), "
+        f"lekin hali Premium sotib olmagan. {fav_text}{plan_text}\n\n"
+        "Unga Premiumga o'tishni taklif qiluvchi, qisqa (2-3 gap), "
+        "do'stona va suhbatdosh ohangdagi xabar yoz (o'zbek tilida, mos "
+        "joyda emoji bilan). Bosim o'tkazma yoki 'chegirma tugayapti' kabi "
+        "yolg'on shoshilinchlik yaratma — buning o'rniga uning faolligini "
+        "e'tirof et va Premium unga qanday qo'shimcha qulaylik berishini "
+        "(masalan reklamasiz tomosha, eksklyuziv qismlarga tezroq kirish) "
+        "tabiiy tarzda eslat. Agar sevimli animelari berilgan bo'lsa, "
+        "ularga ishora qil. Faqat xabar matnini yoz, aniq raqam/muddat "
+        "o'ylab topma (plan_summary'da berilmagan bo'lsa)."
+    )
+    return await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.9, max_output_tokens=350, thinking_level="low",
+    )
+
+
+async def moderate_image(image_base64, mime_type="image/jpeg"):
+    """Admin yuklagan rasmni (anime posteri, banner, sponsor rasmi va h.k.)
+    ochiq foydalanuvchilarga ko'rsatishdan OLDIN NSFW/nomaqbul kontentga
+    tekshiradi. True -> rasm xavfsiz. False -> nomaqbul (yalang'ochlik,
+    haddan tashqari zo'ravonlik/qon, ekstremistik ramzlar va h.k.) deb
+    topildi. AI ishlamasa yoki javob bera olmasa, XAVFSIZ deb hisoblanadi
+    (mavjud admin nazorati baribir asosiy himoya bo'lib qoladi — bu faqat
+    qo'shimcha filtr, admin oqimini butunlay to'xtatib qo'ymasligi kerak)."""
+    if not AI_ENABLED:
+        return True, ""
+    prompt = (
+        "Bu rasm anime saytida OMMAVIY ko'rsatiladi (poster yoki banner "
+        "sifatida). Rasmda quyidagilardan biri bor-yo'qligini tekshir: "
+        "yalang'ochlik yoki jinsiy kontent, haddan tashqari qon/zo'ravonlik, "
+        "ekstremistik/nafrat ramzlari, yoki boshqa umuman nomaqbul kontent "
+        "(oddiy anime uslubidagi jang sahnalari yoki illyustratsiyalar "
+        "MUAMMO EMAS — faqat ANIQ nomaqbul bo'lsa belgila). FAQAT quyidagi "
+        'JSON formatda javob ber: {"safe": true/false, "reason": "..."} '
+        'safe=true bo\'lsa reason bo\'sh ("") qoldirilsin.'
+    )
+    contents = [{
+        "role": "user",
+        "parts": [
+            {"inline_data": {"mime_type": mime_type, "data": image_base64}},
+            {"text": prompt},
+        ],
+    }]
+    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=150, json_mode=True, is_admin=False)
+    if not result:
+        return True, ""
+    try:
+        data = json.loads(result)
+        if data.get("safe") is False:
+            return False, str(data.get("reason") or "").strip()
+        return True, ""
+    except Exception:
+        return True, ""
+
+
 async def find_duplicate_anime(new_title, candidate_titles):
     """Admin yangi anime qo'shayotganda, DB'da nomi o'xshash animelar
     topilsa, shulardan qay biri HAQIQATDA bir xil anime ekanini (masalan
@@ -711,15 +783,37 @@ async def find_duplicate_anime(new_title, candidate_titles):
 async def extract_payment_amount(image_base64, mime_type="image/jpeg"):
     """To'lov skrinshotidan summani (va agar ko'rinsa, karta oxirgi 4 raqamini)
     o'qiydi — adminga tasdiqlashni tezlashtirish uchun, YAKUNIY qaror baribir
-    admin tomonidan qabul qilinadi (bu faqat yordamchi taxmin)."""
+    admin tomonidan qabul qilinadi (bu faqat yordamchi taxmin).
+    Shu bir xil (qo'shimcha so'rov yubormasdan, tezlik uchun) vizual
+    tekshiruvda skrinshot QALBAKI/TAHRIRLANGAN bo'lishi mumkinligini
+    ko'rsatuvchi belgilarni ham baholaydi (mos kelmagan shrift, notekis
+    joylashuv/piksellashuv, bank ilovasi dizayniga mos kelmaslik va h.k.)
+    va natijaga `suspicious`/`suspicion_reason` maydonlarini qo'shadi.
+    MUHIM: bu ham faqat YORDAMCHI signal — yakuniy qaror admin qo'lida
+    qoladi, chunki AI xato taxmin qilishi (ayniqsa siqilgan/pastroq
+    sifatli skrinshotlarda) mumkin."""
     if not AI_ENABLED:
         return None
     prompt = (
         "Bu to'lov cheki/skrinshoti. Undagi PUL SUMMASINI (raqam, valyuta "
         "bilan) top. Agar ko'rinib tursa, karta raqamining oxirgi 4 "
-        "raqamini ham top. FAQAT quyidagi JSON formatda javob ber: "
-        '{"amount": "...", "card_last4": "..."} Aniq o\'qiy olmasangan '
-        'maydonni bo\'sh ("") qoldir, hech narsa o\'ylab topma.'
+        "raqamini ham top.\n\n"
+        "Shuningdek, skrinshot QALBAKI/TAHRIRLANGAN (masalan Photoshop yoki "
+        "boshqa tahrirlash ilovasida raqamlar/matn o'zgartirilgan) bo'lishi "
+        "mumkinligini ko'rsatuvchi ANIQ vizual belgilarni tekshir: matn "
+        "atrofidagi mos kelmagan shrift/o'lcham/rang, notekis fon yoki "
+        "piksellashuv chegaralari, ustma-ust qo'yilgan/joylashuvi noto'g'ri "
+        "matn qatorlari, bank ilovasi interfeysiga (tugmalar, joylashuv, "
+        "shrift uslubi) mos kelmaydigan elementlar, yoki mantiqsiz "
+        "sana/vaqt/raqam formati. E'tibor bering: siqilgan, pastroq "
+        "sifatli yoki qorong'i skrinshot BU YOLG'ON belgi EMAS — faqat "
+        "ANIQ tahrirlash izlari ko'rinsa shubhali deb belgila, taxmin "
+        "qilma.\n\n"
+        "FAQAT quyidagi JSON formatda javob ber: "
+        '{"amount": "...", "card_last4": "...", "suspicious": true/false, '
+        '"suspicion_reason": "..."} Aniq o\'qiy olmasangan maydonni bo\'sh '
+        '("") qoldir. suspicious=false bo\'lsa suspicion_reason ham bo\'sh '
+        'qoldirilsin.'
     )
     contents = [{
         "role": "user",
@@ -728,7 +822,7 @@ async def extract_payment_amount(image_base64, mime_type="image/jpeg"):
             {"text": prompt},
         ],
     }]
-    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=200, json_mode=True)
+    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=250, json_mode=True)
     if not result:
         return None
     try:
@@ -736,6 +830,8 @@ async def extract_payment_amount(image_base64, mime_type="image/jpeg"):
         return {
             "amount": str(data.get("amount") or "").strip(),
             "card_last4": str(data.get("card_last4") or "").strip(),
+            "suspicious": bool(data.get("suspicious")),
+            "suspicion_reason": str(data.get("suspicion_reason") or "").strip(),
         }
     except Exception:
         return None
@@ -774,6 +870,35 @@ async def generate_weekly_report(stats_context):
     return await _call_gemini(
         [{"role": "user", "parts": [{"text": prompt}]}],
         temperature=0.6, max_output_tokens=900,
+    )
+
+
+async def analyze_comment_trends(comments_context):
+    """Haftalik hisobotga QO'SHIMCHA bo'lim — oxirgi hafta izohlariga qarab
+    qaysi anime(lar) haqida eng ko'p SHIKOYAT (past sifat, tarjima xatosi,
+    reklama ko'pligi va h.k.) va qaysi(lar) haqida eng ko'p MAQTOV borligini
+    aniqlaydi. `comments_context` — har bir anime nomi va unga yozilgan
+    izohlar namunasidan iborat matn (tayyorlovchi tomon bazadan yig'ib
+    beradi). Izohlar yetarli bo'lmasa yoki AI aniq xulosa chiqara olmasa,
+    None qaytaradi (bo'sh/asossiz hisobot yozib chalkashtirmaslik uchun)."""
+    if not (comments_context or "").strip():
+        return None
+    prompt = (
+        "Quyida anime Telegram bot/webapp'ida oxirgi hafta ichida turli "
+        f"animelarga yozilgan foydalanuvchi izohlari berilgan (anime nomi "
+        f"bo'yicha guruhlangan):\n\n{comments_context}\n\n"
+        "Shu izohlarga asoslanib admin uchun QISQA (3-5 gap, o'zbek tilida) "
+        "tahlil yoz: qaysi anime(lar) haqida eng ko'p SHIKOYAT/salbiy fikr "
+        "bor va NIMA sababdan (masalan past video sifat, tarjima xatosi, "
+        "qismlar yetishmasligi, reklama ko'pligi), qaysi anime(lar) haqida "
+        "eng ko'p MAQTOV/ijobiy fikr bor. FAQAT izohlarda HAQIQATDA "
+        "ko'ringan naqllarga tayan — hech narsa o'ylab topma. Agar aniq "
+        "trend ko'rinmasa (izohlar juda kam yoki neytral), shuni ochiq "
+        "yoz. Faqat tahlil matnini yoz, sarlavha qo'ymasdan."
+    )
+    return await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.3, max_output_tokens=500, thinking_level="low",
     )
 
 
