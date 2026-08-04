@@ -2499,6 +2499,71 @@ async def ai_chat_stop_cmd(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🚪 Suhbat tugatildi.", reply_markup=main_keyboard())
 
+_BOT_INFO_SETTINGS_KEYS = [
+    "profile_support_url", "premium_price_1m", "premium_price_3m",
+    "premium_price_1y", "premium_referral_bonus_days",
+]
+
+
+async def _build_bot_info_text():
+    """AI-yordamchiga ('AI bilan suhbat' rejimida) botning HAQIQIY
+    boʻlimlari va joriy Premium narxlari haqida toʻgʻri maʼlumot beradi —
+    aks holda AI botning oʻzi haqida (masalan narxlar yoki referal bonusi
+    haqida) taxminiy yoki eskirgan narsa aytib qoʻyishi mumkin edi. Narxlar
+    va bonus kunlar bazadan (admin istalgan vaqt oʻzgartirishi mumkin
+    boʻlgan sozlamalardan) olinadi — kodga qattiq yozib qoʻyilmagan."""
+    settings = await asyncio.to_thread(db.get_settings, _BOT_INFO_SETTINGS_KEYS)
+    price_1m = settings.get("premium_price_1m")
+    price_3m = settings.get("premium_price_3m")
+    price_1y = settings.get("premium_price_1y")
+    bonus_days = settings.get("premium_referral_bonus_days")
+    support_url = settings.get("profile_support_url")
+
+    lines = [
+        "Bot nomi: AniFilm Bot — anime va kino/serial tomosha qilish uchun "
+        "Telegram bot + mini-ilova (webapp).",
+        "Asosiy boʻlimlar/tugmalar:",
+        "- 🔍 Qidiruv — anime nomi boʻyicha qidiruv",
+        "- 🎬 Anime Film / 📺 Anime Serial — turlari boʻyicha roʻyxat",
+        "- 🎲 Random — tasodifiy anime tavsiya qiladi",
+        "- 🎌 «Animelarni koʻrish» tugmasi mini-ilovani ochadi: u yerda "
+        "barcha animelar/kategoriyalar, ❤️ Sevimlilar, 🕒 Tomosha tarixi "
+        "(qaysi joyida toʻxtaganingiz eslab qolinadi), 💬 har bir anime "
+        "ostiga izoh qoldirish, 👤 Profil (statistika, obunalar, "
+        "sozlamalar) mavjud",
+        "- 🔔 «Xabardor qil» — anime sahifasida bosilsa, shu animega yangi "
+        "qism yoki jonli efir qoʻshilganda foydalanuvchiga shaxsiy xabar "
+        "keladi",
+    ]
+    premium_lines = [
+        "- 💎 Premium — reklamasiz tomosha, oldindan chiqqan qismlar va "
+        "premium-only kontentga kirish imkonini beradi."
+    ]
+    price_parts = []
+    if price_1m:
+        price_parts.append(f"1 oy — {price_1m} soʻm")
+    if price_3m:
+        price_parts.append(f"3 oy — {price_3m} soʻm")
+    if price_1y:
+        price_parts.append(f"1 yil — {price_1y} soʻm")
+    if price_parts:
+        premium_lines.append("  Joriy narxlar: " + ", ".join(price_parts) + ".")
+    if bonus_days:
+        premium_lines.append(
+            f"  Doʻstingizni referal havolangiz orqali taklif qilsangiz, u "
+            f"roʻyxatdan oʻtganda sizga {bonus_days} kun bonus Premium "
+            f"qoʻshiladi (havolani Premium boʻlimida topasiz)."
+        )
+    lines.extend(premium_lines)
+    lines.append(
+        "Buyruqlar: /start — botni qayta ishga tushirish / bosh menu, "
+        "/help — yordam xabari."
+    )
+    if support_url:
+        lines.append(f"Savol yoki muammo boʻlsa murojaat: {support_url}")
+    return "\n".join(lines)
+
+
 def _looks_like_catalog_question(text):
     """Savol botning anime katalogi haqidami — arzon kalit-so'z tekshiruvi
     (AI chaqirilmasdan oldin). True bo'lsagina katalog AI'ga yuboriladi —
@@ -2545,7 +2610,10 @@ async def ai_chat_message(message: Message, state: FSMContext):
             f"{'film' if a.get('media_type') == 'film' else 'serial'})"
             for a in animes[:300]
         )
-    reply = await ai_service.ask_ai(text, history=history, catalog_text=catalog_text)
+    bot_info_text = await _build_bot_info_text()
+    reply = await ai_service.ask_ai(
+        text, history=history, catalog_text=catalog_text, bot_info_text=bot_info_text
+    )
     if not reply:
         await message.answer(
             "😕 Hozircha javob bera olmadim, birozdan keyin qayta urinib ko'ring.",

@@ -1331,6 +1331,21 @@ def get_setting(key):
     put_conn(conn)
     return row[0] if row else None
 
+def get_settings(keys):
+    """Bir nechta sozlamani BITTA so'rovda oladi — get_setting()ni bir necha
+    marta ketma-ket chaqirib, ortiqcha DB round-trip qilmaslik uchun (masalan
+    AI-yordamchiga bot haqida kontekst tayyorlashda bir nechta sozlama
+    kerak bo'lganda). Natija: {key: value} lug'at — bazada topilmagan
+    kalitlar lug'atda umuman bo'lmaydi (get_setting'dagi kabi None emas)."""
+    if not keys:
+        return {}
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT key, value FROM settings WHERE key = ANY(%s)", (list(keys),))
+    rows = c.fetchall()
+    put_conn(conn)
+    return {k: v for k, v in rows}
+
 def set_setting(key, value):
     conn = get_conn()
     c = conn.cursor()
