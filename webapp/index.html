@@ -22,6 +22,18 @@
   --gold:#f5c542;
   --glow:rgba(74,222,128,.4);
   --glow-red:rgba(239,68,68,.4);
+  --neon-purple:#a855f7;
+  --neon-purple2:#c084fc;
+  --neon-purple-glow:rgba(168,85,247,.4);
+  --neon-pink:#ec4899;
+  --neon-pink2:#f472b6;
+  --neon-pink-glow:rgba(236,72,153,.4);
+  --neon-blue:#3b82f6;
+  --neon-blue2:#60a5fa;
+  --neon-blue-glow:rgba(59,130,246,.4);
+  --neon-orange:#f59e0b;
+  --neon-orange2:#fb923c;
+  --neon-orange-glow:rgba(245,158,11,.4);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--purple2);outline-offset:2px;}
@@ -130,8 +142,6 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 /* Sections */
 .section{padding:22px 18px 0;}
 .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
-.section-title-row{display:flex;align-items:center;gap:8px;min-width:0;}
-.section-icon{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;flex:none;}
 .section-title{font-size:16px;font-weight:800;}
 .section-link{font-size:12px;color:var(--purple2);font-weight:700;}
 .sort-pill{display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.32);color:var(--purple2);font-size:12.5px;font-weight:800;letter-spacing:.1px;padding:7px 13px;border-radius:20px;white-space:nowrap;transition:background .15s,transform .1s;}
@@ -157,9 +167,9 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .play-circle{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;color:#111;font-size:13px;}
 
 .rank-badge{position:absolute;top:8px;left:8px;width:24px;height:24px;border-radius:8px;background:var(--bg-card2);color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);}
-.rank-badge.r1{background:linear-gradient(135deg,var(--red2),var(--red));box-shadow:0 3px 10px var(--glow-red);}
-.rank-badge.r2{background:#8b8b9c;color:#0a0a0f;}
-.rank-badge.r3{background:#e08a3c;color:#0a0a0f;}
+.rank-badge.r1{background:linear-gradient(135deg,var(--neon-pink2),var(--neon-pink));box-shadow:0 3px 10px var(--neon-pink-glow);}
+.rank-badge.r2{background:linear-gradient(135deg,var(--neon-purple2),var(--neon-purple));color:#fff;box-shadow:0 3px 10px var(--neon-purple-glow);}
+.rank-badge.r3{background:linear-gradient(135deg,var(--neon-orange2),var(--neon-orange));color:#0a0a0f;box-shadow:0 3px 10px var(--neon-orange-glow);}
 .card-stats{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);margin-top:2px;}
 
 .fav-btn{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:rgba(10,10,15,.55);backdrop-filter:blur(4px);border:none;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;}
@@ -174,6 +184,32 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .card-ep-pill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:var(--text-dim);}
 .card-ep-pill b{color:var(--purple2);font-weight:800;}
 .fav-btn.active{color:#ff5c7a;}
+
+/* Neon-box — bo'lim atrofidagi rangli ramka/nur qutisi (yangi dizayn) */
+.neon-box{position:relative;border-radius:20px;padding:16px 14px 18px;border:1.3px solid var(--nb-border,rgba(255,255,255,.1));background:linear-gradient(180deg,var(--nb-bg,transparent) 0%,rgba(255,255,255,0) 65%);box-shadow:0 8px 26px var(--nb-shadow,transparent),inset 0 0 0 1px rgba(255,255,255,.02);}
+.neon-box .section-head{margin-bottom:12px;}
+.neon-purple-box{--nb-border:rgba(168,85,247,.4);--nb-shadow:rgba(168,85,247,.16);--nb-bg:rgba(168,85,247,.08);}
+.neon-pink-box{--nb-border:rgba(236,72,153,.4);--nb-shadow:rgba(236,72,153,.16);--nb-bg:rgba(236,72,153,.08);}
+.neon-blue-box{--nb-border:rgba(59,130,246,.4);--nb-shadow:rgba(59,130,246,.16);--nb-bg:rgba(59,130,246,.08);}
+
+/* Har bir kartaga aylanma (purple/pink/blue) neon ramka — Yangi qo'shilganlar va Sizga tavsiya qatorlari */
+#newRow>.card:nth-child(3n+1) .card-img-wrap,#recommendRow>.card:nth-child(3n+1) .card-img-wrap{border:1.5px solid var(--neon-purple);box-shadow:0 0 14px var(--neon-purple-glow);}
+#newRow>.card:nth-child(3n+2) .card-img-wrap,#recommendRow>.card:nth-child(3n+2) .card-img-wrap{border:1.5px solid var(--neon-pink);box-shadow:0 0 14px var(--neon-pink-glow);}
+#newRow>.card:nth-child(3n) .card-img-wrap,#recommendRow>.card:nth-child(3n) .card-img-wrap{border:1.5px solid var(--neon-blue);box-shadow:0 0 14px var(--neon-blue-glow);}
+#newRow>.card:nth-child(3n+1) .badge-new{background:linear-gradient(135deg,var(--neon-purple2),var(--neon-purple));box-shadow:0 3px 10px var(--neon-purple-glow);}
+#newRow>.card:nth-child(3n+2) .badge-new{background:linear-gradient(135deg,var(--neon-pink2),var(--neon-pink));box-shadow:0 3px 10px var(--neon-pink-glow);}
+#newRow>.card:nth-child(3n) .badge-new{background:linear-gradient(135deg,var(--neon-blue2),var(--neon-blue));box-shadow:0 3px 10px var(--neon-blue-glow);}
+#newRow>.card:nth-child(3n+1) .ep-range-badge,#recommendRow>.card:nth-child(3n+1) .ep-range-badge{border-color:rgba(168,85,247,.5);}
+#newRow>.card:nth-child(3n+1) .ep-range-badge svg,#newRow>.card:nth-child(3n+1) .ep-range-badge .ep-num,#recommendRow>.card:nth-child(3n+1) .ep-range-badge svg,#recommendRow>.card:nth-child(3n+1) .ep-range-badge .ep-num{color:var(--neon-purple2);}
+#newRow>.card:nth-child(3n+2) .ep-range-badge,#recommendRow>.card:nth-child(3n+2) .ep-range-badge{border-color:rgba(236,72,153,.5);}
+#newRow>.card:nth-child(3n+2) .ep-range-badge svg,#newRow>.card:nth-child(3n+2) .ep-range-badge .ep-num,#recommendRow>.card:nth-child(3n+2) .ep-range-badge svg,#recommendRow>.card:nth-child(3n+2) .ep-range-badge .ep-num{color:var(--neon-pink2);}
+#newRow>.card:nth-child(3n) .ep-range-badge,#recommendRow>.card:nth-child(3n) .ep-range-badge{border-color:rgba(59,130,246,.5);}
+#newRow>.card:nth-child(3n) .ep-range-badge svg,#newRow>.card:nth-child(3n) .ep-range-badge .ep-num,#recommendRow>.card:nth-child(3n) .ep-range-badge svg,#recommendRow>.card:nth-child(3n) .ep-range-badge .ep-num{color:var(--neon-blue2);}
+
+/* Mashhur qatori — pink/purple/orange, reyting raqamlari bilan mos */
+#popularRow>.card:nth-child(3n+1) .card-img-wrap{border:1.5px solid var(--neon-pink);box-shadow:0 0 14px var(--neon-pink-glow);}
+#popularRow>.card:nth-child(3n+2) .card-img-wrap{border:1.5px solid var(--neon-purple);box-shadow:0 0 14px var(--neon-purple-glow);}
+#popularRow>.card:nth-child(3n) .card-img-wrap{border:1.5px solid var(--neon-orange);box-shadow:0 0 14px var(--neon-orange-glow);}
 
 /* Grid (all animes / search results) */
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
@@ -542,18 +578,24 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   </div>
 
   <div class="section" id="newSection">
-    <div class="section-head"><div class="section-title-row"><span class="section-icon" style="background:rgba(139,92,246,.18);color:#a78bfa;">⚡</span><div class="section-title">Yangi qo'shilganlar</div></div></div>
-    <div class="row-scroll" id="newRow"></div>
+    <div class="neon-box neon-purple-box">
+      <div class="section-head"><div class="section-title">Yangi qo'shilganlar</div></div>
+      <div class="row-scroll" id="newRow"></div>
+    </div>
   </div>
 
   <div class="section" id="popularSection">
-    <div class="section-head"><div class="section-title-row"><span class="section-icon" style="background:rgba(239,68,68,.16);color:var(--red2);">⭐</span><div class="section-title">Mashhur</div></div></div>
-    <div class="row-scroll" id="popularRow"></div>
+    <div class="neon-box neon-pink-box">
+      <div class="section-head"><div class="section-title">Mashhur</div></div>
+      <div class="row-scroll" id="popularRow"></div>
+    </div>
   </div>
 
   <div class="section" id="recommendSection" style="display:none;">
-    <div class="section-head"><div class="section-title-row"><span class="section-icon" style="background:rgba(59,130,246,.18);color:#60a5fa;">👍</span><div class="section-title">Sizga tavsiya</div></div></div>
-    <div class="row-scroll" id="recommendRow"></div>
+    <div class="neon-box neon-blue-box">
+      <div class="section-head"><div class="section-title">Sizga tavsiya</div></div>
+      <div class="row-scroll" id="recommendRow"></div>
+    </div>
   </div>
 
   <div class="section" id="allSection">
