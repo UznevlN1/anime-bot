@@ -96,17 +96,30 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .seg-btn{flex:1;padding:11px 4px;border-radius:12px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .seg-btn.active{background:linear-gradient(135deg,var(--purple2),var(--purple));border-color:var(--purple);color:#fff;box-shadow:0 3px 10px var(--glow);}
 
-/* Hero */
-.hero-wrap{padding:14px 18px 0;}
-.hero{position:relative;border-radius:20px;overflow:hidden;height:230px;background:#111;display:flex;flex-direction:column;justify-content:flex-end;padding:18px;}
-.hero-badge{align-self:flex-start;background:linear-gradient(135deg,var(--red2),var(--red));color:#fff;font-size:10px;font-weight:800;letter-spacing:.5px;padding:5px 10px;border-radius:8px;margin-bottom:auto;box-shadow:0 3px 10px var(--glow-red);}
-.hero-title{font-size:21px;font-weight:800;margin-bottom:4px;text-shadow:0 2px 8px rgba(0,0,0,.6);}
+/* Hero — Carousel Card (yon tomonlarda keyingi/oldingi karta qisman koʻrinib turadi) */
+.hero-wrap{padding:14px 0 0;position:relative;}
+.hero-track{display:flex;gap:12px;overflow-x:scroll;scroll-snap-type:x mandatory;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding:0 9%;}
+.hero-track::-webkit-scrollbar{display:none;}
+.hero-slide{position:relative;flex:none;width:82%;scroll-snap-align:center;border-radius:20px;overflow:hidden;height:230px;background:#111;display:flex;flex-direction:column;justify-content:flex-end;padding:18px;opacity:.48;transform:scale(.92);transition:opacity .28s ease,transform .28s ease;}
+.hero-slide.active{opacity:1;transform:scale(1);}
+.hero-badge{align-self:flex-start;background:linear-gradient(135deg,var(--purple2),var(--purple));color:#fff;font-size:10px;font-weight:800;letter-spacing:.5px;padding:5px 10px;border-radius:8px;margin-bottom:auto;box-shadow:0 3px 10px var(--glow);}
+.hero-title{font-size:20px;font-weight:800;margin-bottom:4px;text-shadow:0 2px 8px rgba(0,0,0,.6);}
 .hero-sub{font-size:12px;color:#d8d8e4;margin-bottom:12px;}
 .hero-actions{display:flex;gap:10px;}
+.hero-slide:not(.active) .hero-badge,.hero-slide:not(.active) .hero-sub,.hero-slide:not(.active) .hero-actions,.hero-slide:not(.active) .hero-progress-row{display:none;}
 .btn-primary{background:linear-gradient(135deg,var(--purple2),var(--purple));color:#fff;border:none;border-radius:11px;padding:11px 18px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px var(--glow);}
 .btn-ghost{background:rgba(255,255,255,.1);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:11px;padding:11px 14px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;}
+/* 5-variantdagi progress chiziqcha — faqat foydalanuvchi haqiqatan koʻra boshlagan
+   (davom etayotgan) animeda, saqlangan epizod raqami asosida chiqadi. */
+.hero-progress-row{display:flex;align-items:center;gap:8px;margin-top:12px;}
+.hero-progress{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.2);overflow:hidden;}
+.hero-progress i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--purple2),var(--purple));}
+.hero-progress-pct{font-size:11px;font-weight:800;color:var(--purple2);white-space:nowrap;}
+.hero-nav{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;background:rgba(10,10,15,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.14);color:#fff;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;z-index:2;}
+.hero-nav.prev{left:6px;}
+.hero-nav.next{right:6px;}
 .hero-dots{display:flex;justify-content:center;gap:6px;padding:12px 0 2px;}
-.hero-dot{width:6px;height:6px;border-radius:50%;background:var(--border);}
+.hero-dot{width:6px;height:6px;border-radius:50%;background:var(--border);transition:width .2s,background .2s;}
 .hero-dot.active{width:16px;background:var(--purple);}
 
 /* Sections */
@@ -507,15 +520,9 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   <div class="chip-row" id="categoryRow" style="display:none;"></div>
 
   <div id="heroSection" class="hero-wrap">
-    <div class="hero" id="heroCard">
-      <div class="hero-badge" id="heroBadge">TRENDING</div>
-      <div class="hero-title" id="heroTitle">Yuklanmoqda...</div>
-      <div class="hero-sub" id="heroSub"></div>
-      <div class="hero-actions">
-        <button class="btn-primary" id="heroPlay">▶ Tomosha qilish</button>
-        <button class="btn-ghost" id="heroInfo">ⓘ Batafsil</button>
-      </div>
-    </div>
+    <button class="hero-nav prev" id="heroPrev" aria-label="Oldingi">‹</button>
+    <button class="hero-nav next" id="heroNext" aria-label="Keyingi">›</button>
+    <div class="hero-track" id="heroTrack"></div>
     <div class="hero-dots" id="heroDots"></div>
   </div>
 
@@ -955,6 +962,10 @@ function applySort(items){
 let CATEGORIES=[];
 let BANNERS=[];
 let heroList=[]; let heroIdx=0; let heroTimer=null;
+let heroSlideEls=[]; let heroAutoplayPaused=false; let heroResumeTimer=null;
+// anime_id -> foydalanuvchi saqlagan oxirgi epizod raqami (hero'dagi "davom
+// etayotgan" progress-chiziqchasi shu asosida hisoblanadi).
+let CONTINUE_MAP={};
 
 /* ---------- skeleton loading placeholders ---------- */
 function skeletonRow(elId,count){
@@ -967,13 +978,10 @@ function skeletonRow(elId,count){
 }
 function skeletonHero(){
   document.getElementById('heroSection').style.display='';
-  const hc=document.getElementById('heroCard');
-  hc.classList.add('skel');
-  hc.style.backgroundImage='none';
-  document.getElementById('heroTitle').textContent='';
-  document.getElementById('heroSub').textContent='';
+  document.getElementById('heroTrack').innerHTML='<div class="hero-slide skel" style="width:100%;margin:0;opacity:1;transform:none;"></div>';
   document.getElementById('heroDots').innerHTML='';
-  document.querySelector('.hero-actions').style.display='none';
+  document.getElementById('heroPrev').style.display='none';
+  document.getElementById('heroNext').style.display='none';
 }
 function skeletonHome(){
   skeletonHero();
@@ -1008,6 +1016,19 @@ async function loadFavoritesFromServer(){
     const res=await fetch(`/api/favorites?${initDataQS()}`);
     if(res.ok){const data=await res.json();SERVER_FAVS=data.ids||[];}
   }catch(e){/* localStorage keshi bilan davom etamiz */}
+}
+// Hero'dagi progress-chiziqcha uchun: foydalanuvchi qaysi animeda qaysi
+// epizodgacha koʻrgani (anime_id -> episode_number).
+async function loadContinueMapFromServer(){
+  try{
+    const res=await fetch(`/api/history?limit=20&${initDataQS()}`);
+    if(res.ok){
+      const data=await res.json();
+      const map={};
+      (data.items||[]).forEach(it=>{if(it.episode_number!=null)map[it.anime_id]=it.episode_number;});
+      CONTINUE_MAP=map;
+    }
+  }catch(e){/* progress-chiziqcha shunchaki koʻrsatilmaydi */}
 }
 // Umumiy tomosha vaqtini "1 soat 30 daqiqa" / "45 daqiqa" / "1 soat" koʻrinishida,
 // har doim toʻliq va tushunarli qilib formatlaydi (soniyalar asosida — aniqroq).
@@ -1299,6 +1320,45 @@ function pickAutoFeatured(list, count=5, periodDays=3){
   }
   return picked;
 }
+function heroTypeLabel(f){
+  return f.media_type==='film'?'Film':`${f.episode_count||0}/${f.total_episodes||f.episode_count||0}-epizod`;
+}
+// Faqat foydalanuvchi haqiqatan koʻra boshlagan (CONTINUE_MAP'da bor) animeda
+// haqiqiy saqlangan epizod raqami / jami epizod asosida foiz hisoblanadi —
+// bannerlarga yoki hali koʻrilmagan animega soxta/tasodifiy foiz chiqarilmaydi.
+function heroProgressPct(f){
+  if(f.kind!=='anime')return null;
+  const watchedEp=CONTINUE_MAP[f.id];
+  const total=f.total_episodes||f.episode_count;
+  if(!watchedEp||!total)return null;
+  const pct=Math.round(Math.min(100,(watchedEp/total)*100));
+  return pct>0?pct:null;
+}
+function heroSlideHTML(f,i){
+  const targetId=f.kind==='banner'?f.anime_id:f.id;
+  const safeTitle=escapeHtml(f.title);
+  const bg=`linear-gradient(160deg,rgba(10,10,15,.15),#0a0a0f 92%),url(${posterUrl(f)})`;
+  let badgeText,subText;
+  if(f.kind==='banner'){
+    badgeText='E\'LON';
+    subText=escapeHtml(f.subtitle||'');
+  }else{
+    badgeText='TRENDING';
+    subText=`${heroTypeLabel(f)} • ${f.year||''} • ${escapeHtml(f.genre||'')}`;
+  }
+  const pct=heroProgressPct(f);
+  const progressHTML=pct!=null?`<div class="hero-progress-row"><div class="hero-progress"><i style="width:${pct}%"></i></div><span class="hero-progress-pct">${pct}%</span></div>`:'';
+  return `<div class="hero-slide${i===0?' active':''}" data-target="${targetId||''}" style="background-image:${bg};background-size:cover;background-position:center;">
+    <div class="hero-badge">${badgeText}</div>
+    <div class="hero-title">${safeTitle}</div>
+    <div class="hero-sub">${subText}</div>
+    <div class="hero-actions">
+      <button class="btn-primary" data-hero-play>▶ Tomosha qilish</button>
+      <button class="btn-ghost" data-hero-info>ⓘ Batafsil</button>
+    </div>
+    ${progressHTML}
+  </div>`;
+}
 function renderHero(list){
   if(BANNERS.length){
     heroList=BANNERS.map(b=>({
@@ -1309,38 +1369,76 @@ function renderHero(list){
     heroList=pickAutoFeatured(list,5,3).map(a=>({kind:'anime',...a}));
   }
   heroIdx=0;
-  document.getElementById('heroCard').classList.remove('skel');
-  if(!heroList.length){document.getElementById('heroSection').style.display='none';return;}
+  const track=document.getElementById('heroTrack');
+  if(!heroList.length){document.getElementById('heroSection').style.display='none';track.innerHTML='';return;}
   document.getElementById('heroSection').style.display='';
+  track.innerHTML=heroList.map((f,i)=>heroSlideHTML(f,i)).join('');
+  heroSlideEls=Array.from(track.children);
+  heroSlideEls.forEach(slide=>{
+    const targetId=slide.dataset.target;
+    if(!targetId)return;
+    const openFn=()=>openDetail(Number(targetId));
+    slide.querySelector('[data-hero-play]').addEventListener('click',openFn);
+    slide.querySelector('[data-hero-info]').addEventListener('click',openFn);
+  });
   const dots=document.getElementById('heroDots');dots.innerHTML='';
   heroList.forEach((_,i)=>{const dd=document.createElement('div');dd.className='hero-dot'+(i===0?' active':'');dots.appendChild(dd);});
-  paintHero();
+  track.scrollLeft=0;
+  const multi=heroList.length>1;
+  document.getElementById('heroPrev').style.display=multi?'':'none';
+  document.getElementById('heroNext').style.display=multi?'':'none';
   if(heroTimer)clearInterval(heroTimer);
-  if(heroList.length>1)heroTimer=setInterval(()=>{heroIdx=(heroIdx+1)%heroList.length;paintHero();},5000);
+  if(multi)heroTimer=setInterval(heroAutoplayTick,5000);
 }
-function paintHero(){
-  const f=heroList[heroIdx];if(!f)return;
-  document.getElementById('heroTitle').textContent=f.title;
-  const hc=document.getElementById('heroCard');
-  const heroActions=document.querySelector('.hero-actions');
-  const badge=document.getElementById('heroBadge');
-  const targetId=f.kind==='banner'?f.anime_id:f.id;
-  if(f.kind==='banner'){
-    badge.textContent='E\'LON';
-    document.getElementById('heroSub').textContent=f.subtitle||'';
-    heroActions.style.display=targetId?'flex':'none';
-  }else{
-    badge.textContent='TRENDING';
-    const typeLabel=f.media_type==='film'?'Film':`${f.episode_count||0}/${f.total_episodes||f.episode_count||0}-epizod`;
-    document.getElementById('heroSub').textContent=`${typeLabel} • ${f.year||''} • ${f.genre||''}`;
-    heroActions.style.display='flex';
-  }
-  hc.style.backgroundImage=`linear-gradient(160deg,rgba(10,10,15,.15),#0a0a0f 92%),url(${posterUrl(f)})`;
-  hc.style.backgroundSize='cover';hc.style.backgroundPosition='center';
-  document.getElementById('heroPlay').onclick=()=>{if(targetId)openDetail(targetId);};
-  document.getElementById('heroInfo').onclick=()=>{if(targetId)openDetail(targetId);};
+function heroAutoplayTick(){
+  if(heroAutoplayPaused)return;
+  goToHeroSlide((heroIdx+1)%heroList.length);
+}
+function goToHeroSlide(i){
+  if(!heroSlideEls.length)return;
+  heroIdx=((i%heroList.length)+heroList.length)%heroList.length;
+  const track=document.getElementById('heroTrack');
+  const slide=heroSlideEls[heroIdx];
+  track.scrollTo({left:slide.offsetLeft-(track.clientWidth-slide.offsetWidth)/2,behavior:'smooth'});
+  paintHeroActive();
+}
+function paintHeroActive(){
+  heroSlideEls.forEach((s,i)=>s.classList.toggle('active',i===heroIdx));
   document.querySelectorAll('.hero-dot').forEach((d,i)=>d.classList.toggle('active',i===heroIdx));
 }
+function pauseHeroAutoplay(){
+  heroAutoplayPaused=true;
+  if(heroResumeTimer)clearTimeout(heroResumeTimer);
+}
+function resumeHeroAutoplaySoon(){
+  if(heroResumeTimer)clearTimeout(heroResumeTimer);
+  heroResumeTimer=setTimeout(()=>{heroAutoplayPaused=false;},4000);
+}
+(function(){
+  const track=document.getElementById('heroTrack');
+  let scrollTimer=null;
+  // Barmoq bilan sudralganda (yoki avtomatik scrollTo tugagach) qaysi karta
+  // markazga eng yaqinligini aniqlab, active/dot holatini shunga moslaymiz.
+  track.addEventListener('scroll',()=>{
+    clearTimeout(scrollTimer);
+    scrollTimer=setTimeout(()=>{
+      if(!heroSlideEls.length)return;
+      const center=track.scrollLeft+track.clientWidth/2;
+      let best=0,bestDist=Infinity;
+      heroSlideEls.forEach((s,i)=>{
+        const dist=Math.abs((s.offsetLeft+s.offsetWidth/2)-center);
+        if(dist<bestDist){bestDist=dist;best=i;}
+      });
+      heroIdx=best;
+      paintHeroActive();
+    },120);
+  },{passive:true});
+  track.addEventListener('touchstart',pauseHeroAutoplay,{passive:true});
+  track.addEventListener('touchend',resumeHeroAutoplaySoon,{passive:true});
+  track.addEventListener('touchcancel',resumeHeroAutoplaySoon,{passive:true});
+  document.getElementById('heroPrev').addEventListener('click',()=>{pauseHeroAutoplay();goToHeroSlide(heroIdx-1);resumeHeroAutoplaySoon();});
+  document.getElementById('heroNext').addEventListener('click',()=>{pauseHeroAutoplay();goToHeroSlide(heroIdx+1);resumeHeroAutoplaySoon();});
+})();
 
 /* ---------- rows ---------- */
 function renderRow(elId,list,variantFn){
@@ -2569,7 +2667,8 @@ async function init(){
       fetchJSON(`${API}/animes?${initDataQS()}`),
       fetchJSON(`${API}/banners?${initDataQS()}`).catch(()=>[]),
       fetchJSON(`${API}/categories?${initDataQS()}`).catch(()=>[]),
-      loadFavoritesFromServer()
+      loadFavoritesFromServer(),
+      loadContinueMapFromServer()
     ]);
     ALL_ANIME=animes;BANNERS=banners||[];CATEGORIES=categories||[];
     renderHome(ALL_ANIME);
@@ -2675,6 +2774,8 @@ async function init(){
     el.addEventListener('touchcancel',end,{passive:true});
   }
   document.querySelectorAll('.row-scroll').forEach(enableDragScroll);
+  const heroTrackEl=document.getElementById('heroTrack');
+  if(heroTrackEl)enableDragScroll(heroTrackEl);
 })();
 
 /* ---------- scroll qilganda tabbar yashirish/koʻrsatish ---------- */
