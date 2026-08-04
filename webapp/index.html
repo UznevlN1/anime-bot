@@ -189,16 +189,20 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .view.active{display:block;}
 
 /* Detail */
-.detail-hero{position:relative;height:340px;background:#111;}
-.detail-hero img{width:100%;height:100%;object-fit:cover;}
-.detail-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,15,0) 40%,var(--bg) 96%);}
+.detail-hero{position:relative;height:250px;background:#111;overflow:hidden;}
+.detail-hero-bg{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);object-fit:cover;filter:blur(3px) brightness(.72) saturate(1.05);transform:scale(1.04);}
+.detail-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,10,15,.05) 0%,rgba(10,10,15,.35) 45%,var(--bg) 96%);}
 .detail-back{position:absolute;top:calc(16px + var(--tg-content-safe-area-inset-top,0px) + var(--tg-safe-area-inset-top,0px));left:16px;width:44px;height:44px;border-radius:50%;background:rgba(10,10,15,.55);backdrop-filter:blur(10px);border:1.5px solid rgba(245,197,66,.55);color:var(--gold);font-size:19px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.4),inset 0 0 0 1px rgba(245,197,66,.08);}
 .detail-fav{position:absolute;top:calc(16px + var(--tg-content-safe-area-inset-top,0px) + var(--tg-safe-area-inset-top,0px));right:16px;width:44px;height:44px;border-radius:50%;background:rgba(10,10,15,.55);backdrop-filter:blur(10px);border:1.5px solid rgba(245,197,66,.3);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 4px 14px rgba(0,0,0,.4);}
 .detail-fav.active{color:#ff5c7a;border-color:rgba(255,92,122,.5);}
-.detail-body{padding:0 18px;margin-top:-56px;position:relative;z-index:1;}
-.detail-title{font-family:'Playfair Display',serif;font-size:27px;line-height:1.12;font-weight:900;letter-spacing:.3px;margin-bottom:12px;text-shadow:0 3px 14px rgba(0,0,0,.75),0 0 26px rgba(245,197,66,.18);}
-.detail-meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
-.meta-chip{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14);padding:6px 12px;border-radius:20px;font-size:11.5px;font-weight:700;color:var(--text-dim);white-space:nowrap;}
+.detail-body{padding:0 18px;margin-top:-92px;position:relative;z-index:1;}
+.detail-top-row{display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;}
+.detail-poster-card{flex:none;width:112px;border-radius:14px;overflow:hidden;background:var(--bg-card);border:2px solid rgba(245,197,66,.7);box-shadow:0 10px 26px rgba(0,0,0,.55),0 0 18px rgba(245,197,66,.22);}
+.detail-poster-card img{display:block;width:100%;aspect-ratio:3/4.2;object-fit:cover;}
+.detail-top-info{flex:1;min-width:0;padding-bottom:2px;}
+.detail-title{font-family:'Playfair Display',serif;font-size:20px;line-height:1.14;font-weight:900;letter-spacing:.2px;margin-bottom:9px;text-shadow:0 3px 14px rgba(0,0,0,.75),0 0 26px rgba(245,197,66,.18);}
+.detail-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:0;}
+.meta-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14);padding:5px 10px;border-radius:20px;font-size:10.5px;font-weight:700;color:var(--text-dim);white-space:nowrap;}
 .meta-chip svg{flex:none;opacity:.85;}
 .meta-chip.gold{background:rgba(245,197,66,.14);border-color:rgba(245,197,66,.45);color:var(--gold);}
 .meta-chip.live{background:rgba(74,222,128,.12);border-color:rgba(74,222,128,.4);color:var(--purple2);}
@@ -745,13 +749,18 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 
 <main id="view-detail" class="view">
   <div class="detail-hero">
-    <img id="detailImg" src="" alt="">
+    <img id="detailImg" class="detail-hero-bg" src="" alt="">
     <button class="detail-back" id="detailBack" aria-label="Orqaga"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button>
     <button class="detail-fav" id="detailFav" aria-label="Sevimlilarga qo'shish"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.4-10-9.3C.6 7.4 2.5 4 6.4 4c2 0 3.7 1 5.6 3 1.9-2 3.6-3 5.6-3 3.9 0 5.8 3.4 4.4 7.2-2.5 4.9-10 9.3-10 9.3z"/></svg></button>
   </div>
   <div class="detail-body">
-    <div class="detail-title" id="detailTitle"></div>
-    <div class="detail-meta" id="detailMeta"></div>
+    <div class="detail-top-row">
+      <div class="detail-poster-card"><img id="detailPosterImg" src="" alt=""></div>
+      <div class="detail-top-info">
+        <div class="detail-title" id="detailTitle"></div>
+        <div class="detail-meta" id="detailMeta"></div>
+      </div>
+    </div>
     <div class="detail-desc-box">
       <div class="detail-desc-head">Sujeti</div>
       <div class="detail-desc" id="detailDesc"></div>
@@ -1931,6 +1940,7 @@ async function openDetail(id){
   try{
     const d=await fetchJSON(`${API}/animes/${id}?${initDataQS()}`);
     document.getElementById('detailImg').src=posterUrl(d);
+    document.getElementById('detailPosterImg').src=posterUrl(d);
     document.getElementById('detailTitle').textContent=d.title;
     const typeLabel=d.media_type==='film'?'Film':'Serial';
     const calSvg='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>';
