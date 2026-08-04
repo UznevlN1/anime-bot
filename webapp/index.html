@@ -96,28 +96,30 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .seg-btn{flex:1;padding:11px 4px;border-radius:12px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);font-size:12.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .seg-btn.active{background:linear-gradient(135deg,var(--purple2),var(--purple));border-color:var(--purple);color:#fff;box-shadow:0 3px 10px var(--glow);}
 
-/* Hero — Carousel Card (yon tomonlarda keyingi/oldingi karta qisman koʻrinib turadi) */
-.hero-wrap{padding:14px 0 0;position:relative;}
-.hero-track{display:flex;gap:12px;overflow-x:scroll;scroll-snap-type:x mandatory;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding:0 9%;}
+/* Hero — Gaming Style (5-variant): yashil "neon" ramka, oʻng tepada
+   ikonka-tugmalar, pastda chapda progress-chiziqcha, oʻngda "Tomosha qilish" */
+.hero-wrap{padding:14px 18px 0;position:relative;}
+.hero-track{display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;border-radius:20px;}
 .hero-track::-webkit-scrollbar{display:none;}
-.hero-slide{position:relative;flex:none;width:82%;scroll-snap-align:center;border-radius:20px;overflow:hidden;height:230px;background:#111;display:flex;flex-direction:column;justify-content:flex-end;padding:18px;opacity:.48;transform:scale(.92);transition:opacity .28s ease,transform .28s ease;}
-.hero-slide.active{opacity:1;transform:scale(1);}
-.hero-badge{align-self:flex-start;background:linear-gradient(135deg,var(--purple2),var(--purple));color:#fff;font-size:10px;font-weight:800;letter-spacing:.5px;padding:5px 10px;border-radius:8px;margin-bottom:auto;box-shadow:0 3px 10px var(--glow);}
-.hero-title{font-size:20px;font-weight:800;margin-bottom:4px;text-shadow:0 2px 8px rgba(0,0,0,.6);}
-.hero-sub{font-size:12px;color:#d8d8e4;margin-bottom:12px;}
-.hero-actions{display:flex;gap:10px;}
-.hero-slide:not(.active) .hero-badge,.hero-slide:not(.active) .hero-sub,.hero-slide:not(.active) .hero-actions,.hero-slide:not(.active) .hero-progress-row{display:none;}
+.hero-slide{position:relative;flex:none;width:100%;scroll-snap-align:start;border-radius:20px;overflow:hidden;height:230px;background:#111;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;border:1.5px solid rgba(74,222,128,.5);box-shadow:0 0 22px rgba(74,222,128,.16),inset 0 0 24px rgba(74,222,128,.05);}
+.hero-icons{position:absolute;top:14px;right:14px;display:flex;align-items:center;gap:7px;z-index:2;}
+.hero-icon-btn{width:32px;height:32px;border-radius:50%;background:rgba(10,10,15,.6);backdrop-filter:blur(6px);border:1px solid rgba(74,222,128,.4);color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;flex:none;}
+.hero-icon-btn.active{color:#ff5c7a;border-color:rgba(255,92,122,.55);}
+.hero-views-pill{display:flex;align-items:center;gap:4px;background:rgba(10,10,15,.6);backdrop-filter:blur(6px);border:1px solid rgba(74,222,128,.4);color:#fff;font-size:11px;font-weight:800;padding:0 10px;height:32px;border-radius:20px;white-space:nowrap;}
+.hero-badge{position:relative;align-self:flex-start;display:flex;align-items:center;gap:5px;background:rgba(10,10,15,.55);border:1px solid rgba(74,222,128,.55);color:var(--purple2);font-size:10px;font-weight:800;letter-spacing:.5px;padding:5px 11px 5px 9px;border-radius:20px;margin-bottom:auto;}
+.hero-title{font-size:19px;font-weight:800;margin-bottom:4px;text-shadow:0 2px 8px rgba(0,0,0,.6);}
+.hero-sub{font-size:12px;color:#d8d8e4;}
+.hero-bottom-row{display:flex;align-items:center;gap:12px;margin-top:12px;}
 .btn-primary{background:linear-gradient(135deg,var(--purple2),var(--purple));color:#fff;border:none;border-radius:11px;padding:11px 18px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;box-shadow:0 4px 14px var(--glow);}
 .btn-ghost{background:rgba(255,255,255,.1);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:11px;padding:11px 14px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;}
-/* 5-variantdagi progress chiziqcha — faqat foydalanuvchi haqiqatan koʻra boshlagan
-   (davom etayotgan) animeda, saqlangan epizod raqami asosida chiqadi. */
-.hero-progress-row{display:flex;align-items:center;gap:8px;margin-top:12px;}
+.hero-bottom-row .btn-primary{flex:none;white-space:nowrap;padding:11px 16px;font-size:12.5px;margin-left:auto;}
+/* Progress chiziqcha — faqat foydalanuvchi haqiqatan koʻra boshlagan (davom
+   etayotgan) animeda, saqlangan epizod raqami / jami epizod asosida chiqadi. */
+.hero-progress-row{flex:1;min-width:0;display:flex;align-items:center;gap:8px;}
+.hero-progress-playicon{width:22px;height:22px;border-radius:50%;background:var(--purple2);color:#06210f;font-size:9px;display:flex;align-items:center;justify-content:center;flex:none;}
 .hero-progress{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.2);overflow:hidden;}
 .hero-progress i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--purple2),var(--purple));}
 .hero-progress-pct{font-size:11px;font-weight:800;color:var(--purple2);white-space:nowrap;}
-.hero-nav{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;background:rgba(10,10,15,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.14);color:#fff;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;z-index:2;}
-.hero-nav.prev{left:6px;}
-.hero-nav.next{right:6px;}
 .hero-dots{display:flex;justify-content:center;gap:6px;padding:12px 0 2px;}
 .hero-dot{width:6px;height:6px;border-radius:50%;background:var(--border);transition:width .2s,background .2s;}
 .hero-dot.active{width:16px;background:var(--purple);}
@@ -520,8 +522,6 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   <div class="chip-row" id="categoryRow" style="display:none;"></div>
 
   <div id="heroSection" class="hero-wrap">
-    <button class="hero-nav prev" id="heroPrev" aria-label="Oldingi">‹</button>
-    <button class="hero-nav next" id="heroNext" aria-label="Keyingi">›</button>
     <div class="hero-track" id="heroTrack"></div>
     <div class="hero-dots" id="heroDots"></div>
   </div>
@@ -978,10 +978,8 @@ function skeletonRow(elId,count){
 }
 function skeletonHero(){
   document.getElementById('heroSection').style.display='';
-  document.getElementById('heroTrack').innerHTML='<div class="hero-slide skel" style="width:100%;margin:0;opacity:1;transform:none;"></div>';
+  document.getElementById('heroTrack').innerHTML='<div class="hero-slide skel" style="width:100%;margin:0;"></div>';
   document.getElementById('heroDots').innerHTML='';
-  document.getElementById('heroPrev').style.display='none';
-  document.getElementById('heroNext').style.display='none';
 }
 function skeletonHome(){
   skeletonHero();
@@ -1343,20 +1341,33 @@ function heroSlideHTML(f,i){
     badgeText='E\'LON';
     subText=escapeHtml(f.subtitle||'');
   }else{
-    badgeText='TRENDING';
+    badgeText='🔥 TRENDING';
     subText=`${heroTypeLabel(f)} • ${f.year||''} • ${escapeHtml(f.genre||'')}`;
   }
   const pct=heroProgressPct(f);
-  const progressHTML=pct!=null?`<div class="hero-progress-row"><div class="hero-progress"><i style="width:${pct}%"></i></div><span class="hero-progress-pct">${pct}%</span></div>`:'';
-  return `<div class="hero-slide${i===0?' active':''}" data-target="${targetId||''}" style="background-image:${bg};background-size:cover;background-position:center;">
+  const progressHTML=pct!=null
+    ? `<div class="hero-progress-row"><div class="hero-progress-playicon">▶</div><div class="hero-progress"><i style="width:${pct}%"></i></div><span class="hero-progress-pct">${pct}%</span></div>`
+    : '<div class="hero-progress-row"></div>';
+  // Faqat haqiqiy anime kartalarida (bannerda emas) — chunki koʻrishlar soni
+  // va sevimlilarga qoʻshish faqat aniq animega tegishli boʻlishi kerak.
+  const iconsHTML=(f.kind==='anime')
+    ? `<div class="hero-icons">
+        <button class="hero-icon-btn${isFav(f.id)?' active':''}" data-hero-fav>${isFav(f.id)?'♥':'♡'}</button>
+        <div class="hero-views-pill">👁 ${formatViews(f.views)}</div>
+      </div>`
+    : '';
+  // Havolasiz banner (anime_id yoʻq) uchun "Tomosha qilish" tugmasi
+  // chiqarilmaydi — bosilganda hech narsa qilmaydigan tugma koʻrsatmaymiz.
+  const watchBtnHTML=targetId?'<button class="btn-primary" data-hero-play>▶ Tomosha qilish</button>':'';
+  return `<div class="hero-slide" data-target="${targetId||''}" style="background-image:${bg};background-size:cover;background-position:center;">
+    ${iconsHTML}
     <div class="hero-badge">${badgeText}</div>
     <div class="hero-title">${safeTitle}</div>
     <div class="hero-sub">${subText}</div>
-    <div class="hero-actions">
-      <button class="btn-primary" data-hero-play>▶ Tomosha qilish</button>
-      <button class="btn-ghost" data-hero-info>ⓘ Batafsil</button>
+    <div class="hero-bottom-row">
+      ${progressHTML}
+      ${watchBtnHTML}
     </div>
-    ${progressHTML}
   </div>`;
 }
 function renderHero(list){
@@ -1377,16 +1388,28 @@ function renderHero(list){
   heroSlideEls.forEach(slide=>{
     const targetId=slide.dataset.target;
     if(!targetId)return;
-    const openFn=()=>openDetail(Number(targetId));
-    slide.querySelector('[data-hero-play]').addEventListener('click',openFn);
-    slide.querySelector('[data-hero-info]').addEventListener('click',openFn);
+    const numId=Number(targetId);
+    const openFn=()=>openDetail(numId);
+    // "Batafsil" tugmasi endi yoʻq (5-variant dizaynida yoʻq) — shuning
+    // uchun kartaning oʻzini bosish ham anime sahifasini ochadi.
+    slide.addEventListener('click',openFn);
+    const playBtn=slide.querySelector('[data-hero-play]');
+    if(playBtn)playBtn.addEventListener('click',(e)=>{e.stopPropagation();openFn();});
+    const favBtnEl=slide.querySelector('[data-hero-fav]');
+    if(favBtnEl){
+      favBtnEl.addEventListener('click',(e)=>{
+        e.stopPropagation();
+        const active=toggleFav(numId);
+        favBtnEl.classList.toggle('active',active);
+        favBtnEl.textContent=active?'♥':'♡';
+        if(document.getElementById('view-favorites').classList.contains('active'))renderFavorites();
+      });
+    }
   });
   const dots=document.getElementById('heroDots');dots.innerHTML='';
   heroList.forEach((_,i)=>{const dd=document.createElement('div');dd.className='hero-dot'+(i===0?' active':'');dots.appendChild(dd);});
   track.scrollLeft=0;
   const multi=heroList.length>1;
-  document.getElementById('heroPrev').style.display=multi?'':'none';
-  document.getElementById('heroNext').style.display=multi?'':'none';
   if(heroTimer)clearInterval(heroTimer);
   if(multi)heroTimer=setInterval(heroAutoplayTick,5000);
 }
@@ -1399,11 +1422,10 @@ function goToHeroSlide(i){
   heroIdx=((i%heroList.length)+heroList.length)%heroList.length;
   const track=document.getElementById('heroTrack');
   const slide=heroSlideEls[heroIdx];
-  track.scrollTo({left:slide.offsetLeft-(track.clientWidth-slide.offsetWidth)/2,behavior:'smooth'});
+  track.scrollTo({left:slide.offsetLeft,behavior:'smooth'});
   paintHeroActive();
 }
 function paintHeroActive(){
-  heroSlideEls.forEach((s,i)=>s.classList.toggle('active',i===heroIdx));
   document.querySelectorAll('.hero-dot').forEach((d,i)=>d.classList.toggle('active',i===heroIdx));
 }
 function pauseHeroAutoplay(){
@@ -1418,7 +1440,7 @@ function resumeHeroAutoplaySoon(){
   const track=document.getElementById('heroTrack');
   let scrollTimer=null;
   // Barmoq bilan sudralganda (yoki avtomatik scrollTo tugagach) qaysi karta
-  // markazga eng yaqinligini aniqlab, active/dot holatini shunga moslaymiz.
+  // koʻrinishda ekanini aniqlab, dot-indikatorni shunga moslaymiz.
   track.addEventListener('scroll',()=>{
     clearTimeout(scrollTimer);
     scrollTimer=setTimeout(()=>{
@@ -1436,8 +1458,6 @@ function resumeHeroAutoplaySoon(){
   track.addEventListener('touchstart',pauseHeroAutoplay,{passive:true});
   track.addEventListener('touchend',resumeHeroAutoplaySoon,{passive:true});
   track.addEventListener('touchcancel',resumeHeroAutoplaySoon,{passive:true});
-  document.getElementById('heroPrev').addEventListener('click',()=>{pauseHeroAutoplay();goToHeroSlide(heroIdx-1);resumeHeroAutoplaySoon();});
-  document.getElementById('heroNext').addEventListener('click',()=>{pauseHeroAutoplay();goToHeroSlide(heroIdx+1);resumeHeroAutoplaySoon();});
 })();
 
 /* ---------- rows ---------- */
