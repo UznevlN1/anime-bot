@@ -101,12 +101,10 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .hero-wrap{padding:14px 18px 0;position:relative;}
 .hero-track{display:flex;overflow-x:scroll;scroll-snap-type:x mandatory;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;border-radius:20px;}
 .hero-track::-webkit-scrollbar{display:none;}
-.hero-slide{position:relative;flex:none;width:100%;aspect-ratio:2/1;scroll-snap-align:start;border-radius:20px;overflow:hidden;background:#111;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;border:1px solid rgba(74,222,128,.28);box-shadow:0 0 0 1px rgba(74,222,128,.05),0 0 28px rgba(74,222,128,.2),inset 0 0 30px rgba(74,222,128,.06);}
-.hero-corner{position:absolute;width:26px;height:26px;pointer-events:none;z-index:1;}
-.hero-corner-tl{top:-1px;left:-1px;border-top:3px solid rgba(74,222,128,.95);border-left:3px solid rgba(74,222,128,.95);border-top-left-radius:19px;filter:drop-shadow(0 0 5px rgba(74,222,128,.6));}
-.hero-corner-tr{top:-1px;right:-1px;border-top:3px solid rgba(74,222,128,.95);border-right:3px solid rgba(74,222,128,.95);border-top-right-radius:19px;filter:drop-shadow(0 0 5px rgba(74,222,128,.6));}
-.hero-corner-bl{bottom:-1px;left:-1px;border-bottom:3px solid rgba(74,222,128,.95);border-left:3px solid rgba(74,222,128,.95);border-bottom-left-radius:19px;filter:drop-shadow(0 0 5px rgba(74,222,128,.6));}
-.hero-corner-br{bottom:-1px;right:-1px;border-bottom:3px solid rgba(74,222,128,.95);border-right:3px solid rgba(74,222,128,.95);border-bottom-right-radius:19px;filter:drop-shadow(0 0 5px rgba(74,222,128,.6));}
+.hero-slide{position:relative;flex:none;width:100%;aspect-ratio:2/1;scroll-snap-align:start;overflow:hidden;background:#111;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;clip-path:polygon(8% 0,92% 0,100% 16%,100% 84%,92% 100%,8% 100%,0 84%,0 16%);box-shadow:0 0 0 1px rgba(74,222,128,.05),0 0 28px rgba(74,222,128,.2),inset 0 0 30px rgba(74,222,128,.06);}
+.hero-frame{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;}
+.hero-frame-line{fill:none;stroke:rgba(74,222,128,.9);stroke-width:1.6;}
+.hero-frame-stripe{opacity:.6;}
 .hero-icons{position:absolute;top:14px;right:14px;display:flex;align-items:center;gap:7px;z-index:2;}
 .hero-icon-btn{width:34px;height:34px;border-radius:11px;background:rgba(7,12,10,.62);backdrop-filter:blur(8px);border:1.5px solid rgba(74,222,128,.55);color:#eafff2;font-size:15px;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 2px 8px rgba(0,0,0,.25);}
 .hero-icon-btn.active{color:#ff5c7a;border-color:rgba(255,92,122,.6);background:rgba(255,92,122,.14);}
@@ -749,7 +747,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
   <div class="detail-hero">
     <img id="detailImg" src="" alt="">
     <button class="detail-back" id="detailBack" aria-label="Orqaga"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button>
-    <button class="detail-fav" id="detailFav" aria-label="Sevimlilarga qo'shish">♡</button>
+    <button class="detail-fav" id="detailFav" aria-label="Sevimlilarga qo'shish"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.4-10-9.3C.6 7.4 2.5 4 6.4 4c2 0 3.7 1 5.6 3 1.9-2 3.6-3 5.6-3 3.9 0 5.8 3.4 4.4 7.2-2.5 4.9-10 9.3-10 9.3z"/></svg></button>
   </div>
   <div class="detail-body">
     <div class="detail-title" id="detailTitle"></div>
@@ -919,6 +917,14 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 </nav>
 
 <script>
+/* Emoji (♡ ⬇ 👁 va h.k.) turli qurilma/OS'larda har xil koʻrinishda chiqadi
+   (masalan ba'zi telefonlarda 👁 juda "realistik" chiqadi). Shu sababli
+   barcha joyda bir xil, aniq chiqadigan SVG ikonkalardan foydalanamiz. */
+const ICON_HEART_OUTLINE='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.4-10-9.3C.6 7.4 2.5 4 6.4 4c2 0 3.7 1 5.6 3 1.9-2 3.6-3 5.6-3 3.9 0 5.8 3.4 4.4 7.2-2.5 4.9-10 9.3-10 9.3z"/></svg>';
+const ICON_HEART_FILLED='<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 20.5s-7.5-4.4-10-9.3C.6 7.4 2.5 4 6.4 4c2 0 3.7 1 5.6 3 1.9-2 3.6-3 5.6-3 3.9 0 5.8 3.4 4.4 7.2-2.5 4.9-10 9.3-10 9.3z"/></svg>';
+const ICON_DOWNLOAD='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4.5 18.5h15"/></svg>';
+const ICON_EYE='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+function heartIcon(active){return active?ICON_HEART_FILLED:ICON_HEART_OUTLINE;}
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 tg?.requestFullscreen?.();
@@ -1272,7 +1278,7 @@ function revealCard(d){
   }
 }
 function favBtn(a){
-  return `<button class="fav-btn ${isFav(a.id)?'active':''}" data-favtoggle="${a.id}" aria-label="Sevimlilarga qo'shish">${isFav(a.id)?'♥':'♡'}</button>`;
+  return `<button class="fav-btn ${isFav(a.id)?'active':''}" data-favtoggle="${a.id}" aria-label="Sevimlilarga qo'shish">${heartIcon(isFav(a.id))}</button>`;
 }
 function renderCard(a,variant){
   const d=document.createElement('div');d.className='card';
@@ -1293,7 +1299,7 @@ function renderCard(a,variant){
   inner+=favBtn(a)+`</div>`;
   let sub='';
   if(variant&&variant.rank){
-    sub=`<div class="card-stats">👁 ${formatViews(a.views)}</div>`;
+    sub=`<div class="card-stats">${ICON_EYE} ${formatViews(a.views)}</div>`;
   }else if(variant==='new'){
     sub=`<div class="card-sub">${typeLabel} • ${a.year||''}</div>`;
   }else{
@@ -1303,7 +1309,7 @@ function renderCard(a,variant){
   d.querySelector('.card-img-wrap').addEventListener('click',()=>openDetail(a.id));
   d.querySelector('.card-title').addEventListener('click',()=>openDetail(a.id));
   const fb=d.querySelector('[data-favtoggle]');
-  fb.addEventListener('click',(e)=>{e.stopPropagation();const active=toggleFav(a.id);fb.classList.toggle('active',active);fb.textContent=active?'♥':'♡';if(document.getElementById('view-favorites').classList.contains('active'))renderFavorites();});
+  fb.addEventListener('click',(e)=>{e.stopPropagation();const active=toggleFav(a.id);fb.classList.toggle('active',active);fb.innerHTML=heartIcon(active);if(document.getElementById('view-favorites').classList.contains('active'))renderFavorites();});
   revealCard(d);
   return d;
 }
@@ -1357,19 +1363,28 @@ function heroSlideHTML(f,i){
   // va sevimlilarga qoʻshish faqat aniq animega tegishli boʻlishi kerak.
   const iconsHTML=(f.kind==='anime')
     ? `<div class="hero-icons">
-        <button class="hero-icon-btn${isFav(f.id)?' active':''}" data-hero-fav>${isFav(f.id)?'♥':'♡'}</button>
-        <button class="hero-icon-btn" data-hero-download aria-label="Yuklab olish">⬇</button>
-        <div class="hero-views-pill">👁 ${formatViews(f.views)}</div>
+        <button class="hero-icon-btn${isFav(f.id)?' active':''}" data-hero-fav>${heartIcon(isFav(f.id))}</button>
+        <button class="hero-icon-btn" data-hero-download aria-label="Yuklab olish">${ICON_DOWNLOAD}</button>
+        <div class="hero-views-pill">${ICON_EYE} ${formatViews(f.views)}</div>
       </div>`
     : '';
   // Havolasiz banner (anime_id yoʻq) uchun "Tomosha qilish" tugmasi
   // chiqarilmaydi — bosilganda hech narsa qilmaydigan tugma koʻrsatmaymiz.
   const watchBtnHTML=targetId?'<button class="btn-primary" data-hero-play>▶ Tomosha qilish</button>':'';
   return `<div class="hero-slide" data-target="${targetId||''}" style="background-image:${bg};background-size:cover;background-position:center;">
-    <div class="hero-corner hero-corner-tl"></div>
-    <div class="hero-corner hero-corner-tr"></div>
-    <div class="hero-corner hero-corner-bl"></div>
-    <div class="hero-corner hero-corner-br"></div>
+    <svg class="hero-frame" viewBox="0 0 200 100" preserveAspectRatio="none">
+      <defs>
+        <pattern id="heroStripe${i}" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+          <rect width="5" height="5" fill="transparent"></rect>
+          <rect width="2.4" height="5" fill="#4ade80"></rect>
+        </pattern>
+      </defs>
+      <polygon class="hero-frame-stripe" fill="url(#heroStripe${i})" points="8,0 46,0 8,20"></polygon>
+      <polygon class="hero-frame-stripe" fill="url(#heroStripe${i})" points="192,0 154,0 192,20"></polygon>
+      <polygon class="hero-frame-stripe" fill="url(#heroStripe${i})" points="8,100 46,100 8,80"></polygon>
+      <polygon class="hero-frame-stripe" fill="url(#heroStripe${i})" points="192,100 154,100 192,80"></polygon>
+      <polygon class="hero-frame-line" points="16,1 184,1 199,17 199,83 184,99 16,99 1,83 1,17"></polygon>
+    </svg>
     ${iconsHTML}
     <div class="hero-badge">${badgeText}</div>
     <div class="hero-title">${safeTitle}</div>
@@ -1423,7 +1438,7 @@ function renderHero(list){
         e.stopPropagation();
         const active=toggleFav(numId);
         favBtnEl.classList.toggle('active',active);
-        favBtnEl.textContent=active?'♥':'♡';
+        favBtnEl.innerHTML=heartIcon(active);
         if(document.getElementById('view-favorites').classList.contains('active'))renderFavorites();
       });
     }
@@ -1931,8 +1946,8 @@ async function openDetail(id){
     document.getElementById('aiReasonBtn').style.display='';
     const favBtn2=document.getElementById('detailFav');
     favBtn2.classList.toggle('active',isFav(d.id));
-    favBtn2.textContent=isFav(d.id)?'♥':'♡';
-    favBtn2.onclick=()=>{const active=toggleFav(d.id);favBtn2.classList.toggle('active',active);favBtn2.textContent=active?'♥':'♡';};
+    favBtn2.innerHTML=heartIcon(isFav(d.id));
+    favBtn2.onclick=()=>{const active=toggleFav(d.id);favBtn2.classList.toggle('active',active);favBtn2.innerHTML=heartIcon(active);};
     const grid=document.getElementById('epGrid');grid.innerHTML='';
     const watched=watchedEpIds();
     (d.episodes||[]).forEach(ep=>{
