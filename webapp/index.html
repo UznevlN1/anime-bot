@@ -138,8 +138,8 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .row-scroll{display:flex;gap:12px;overflow-x:scroll;padding-bottom:4px;scrollbar-width:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
 .row-scroll::-webkit-scrollbar{display:none;}
 
-.card{width:128px;flex:none;opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s ease;}
-.card.revealed{opacity:1;transform:translateY(0);}
+.card{width:128px;flex:none;}
+.card.revealed{}
 .card-img-wrap{position:relative;width:128px;height:176px;border-radius:14px;overflow:hidden;background:var(--bg-card);transition:transform .18s cubic-bezier(.4,0,.2,1);}
 .card:active .card-img-wrap{transform:scale(.95);}
 @media (prefers-reduced-motion:reduce){
