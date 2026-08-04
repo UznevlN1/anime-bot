@@ -1885,9 +1885,6 @@ def admin_cat_settings_keyboard():
             InlineKeyboardButton(text="🎬 Avtomatik klip", callback_data="admin_autoclip", style="primary"),
         ],
         [
-            InlineKeyboardButton(text="👤 Profil bo'limi (bepul)", callback_data="admin_profile_lock", style="danger"),
-        ],
-        [
             InlineKeyboardButton(text="🔒 Avtomatik bloklash", callback_data="admin_autoblock", style="danger"),
         ],
         [
@@ -3447,32 +3444,46 @@ async def add_status(call: CallbackQuery, state: FSMContext):
 @dp.message(AddAnime.videos, F.video)
 async def add_video(message: Message, state: FSMContext):
     data = await state.get_data()
-    video_ids = data.get("video_ids", [])
-    ep_num = len(video_ids) + 1
+    tasks = data.get("video_tasks", [])
+    ep_num = len(tasks) + 1
     # MUHIM: avval bu yerda to'g'ridan-to'g'ri bot.copy_message ishlatilib,
     # kodek moslik tekshiruvi (H.264/AAC'ga o'tkazish) butunlay o'tkazib
     # yuborilar edi — shuning uchun HEVC/AC3 kabi formatdagi raw fayllar
     # webapp brauzer pleerida umuman ochilmas edi. Endi AddEpisode/EditEpisode
     # oqimlari bilan bir xil _upload_episode_to_storage ishlatiladi.
-    new_msg_id = await _upload_episode_to_storage(
-        message.chat.id, message.message_id,
-        episode_caption(ep_num), status_message=message
-    )
-    video_ids.append(new_msg_id)
-    await state.update_data(video_ids=video_ids)
-    asyncio.create_task(_warmup_stream_clients(new_msg_id))
-    await message.answer(f"✅ {len(video_ids)}-video kanalga saqlandi. /done yozing yoki davom eting.")
+    # TEZLIK: bu jarayon (yuklab olish + kerak bo'lsa transkod + qayta yuklash)
+    # bir necha daqiqa cho'zilishi mumkin. Avval shu yerda to'g'ridan-to'g'ri
+    # await qilinardi — admin keyingi videoni yuborishdan oldin har safar shu
+    # vaqtni kutishga majbur bo'lardi. Endi fonda (background task) ishga
+    # tushiriladi va admin darhol keyingi videoni yubora oladi; barcha
+    # qismlar /done bosilganda kutib olinadi (agar hali tugallanmagan bo'lsa).
+    task = asyncio.create_task(_process_episode_upload(
+        message, episode_caption(ep_num), ep_label=f"{ep_num}-video"
+    ))
+    tasks.append(task)
+    await state.update_data(video_tasks=tasks)
+    await message.answer(f"📥 {ep_num}-video qabul qilindi, fonda qayta ishlanmoqda... /done yozing yoki davom eting.")
 
 @dp.message(AddAnime.videos, Command("done"))
 async def add_done(message: Message, state: FSMContext):
     data = await state.get_data()
-    if not data.get("video_ids"):
+    tasks = data.get("video_tasks", [])
+    if not tasks:
         await message.answer("❌ Video yuklanmadi!")
         return
+    pending = [t for t in tasks if not t.done()]
+    if pending:
+        wait_msg = await message.answer(f"⏳ {len(pending)} ta video hali fonda qayta ishlanmoqda, kutib turing...")
+    video_ids = await asyncio.gather(*tasks)
+    if pending:
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
     anime_id = await asyncio.to_thread(db.add_anime, data["title"], data["year"], data["country"],
         data["genre"], data["description"], data.get("language", "Nomalum"), data["photo_id"], data["media_type"],
         data.get("total_episodes"), data.get("status", "ongoing"))
-    for i, msg_id in enumerate(data["video_ids"], 1):
+    for i, msg_id in enumerate(video_ids, 1):
         await asyncio.to_thread(db.add_episode, anime_id, i, msg_id)
     await state.clear()
 
@@ -3485,8 +3496,8 @@ async def add_done(message: Message, state: FSMContext):
             await post_anime_to_announce_channel(new_anime)
 
     # Reklama klipi — 1-qismdan avtomatik yaratiladi (fonda, javobni bloklamaydi)
-    if await is_auto_clip_enabled() and data["video_ids"]:
-        asyncio.create_task(_auto_generate_highlight_clip(message, data["video_ids"][0]))
+    if await is_auto_clip_enabled() and video_ids:
+        asyncio.create_task(_auto_generate_highlight_clip(message, video_ids[0]))
 
     # Faqat BLOKLNMAGAN foydalanuvchilarga xabar
     users = await asyncio.to_thread(db.get_all_active_users)
@@ -3504,8 +3515,8 @@ async def add_done(message: Message, state: FSMContext):
             pass
 
     total = data.get("total_episodes")
-    progress_line = f"\n📦 Yuklandi: {len(data['video_ids'])}/{total} qism" if total else f"\n📹 {len(data['video_ids'])} ta video"
-    await log_admin_action(message.from_user, "Anime qo'shdi", f"{data['title']} ({len(data['video_ids'])} qism)")
+    progress_line = f"\n📦 Yuklandi: {len(video_ids)}/{total} qism" if total else f"\n📹 {len(video_ids)} ta video"
+    await log_admin_action(message.from_user, "Anime qo'shdi", f"{data['title']} ({len(video_ids)} qism)")
     # Webapp 🔔 paneli uchun bildirishnoma
     await asyncio.to_thread(
         db.create_notification, "anime",
@@ -3573,7 +3584,7 @@ async def addepi_selected(call: CallbackQuery, state: FSMContext):
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     next_ep = len(episodes) + 1
-    await state.update_data(episode_anime_id=anime_id, episode_msg_ids=[], next_ep=next_ep)
+    await state.update_data(episode_anime_id=anime_id, episode_tasks=[], next_ep=next_ep)
     await state.set_state(AddEpisode.videos)
     total = anime.get("total_episodes") if anime else None
     progress_line = f"\n📦 Hozircha: {len(episodes)}/{total} qism yuklangan." if total else f"\n📦 Hozircha: {len(episodes)} qism yuklangan."
@@ -3584,31 +3595,41 @@ async def addepi_selected(call: CallbackQuery, state: FSMContext):
 @dp.message(AddEpisode.videos, F.video)
 async def addepi_video(message: Message, state: FSMContext):
     data = await state.get_data()
-    msg_ids = data.get("episode_msg_ids", [])
-    ep_num = data["next_ep"] + len(msg_ids)
-    new_msg_id = await _upload_episode_to_storage(
-        message.chat.id, message.message_id,
-        episode_caption(ep_num), status_message=message
-    )
-    msg_ids.append(new_msg_id)
-    await state.update_data(episode_msg_ids=msg_ids)
-    asyncio.create_task(_warmup_stream_clients(new_msg_id))
-    await message.answer(f"✅ {ep_num}-qism kanalga saqlandi.")
+    tasks = data.get("episode_tasks", [])
+    ep_num = data["next_ep"] + len(tasks)
+    # TEZLIK: fonda ishga tushiriladi (qarang: add_video izohi) — admin
+    # keyingi qismni darhol yubora oladi, transkod/yuklash orqada davom etadi.
+    task = asyncio.create_task(_process_episode_upload(
+        message, episode_caption(ep_num), ep_label=f"{ep_num}-qism"
+    ))
+    tasks.append(task)
+    await state.update_data(episode_tasks=tasks)
+    await message.answer(f"📥 {ep_num}-qism qabul qilindi, fonda qayta ishlanmoqda...")
 
 @dp.message(AddEpisode.videos, Command("done"))
 async def addepi_done(message: Message, state: FSMContext):
     data = await state.get_data()
-    if not data.get("episode_msg_ids"):
+    tasks = data.get("episode_tasks", [])
+    if not tasks:
         await message.answer("❌ Video yuklanmadi!")
         return
-    for i, msg_id in enumerate(data["episode_msg_ids"]):
+    pending = [t for t in tasks if not t.done()]
+    if pending:
+        wait_msg = await message.answer(f"⏳ {len(pending)} ta qism hali fonda qayta ishlanmoqda, kutib turing...")
+    episode_msg_ids = await asyncio.gather(*tasks)
+    if pending:
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+    for i, msg_id in enumerate(episode_msg_ids):
         await asyncio.to_thread(db.add_episode, data["episode_anime_id"], data["next_ep"] + i, msg_id)
     await state.clear()
 
     # Reklama klipi — shu safar yuklangan birinchi (eng yangi) qismdan avtomatik
     # yaratiladi (fonda, javobni bloklamaydi)
-    if await is_auto_clip_enabled() and data["episode_msg_ids"]:
-        asyncio.create_task(_auto_generate_highlight_clip(message, data["episode_msg_ids"][0]))
+    if await is_auto_clip_enabled() and episode_msg_ids:
+        asyncio.create_task(_auto_generate_highlight_clip(message, episode_msg_ids[0]))
 
     # Obunachilarga shaxsiy xabar — yangi qism chiqqani haqida
     anime_row = await asyncio.to_thread(db.get_anime, data["episode_anime_id"])
@@ -3634,7 +3655,7 @@ async def addepi_done(message: Message, state: FSMContext):
         )
 
     await message.answer(
-        f"✅ {len(data['episode_msg_ids'])} ta qism qoshildi!",
+        f"✅ {len(episode_msg_ids)} ta qism qoshildi!",
         reply_markup=admin_keyboard()
     )
 
@@ -4450,6 +4471,27 @@ async def _probe_audio_codec(path):
 # Shu sabab bunday holatda avtomatik H.264/AAC'ga o'tkazamiz.
 _BROWSER_SAFE_VIDEO_CODECS = {"h264", "vp9", "vp8", "av1"}
 _BROWSER_SAFE_AUDIO_CODECS = {"aac", "mp3"}
+
+async def _process_episode_upload(message, caption, ep_label):
+    """`_upload_episode_to_storage`ni fonda (background task sifatida) ishga
+    tushiradi va tugagach adminga xabar beradi. Ilgari bu jarayon sinxron
+    edi — admin navbatdagi videoni yuborishdan oldin har safar yuklab olish +
+    (kerak bo'lsa) transkod + qayta yuklashni to'liq kutishga majbur bo'lardi.
+    Endi admin videolarni ketma-ket, kutmasdan yubora oladi; barcha qismlar
+    /done bosilganda kerak bo'lsa kutib olinadi (add_done/addepi_done'da)."""
+    try:
+        new_msg_id = await _upload_episode_to_storage(
+            message.chat.id, message.message_id, caption, status_message=message
+        )
+    except Exception:
+        logger.exception(f"[video-queue] {ep_label} fonda qayta ishlashda kutilmagan xato")
+        raise
+    try:
+        await message.answer(f"✅ {ep_label} kanalga saqlandi.")
+    except Exception:
+        pass
+    asyncio.create_task(_warmup_stream_clients(new_msg_id))
+    return new_msg_id
 
 async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None):
     """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi. Video yoki
@@ -6332,38 +6374,6 @@ async def set_maintenance(call: CallbackQuery):
     await call.answer(f"🔧 {status}", show_alert=True)
     await admin_maintenance(call)
 
-# ---- PROFIL BO'LIMI (bepul foydalanuvchilar uchun vaqtincha yopish) ----
-@dp.callback_query(F.data == "admin_profile_lock")
-async def admin_profile_lock(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
-        return
-    current = await asyncio.to_thread(db.get_setting, "profile_disabled_for_free")
-    status = "✅ Yopiq (faqat Premium kira oladi)" if current == "1" else "❌ Ochiq (hammaga)"
-    await call.message.edit_text(
-        f"👤 <b>Profil bo'limi (bepul foydalanuvchilar uchun)</b>\n"
-        f"Holat: {status}\n\n"
-        f"Yoqilsa — Premium bo'lmagan foydalanuvchilar Webappdagi Profil "
-        f"bo'limini ocholmaydi, oʻrniga Premium sotib olish taklifini koʻradi. "
-        f"Premium foydalanuvchilar va admin har doim kira oladi.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Yopish", callback_data="proflock_on"),
-                InlineKeyboardButton(text="❌ Ochish", callback_data="proflock_off"),
-            ],
-            [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
-        ]),
-        parse_mode="HTML"
-    )
-
-@dp.callback_query(F.data.in_(["proflock_on", "proflock_off"]))
-async def set_profile_lock(call: CallbackQuery):
-    value = "1" if call.data == "proflock_on" else "0"
-    await asyncio.to_thread(db.set_setting, "profile_disabled_for_free", value)
-    status = "✅ Yopildi" if value == "1" else "❌ Ochildi"
-    await log_admin_action(call.from_user, "Profil bo'limi (bepul foydalanuvchilar)", status)
-    await call.answer(f"👤 {status}", show_alert=True)
-    await admin_profile_lock(call)
-
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
 async def admin_content(call: CallbackQuery):
@@ -6862,9 +6872,6 @@ async def admin_help(call: CallbackQuery):
         "filtrlanadi)\n"
         "🔧 Texnik ishlar — yoqilsa, oddiy foydalanuvchilar botga kira olmaydi "
         "(adminlar bundan mustasno)\n"
-        "👤 Profil boʻlimi (bepul) — Premium boʻlmagan foydalanuvchilar uchun "
-        "webapp Profil boʻlimini vaqtincha yopish (Premium sotishni "
-        "ragʻbatlantirish kampaniyasi uchun)\n"
         "📣 Eʼlon kanali — yangi anime/qism qoʻshilganda avtomatik eʼlon "
         "yuboriladigan kanal\n\n"
 
@@ -7455,30 +7462,16 @@ async def webapp_sponsor(request):
 
 async def webapp_profile(request):
     user_id = _webapp_user_id(request)
-    u, channel_url, support_url, premium, prices, app_version, profile_disabled = await asyncio.gather(
+    u, channel_url, support_url, premium, prices, app_version = await asyncio.gather(
         asyncio.to_thread(db.get_user, user_id),
         asyncio.to_thread(db.get_setting, "profile_channel_url"),
         asyncio.to_thread(db.get_setting, "profile_support_url"),
         asyncio.to_thread(db.get_premium_status, user_id),
         premium_settings(),
         asyncio.to_thread(db.get_setting, "bot_version"),
-        asyncio.to_thread(db.get_setting, "profile_disabled_for_free"),
     )
-    is_admin = await is_admin_user(user_id)
-
-    # Kampaniya: bepul (Premium bo'lmagan) foydalanuvchilar uchun Profil
-    # bo'limi vaqtincha yopilgan bo'lishi mumkin — Premium/admin har doim kiradi.
-    if profile_disabled == "1" and not premium["is_premium"] and not is_admin:
-        return web.json_response({
-            "disabled": True,
-            "is_premium": False,
-            "channel_url": channel_url or "",
-            "support_url": support_url or "",
-            "bot_username": BOT_USERNAME or "",
-        })
 
     return web.json_response({
-        "disabled": False,
         "joined_at": u.get("joined_at") if u else None,
         "is_premium": premium["is_premium"],
         "premium_days_left": premium["days_left"],

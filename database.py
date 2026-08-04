@@ -382,9 +382,10 @@ def init_db():
     c.execute("INSERT INTO settings VALUES ('premium_price_1y', '120000') ON CONFLICT DO NOTHING")
     c.execute("INSERT INTO settings VALUES ('premium_early_hours', '48') ON CONFLICT DO NOTHING")
     c.execute("INSERT INTO settings VALUES ('premium_referral_bonus_days', '3') ON CONFLICT DO NOTHING")
-    # Webapp Profil bo'limini bepul (Premium bo'lmagan) foydalanuvchilar uchun
-    # vaqtincha yopib qo'yish (Premium sotishni rag'batlantirish uchun kampaniya)
-    c.execute("INSERT INTO settings VALUES ('profile_disabled_for_free', '0') ON CONFLICT DO NOTHING")
+    # Eskirgan sozlama: Profil bo'limini bepul foydalanuvchilar uchun yopish
+    # funksiyasi olib tashlandi — allaqachon deploy qilingan bazalarda qolib
+    # ketgan qatorni tozalaymiz.
+    c.execute("DELETE FROM settings WHERE key = 'profile_disabled_for_free'")
 
     conn.commit()
     put_conn(conn)
