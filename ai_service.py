@@ -766,6 +766,158 @@ async def moderate_image(image_base64, mime_type="image/jpeg"):
         return True, ""
 
 
+async def verify_anime_photo_title(image_base64, title, mime_type="image/jpeg"):
+    """Admin yangi anime qo'shayotganda AniList'dan avtomatik to'ldirishdan
+    OLDIN chaqiriladi: admin yuborgan POSTER RASM bilan admin yozgan NOM
+    (title) haqiqatan bir xil animega tegishlimi — shuni AI'ning ko'rish
+    (vision) qobiliyati bilan tekshiradi. Bu AniList qidiruvi noto'g'ri/
+    boshqa animeni topib qo'yishining oldini olish uchun kerak (masalan
+    nom noto'g'ri yozilgan yoki bir nechta anime bir xil nomga ega bo'lsa).
+
+    Qaytaradi: {"matches": bool, "detected_title": str, "confidence": str}
+      - matches=True  -> rasm va nom mos, AniList qidiruvini "title" bilan
+        davom ettirish xavfsiz.
+      - matches=False -> AI rasmda boshqa anime ko'rgandek va bu haqda
+        "detected_title" orqali o'z taxminini beradi (bo'sh bo'lishi ham
+        mumkin — rasmni umuman tanimasa).
+      - AI ishlamasa/xato bersa yoki aniq xulosaga kela olmasa,
+        matches=True qaytariladi (ya'ni oqim to'xtatilmaydi — bu faqat
+        QO'SHIMCHA ogohlantirish, admin baribir yakuniy qarorni o'zi
+        qabul qiladi)."""
+    if not AI_ENABLED:
+        return {"matches": True, "detected_title": "", "confidence": ""}
+    prompt = (
+        f"Admin bu anime posterini '{title}' nomi bilan qo'shmoqchi.\n\n"
+        "Rasmga qarab, bu haqiqatan ham shu nomdagi anime posteri/kadri "
+        "ekanligini tekshir. Agar rasmda personajlar yoki uslub aynan shu "
+        "animega mos kelmasa (masalan boshqa animening posteri "
+        "yuborilgan bo'lsa), buni aniq belgila.\n\n"
+        "Agar rasmni aniq tanimasang yoki ishonchli xulosa qila olmasang, "
+        '"matches": true qaytar (shubhali holatda ogohlantirmaslik '
+        "yaxshiroq, chunki noto'g'ri ogohlantirish adminni chalg'itadi).\n\n"
+        'FAQAT quyidagi JSON formatda javob ber: {"matches": true/false, '
+        '"detected_title": "agar matches=false bo\'lsa, rasmda ko\'ringan '
+        'haqiqiy anime nomi (bilmasang bo\'sh \\"\\")", '
+        '"confidence": "low/medium/high"}'
+    )
+    contents = [{
+        "role": "user",
+        "parts": [
+            {"inline_data": {"mime_type": mime_type, "data": image_base64}},
+            {"text": prompt},
+        ],
+    }]
+    result = await _call_gemini(
+        contents, temperature=0.0, max_output_tokens=200, json_mode=True,
+        thinking_level="low",
+    )
+    if not result:
+        return {"matches": True, "detected_title": "", "confidence": ""}
+    try:
+        data = json.loads(result)
+        return {
+            "matches": bool(data.get("matches", True)),
+            "detected_title": str(data.get("detected_title") or "").strip(),
+            "confidence": str(data.get("confidence") or "").strip(),
+        }
+    except Exception:
+        return {"matches": True, "detected_title": "", "confidence": ""}
+
+
+async def identify_anime_from_image_tracemoe(image_bytes):
+    """trace.moe orqali rasmdan (poster/kadr) anime nomini aniqlaydi.
+    Bepul, API kalit talab qilmaydi. Ishonch darajasi past bo'lsa
+    None qaytaradi — shunda chaqiruvchi tomon Gemini vision'ga
+    (taxminga) o'tishi mumkin."""
+    session = await _get_session()
+    try:
+        async with session.post(
+            "https://api.trace.moe/search?anilistInfo",
+            data=image_bytes,
+            headers={"Content-Type": "image/jpeg"},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+    except Exception:
+        logger.exception("[identify_anime_from_image_tracemoe] so'rov xato")
+        return None
+
+    results = data.get("result") or []
+    if not results:
+        return None
+    best = results[0]
+    similarity = best.get("similarity", 0)
+    if similarity < 0.87:  # past ishonch — AniList taxminini rad etamiz
+        return None
+
+    anilist = best.get("anilist") or {}
+    title = (anilist.get("title") or {}).get("romaji") or \
+            (anilist.get("title") or {}).get("english") or ""
+    if not title:
+        return None
+    return {
+        "title": title,
+        "anilist_id": anilist.get("id"),
+        "similarity": round(similarity * 100, 1),
+    }
+
+
+async def guess_anime_title_from_image(image_base64, mime_type="image/jpeg"):
+    """trace.moe rasmni tanimaganda (past ishonch yoki umuman topilmaganda)
+    ZAXIRA sifatida chaqiriladi: AI'ning vision qobiliyati bilan posterga
+    qarab anime nomini TAXMIN qiladi. Bu — trace.moe kabi aniq bazaga
+    tayanmagani uchun — noto'g'ri yoki o'ylab topilgan nom qaytarishi
+    mumkin, shu sabab natija HAR DOIM admin'ga "AI taxmini, tekshiring"
+    deb aniq belgilab ko'rsatilishi SHART (chaqiruvchi tomon).
+
+    Qaytaradi: {"title": str, "year": str, "confidence": "low/medium/high"}
+      Hech narsa aniqlay olmasa — barcha maydonlar bo'sh, confidence="low"."""
+    empty = {"title": "", "year": "", "confidence": "low"}
+    if not AI_ENABLED:
+        return empty
+
+    prompt = (
+        "Bu rasm — anime posteri yoki kadri. Rasmga diqqat bilan qarab, "
+        "bu qaysi anime ekanini aniqlashga harakat qil (personajlar "
+        "dizayni, uslub, matn/logotip agar rasmda ko'rinsa — shularga "
+        "tayan).\n\n"
+        "MUHIM: Agar ANIQ ishonchli bo'lmasang yoki bu anime senga "
+        "notanish bo'lsa, nom o'ylab topma — bo'sh (\"\") qoldir. "
+        "Noto'g'ri taxmin qilishdan ko'ra \"bilmayman\" deyish "
+        "YAXSHIROQ.\n\n"
+        'FAQAT quyidagi JSON formatda javob ber: {"title": "aniq bo\'lsa '
+        'anime nomi, aks holda \\"\\"", "year": "chiqqan yili bilsang, '
+        'aks holda \\"\\"", "confidence": "low/medium/high"}'
+    )
+    contents = [{
+        "role": "user",
+        "parts": [
+            {"inline_data": {"mime_type": mime_type, "data": image_base64}},
+            {"text": prompt},
+        ],
+    }]
+    result = await _call_gemini(
+        contents, temperature=0.0, max_output_tokens=150, json_mode=True,
+        thinking_level="low",
+    )
+    if not result:
+        return empty
+    try:
+        data = json.loads(result)
+        title = str(data.get("title") or "").strip()
+        if not title:
+            return empty
+        return {
+            "title": title,
+            "year": str(data.get("year") or "").strip(),
+            "confidence": str(data.get("confidence") or "low").strip().lower(),
+        }
+    except Exception:
+        return empty
+
+
 async def find_duplicate_anime(new_title, candidate_titles):
     """Admin yangi anime qo'shayotganda, DB'da nomi o'xshash animelar
     topilsa, shulardan qay biri HAQIQATDA bir xil anime ekanini (masalan
