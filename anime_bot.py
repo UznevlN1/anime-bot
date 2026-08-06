@@ -424,6 +424,9 @@ class SponsorState(StatesGroup):
 class PremiumState(StatesGroup):
     waiting_screenshot = State()
 
+class PremiumRejectState(StatesGroup):
+    waiting_custom_reason = State()
+
 class PremiumAdminState(StatesGroup):
     price_1m = State()
     price_3m = State()
@@ -951,6 +954,19 @@ async def premium_approve(call: CallbackQuery):
         pass
     await call.answer("✅ Tasdiqlandi")
 
+# Tayyor rad etish sabablari: (kod, admin panelda ko'rinadigan matn, AI'ga
+# beriladigan sabab tavsifi, qayta urinishni taklif qilish kerakmi).
+# "Soxta chek" holatida qayta urinish taklif qilinmaydi — bunday holatda
+# foydalanuvchini yana urinishga undash o'rniga admin bilan bog'lanishga
+# yo'naltirilgan matn to'g'riroq.
+PAYMENT_REJECT_REASONS = {
+    "amount": ("💸 Summa mos emas", "yuborilgan summa so'ralgan tarif narxiga mos kelmaydi", True),
+    "fake": ("🖼 Chek soxta/tahrirlangan", "chek skrinshoti soxta yoki tahrirlangan ko'rinishga ega", False),
+    "blurry": ("🔍 Sifatsiz/o'qib bo'lmadi", "chek skrinshoti sifatsiz yoki xira, ma'lumotlarni aniq o'qib bo'lmadi", True),
+    "duplicate": ("🔁 Takroriy chek", "bu chek avval boshqa to'lov uchun allaqachon ishlatilgan", False),
+}
+
+
 @dp.callback_query(F.data.startswith("pay_no_"))
 async def premium_reject(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
@@ -960,19 +976,141 @@ async def premium_reject(call: CallbackQuery):
     if not payment or payment["status"] != "pending":
         await call.answer("Bu so'rov allaqachon ko'rib chiqilgan", show_alert=True)
         return
-    await asyncio.to_thread(db.set_payment_status, payment_id, "rejected")
+    await call.answer()
+    orig_message_id = call.message.message_id
+    buttons = [
+        [InlineKeyboardButton(text=label, callback_data=f"payno_{code}_{payment_id}_{orig_message_id}")]
+        for code, (label, _, _) in PAYMENT_REJECT_REASONS.items()
+    ]
+    buttons.append([InlineKeyboardButton(text="✍️ Boshqa (yozib kiritish)", callback_data=f"paynocustom_{payment_id}_{orig_message_id}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Bekor qilish", callback_data=f"paynocancel_{payment_id}")])
+    await call.message.answer(
+        f"❌ To'lov #{payment_id} — rad etish sababini tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@dp.callback_query(F.data.startswith("paynocancel_"))
+async def premium_reject_cancel(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer("Bekor qilindi")
     try:
-        await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ <b>Rad etildi</b>", parse_mode="HTML")
+        await call.message.delete()
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("payno_"))
+async def premium_reject_preset(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    parts = call.data.split("_")
+    code = parts[1]
+    payment_id = int(parts[2])
+    orig_message_id = int(parts[3]) if len(parts) > 3 else None
+    reason_info = PAYMENT_REJECT_REASONS.get(code)
+    if not reason_info:
+        await call.answer()
+        return
+    _, reason_for_ai, suggest_retry = reason_info
+    await call.answer()
+    try:
+        await call.message.delete()  # sabab tanlash klaviaturasini tozalab qo'yamiz
+    except Exception:
+        pass
+    await _finalize_payment_rejection(
+        call.from_user.id, payment_id, reason_for_ai, suggest_retry,
+        orig_chat_id=call.message.chat.id, orig_message_id=orig_message_id,
+    )
+
+
+@dp.callback_query(F.data.startswith("paynocustom_"))
+async def premium_reject_custom_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    parts = call.data.split("_")
+    payment_id = int(parts[1])
+    orig_message_id = int(parts[2]) if len(parts) > 2 else None
+    await call.answer()
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await state.set_state(PremiumRejectState.waiting_custom_reason)
+    await state.update_data(
+        payment_id=payment_id, orig_chat_id=call.message.chat.id, orig_message_id=orig_message_id
+    )
+    await call.message.answer(
+        f"✍️ To'lov #{payment_id} — rad etish sababini o'z so'zingiz bilan yozing "
+        f"(bu asosida foydalanuvchiga xushmuomala xabar tuziladi):"
+    )
+
+
+@dp.message(PremiumRejectState.waiting_custom_reason)
+async def premium_reject_custom_text(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        await state.clear()
+        return
+    data = await state.get_data()
+    payment_id = data.get("payment_id")
+    orig_chat_id = data.get("orig_chat_id")
+    orig_message_id = data.get("orig_message_id")
+    await state.clear()
+    reason_text = (message.text or "").strip()
+    if not reason_text:
+        await message.answer("❌ Iltimos, sababni matn sifatida yozing.")
+        return
+    await _finalize_payment_rejection(
+        message.from_user.id, payment_id, reason_text, suggest_retry=True,
+        orig_chat_id=orig_chat_id, orig_message_id=orig_message_id,
+    )
+
+
+async def _finalize_payment_rejection(admin_id, payment_id, reason_for_ai, suggest_retry=True,
+                                       orig_chat_id=None, orig_message_id=None):
+    """Tanlangan/yozilgan sababga asoslanib to'lovni rad etadi: bazani
+    yangilaydi, asl to'lov xabari captionini "Rad etildi" deb belgilaydi
+    va foydalanuvchiga AI tuzgan (yoki AI ishlamasa zaxira) xushmuomala
+    xabarni yuboradi."""
+    payment = await asyncio.to_thread(db.get_payment_request, payment_id)
+    if not payment or payment["status"] != "pending":
+        try:
+            await bot.send_message(admin_id, "Bu so'rov allaqachon ko'rib chiqilgan.")
+        except Exception:
+            pass
+        return
+    await asyncio.to_thread(db.set_payment_status, payment_id, "rejected")
+
+    user_message = await ai_service.generate_payment_rejection_message(reason_for_ai, suggest_retry=suggest_retry)
+    if not user_message:
+        user_message = f"❌ To'lovingiz tasdiqlanmadi. Sabab: {reason_for_ai}."
+        if suggest_retry:
+            user_message += " Iltimos, to'g'ri chek bilan qayta urinib ko'ring."
+        else:
+            user_message += " Savol bo'lsa, admin bilan bog'laning."
+
+    if orig_chat_id and orig_message_id:
+        try:
+            await bot.edit_message_caption(
+                chat_id=orig_chat_id, message_id=orig_message_id,
+                caption=f"💎 To'lov #{payment_id}\n\n❌ <b>Rad etildi</b> — {reason_for_ai}",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+    try:
+        await bot.send_message(payment["user_id"], user_message)
     except Exception:
         pass
     try:
         await bot.send_message(
-            payment["user_id"],
-            "❌ To'lovingiz tasdiqlanmadi. Chekni tekshirib qayta yuborishga urinib ko'ring yoki admin bilan bog'laning."
+            admin_id,
+            f"❌ To'lov #{payment_id} rad etildi.\n\n"
+            f"📤 Foydalanuvchiga yuborilgan xabar:\n{user_message}"
         )
     except Exception:
         pass
-    await call.answer("❌ Rad etildi")
 
 # ---- To'lov summasini TUZATIB tasdiqlash (foydalanuvchi so'ralganidan kam/ko'p pul yuborgan bo'lsa) ----
 @dp.callback_query(F.data.startswith("pay_editamt_"))
@@ -7103,9 +7241,42 @@ async def admin_revenue(call: CallbackQuery):
         f"📦 <b>Reja boʻyicha taqsimot:</b>\n{plan_lines}\n"
         f"📈 <b>Oylik tushum (oxirgi 6 oy):</b>\n{month_lines}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 Tozalash", callback_data="revenue_clear_confirm", style="danger")],
             [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_cat_stats")],
         ]),
         parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "revenue_clear_confirm")
+async def revenue_clear_confirm(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer()
+    await call.message.edit_text(
+        "⚠️ <b>Diqqat!</b>\n\n"
+        "Bu BARCHA to'lov tarixini (jumladan test to'lovlarni) o'chiradi va "
+        "Daromad statistikasini nolga qaytaradi.\n\n"
+        "Foydalanuvchilarning aktiv Premium muddatiga bu TA'SIR QILMAYDI — "
+        "faqat to'lov tarixi o'chadi.\n\n"
+        "❗️ Bu amalni ORQAGA QAYTARIB BO'LMAYDI. Davom etasizmi?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Ha, tozalash", callback_data="revenue_clear_do", style="danger")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_revenue")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "revenue_clear_do")
+async def revenue_clear_do(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await call.answer()
+    deleted = await asyncio.to_thread(db.clear_all_payments)
+    await call.message.edit_text(
+        f"✅ Tozalandi — {deleted} ta to'lov yozuvi o'chirildi. Daromad statistikasi endi 0 dan boshlanadi.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💰 Daromadga qaytish", callback_data="admin_revenue")],
+        ])
     )
 
 # ---- ADMIN QO'LLANMA ----

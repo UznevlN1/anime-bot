@@ -561,6 +561,20 @@ def set_payment_amount(payment_id, amount):
     conn.commit()
     put_conn(conn)
 
+def clear_all_payments():
+    """BARCHA to'lov yozuvlarini (test yoki eski ma'lumotlarni) o'chiradi —
+    Daromad statistikasini nolga qaytaradi. Foydalanuvchilarning aktiv
+    Premium muddatiga TA'SIR QILMAYDI (bu faqat to'lov tarixi jadvali,
+    users jadvalidagi premium_until'ga tegmaydi). QAYTARIB BO'LMAYDI —
+    admin panelda tasdiqlashdan keyin chaqirilishi kerak."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM premium_payments")
+    affected = c.rowcount
+    conn.commit()
+    put_conn(conn)
+    return affected
+
 # ---- Referral bonus ----
 def get_revenue_stats():
     """Tasdiqlangan (approved) to'lovlar bo'yicha daromad statistikasi: umumiy summa,

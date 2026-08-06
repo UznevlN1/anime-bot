@@ -727,6 +727,52 @@ async def generate_premium_pitch_message(user_context, plan_summary=""):
     )
 
 
+async def generate_payment_rejection_message(reason, suggest_retry=True):
+    """Admin to'lovni rad etganda foydalanuvchiga yuboriladigan xabarni
+    yozadi. `reason` — admin tanlagan/yozgan rad etish sababi (masalan
+    "summa mos emas", "chek soxta/tahrirlangan", "sifatsiz rasm — o'qib
+    bo'lmadi", yoki admin o'z so'zi bilan yozgan erkin matn). AI shu
+    sababni foydalanuvchiga xafa qilmaydigan, xushmuomala tilga o'giradi
+    — sababni o'zgartirmaydi yoki yumshatib "yashirmaydi", faqat ohangini
+    silliqlaydi. `suggest_retry=True` bo'lsa, xabar oxirida to'g'ri
+    chek bilan qayta urinishga taklif qo'shiladi (masalan sabab "soxta
+    chek" bo'lsa buni False qilib chaqirish tavsiya etiladi — bunday holda
+    qayta urinish o'rniga admin bilan bog'lanishga yo'naltirilgan matn
+    yaxshiroq)."""
+    retry_text = (
+        "Xabar oxirida foydalanuvchini TO'G'RI/ANIQ chek skrinshoti bilan "
+        "qayta urinib ko'rishga xushmuomalalik bilan taklif qil."
+        if suggest_retry else
+        "Qayta urinishni taklif qilma — buning o'rniga admin bilan "
+        "to'g'ridan-to'g'ri bog'lanishni taklif qil."
+    )
+    prompt = (
+        "Anime Telegram bot/webapp'ida foydalanuvchining Premium uchun "
+        f"yuborgan to'lov chekini admin rad etdi. Rad etish sababi: "
+        f"\"{reason}\".\n\n"
+        "Shu sababga asoslanib, foydalanuvchiga yuboriladigan QISQA "
+        "(2-3 gap, o'zbek tilida) xabar yoz. Ohang: xushmuomala, "
+        "hurmatli, lekin ayblovchi yoki qattiqqo'l emas — sababni ochiq "
+        "va tushunarli qilib ayt (yumshatib, noaniq qilib yozma), lekin "
+        "foydalanuvchini past ko'rmagan, tushunuvchan tilda. "
+        f"{retry_text} Faqat xabar matnini yoz, sarlavha yoki tirnoq "
+        "belgisiz."
+    )
+    result = await _call_gemini(
+        [{"role": "user", "parts": [{"text": prompt}]}],
+        temperature=0.6, max_output_tokens=300, thinking_level="low",
+    )
+    if result:
+        return result
+    # AI ishlamasa — xavfsiz zaxira matn (sababni baribir ko'rsatadi)
+    fallback = f"❌ To'lovingiz tasdiqlanmadi. Sabab: {reason}."
+    if suggest_retry:
+        fallback += " Iltimos, to'g'ri chek bilan qayta urinib ko'ring."
+    else:
+        fallback += " Savol bo'lsa, admin bilan bog'laning."
+    return fallback
+
+
 async def moderate_image(image_base64, mime_type="image/jpeg"):
     """Admin yuklagan rasmni (anime posteri, banner, sponsor rasmi va h.k.)
     ochiq foydalanuvchilarga ko'rsatishdan OLDIN NSFW/nomaqbul kontentga
@@ -754,7 +800,7 @@ async def moderate_image(image_base64, mime_type="image/jpeg"):
             {"text": prompt},
         ],
     }]
-    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=150, json_mode=True, is_admin=False)
+    result = await _call_gemini(contents, temperature=0.0, max_output_tokens=150, json_mode=True)
     if not result:
         return True, ""
     try:
