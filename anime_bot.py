@@ -5459,6 +5459,53 @@ def _candidate_start_times(target_duration, total_duration, edge_margin_ratio=0.
     step = (hi - lo) / (n - 1)
     return [lo + i * step for i in range(n)]
 
+async def _await_with_heartbeat(coro, progress_cb, text_fn, interval=2.5):
+    """Uzoq davom etishi mumkin bo'lgan, ICHKI foiz bermaydigan BITTA `await`
+    (masalan tashqi AI so'roviga javob kutish) davomida ham progress xabari
+    "qotib qolgandek" ko'rinmasligi uchun: fon rejimida har `interval` soniyada
+    `progress_cb(text_fn(), True)` chaqirilib turadi, shu orqali elapsed vaqt
+    tirik yangilanadi. `coro` tugashi (natija yoki xato bilan) bilan fon-tik
+    avtomatik to'xtatiladi."""
+    if not progress_cb:
+        return await coro
+    task = asyncio.ensure_future(coro)
+
+    async def _tick():
+        try:
+            while not task.done():
+                await asyncio.sleep(interval)
+                if not task.done():
+                    await progress_cb(text_fn(), True)
+        except asyncio.CancelledError:
+            pass
+
+    ticker = asyncio.ensure_future(_tick())
+    try:
+        return await task
+    finally:
+        ticker.cancel()
+        try:
+            await ticker
+        except asyncio.CancelledError:
+            pass
+
+
+def _stage_scan_cb(progress_cb, label):
+    """`_analyze_loudness` / `_analyze_scene_cuts`ning ffmpeg `-progress`ga
+    asoslangan foiz callback'i `progress_cb(pct)` (0-100) ni, `_ai_pick_best_window`
+    kutgan `progress_cb(text, force=False)` formatiga moslashtiradi — shu orqali
+    butun videoni skanerlash paytida ham xabar REAL foiz bilan yangilanib turadi
+    (avvalgi holatda tahlil tugaguncha xabar butunlay o'zgarmasdi)."""
+    if not progress_cb:
+        return None
+
+    async def _cb(pct):
+        await progress_cb(
+            f"🔎 Nomzod lahzalar qidirilmoqda ({label})...\n\n{_progress_bar(pct)} {pct}%"
+        )
+    return _cb
+
+
 async def _ai_pick_best_window(path, target_duration, total_duration, progress_cb=None):
     """Nomzod lahzalardan kadr oladi, Gemini'ga (vision, ai_service orqali) yuboradi
     va eng qiziqarlisini tanlashini so'raydi. Muvaffaqiyatsiz bo'lsa (AI o'chirilgan,
@@ -5486,10 +5533,16 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
     used_smart = False
     try:
         if progress_cb:
-            await progress_cb("🔎 Nomzod lahzalar qidirilmoqda (ovoz + sahna tahlili)...", True)
-        loud_frames = await _analyze_loudness(path, total_duration)
+            await progress_cb("🔎 Nomzod lahzalar qidirilmoqda (ovoz tahlili)...", True)
+        loud_frames = await _analyze_loudness(
+            path, total_duration, progress_cb=_stage_scan_cb(progress_cb, "ovoz tahlili")
+        )
         try:
-            cuts = await _analyze_scene_cuts(path, total_duration)
+            if progress_cb:
+                await progress_cb("🔎 Nomzod lahzalar qidirilmoqda (sahna tahlili)...", True)
+            cuts = await _analyze_scene_cuts(
+                path, total_duration, progress_cb=_stage_scan_cb(progress_cb, "sahna tahlili")
+            )
         except Exception as e:
             logger.warning(f"[ai-highlight] sahna-almashinuv tahlili muvaffaqiyatsiz: {e}")
             cuts = None
@@ -5535,9 +5588,34 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
                 images_b64.append(base64.b64encode(f.read()).decode("ascii"))
 
         if progress_cb:
-            await progress_cb(f"🤖 AI ishlamoqda: {len(candidates)} ta kadr yuborildi, javob kutilmoqda...", True)
+            _ai_wait_t0 = time.monotonic()
+            # Kutish uzayib ketsa, foydalanuvchini xotirjam qilish uchun vaqt
+            # oshgani sari xabar matni ham o'zgarib boradi (shunchaki sekund
+            # sanashdan ko'ra "sabr qiling" / "ozgina qoldi" degan his beradi).
+            _ai_wait_stages = [
+                (0, "javob kutilmoqda..."),
+                (8, "AI hali tahlil qilmoqda, iltimos biroz sabr qiling..."),
+                (18, "ozgina qoldi, kuting..."),
+                (30, "AI odatdagidan sekinroq javob bermoqda, iltimos yana biroz sabr qiling..."),
+            ]
 
-        idx = await ai_service.pick_highlight_frame(images_b64)
+            def _ai_wait_text():
+                waited = int(time.monotonic() - _ai_wait_t0)
+                phrase = _ai_wait_stages[0][1]
+                for threshold, text in _ai_wait_stages:
+                    if waited >= threshold:
+                        phrase = text
+                return (
+                    f"🤖 AI ishlamoqda: {len(candidates)} ta kadr yuborildi, "
+                    f"{phrase} ({waited}s)"
+                )
+
+            await progress_cb(_ai_wait_text(), True)
+            idx = await _await_with_heartbeat(
+                ai_service.pick_highlight_frame(images_b64), progress_cb, _ai_wait_text
+            )
+        else:
+            idx = await ai_service.pick_highlight_frame(images_b64)
         if idx is not None and 0 <= idx < len(candidates):
             return candidates[idx], used_smart
         return None
@@ -5883,6 +5961,42 @@ def _fmt_mmss(seconds):
     seconds = max(0, int(seconds))
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
+async def _recover_stale_clip_jobs():
+    """Bot ishga tushganda (start_polling'dan OLDIN) chaqiriladi. Oldingi
+    process bexosdan o'lib qolgan bo'lsa (Render OOM/redeploy/crash — bunday
+    holatda process_highlight_clip'ning finally bloki ishlashga ulgurmaydi),
+    DB'da "clipjob_..." yozuvlari qolib ketadi va admin ekranida progress
+    xabari "Bekor qilish" tugmasi bilan abadiy muzlab qoladi. Avval admin shu
+    tugmani bosgandagina (keyinchalik, tasodifan) chalkash "jarayon topilmadi"
+    xabarini ko'rar edi. Endi bot qayta ishga tushishi bilanoq shu yozuvlarni
+    o'qib, har bir "muzlab qolgan" xabarni o'zi tuzatadi — admin hech narsa
+    bosishi shart emas va xabar darrov tushunarli holatga keladi."""
+    try:
+        stale = await asyncio.to_thread(db.get_settings_prefix, "clipjob_")
+    except Exception as e:
+        logger.warning(f"[clip-recover] DB'dan o'qib bo'lmadi: {e}")
+        return
+    if not stale:
+        return
+    for key, raw in stale.items():
+        try:
+            info = json.loads(raw)
+            await bot.edit_message_text(
+                chat_id=info["chat_id"],
+                message_id=info["message_id"],
+                text="⚠️ Bu klip jarayoni bot qayta ishga tushgani sabab to'xtab qoldi. "
+                     "Kerak bo'lsa qaytadan boshlang.",
+                reply_markup=None,
+            )
+        except Exception:
+            pass  # xabar allaqachon o'chirilgan/tahrirlanmas — bemalol o'tkazib yuboriladi
+        finally:
+            try:
+                await asyncio.to_thread(db.delete_setting, key)
+            except Exception:
+                pass
+    logger.info(f"[clip-recover] {len(stale)} ta muzlab qolgan klip-jarayon xabari tuzatildi.")
+
 async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status_message):
     """Video yuklab olinadi -> eng qiziqarli joy topiladi -> suv belgisi bilan
     16:9 va 9:16 formatlarda kesiladi -> ikkalasi ham adminga yuboriladi.
@@ -5902,6 +6016,21 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
     ])
     progress_msg = await status_message.answer("⏳ Boshlanmoqda...", reply_markup=cancel_kb)
     _clip_jobs[job_id] = asyncio.current_task()
+    # MUHIM: job haqidagi minimal ma'lumot (qaysi chat/xabarda progress ko'rsatilyapti)
+    # DB'ga ham yoziladi — faqat xotiradagi _clip_jobs'ga tayanilsa, server
+    # to'satdan qayta ishga tushganda (OOM/redeploy/crash) bu yozuv yo'qolib,
+    # progress xabari "muzlab" qolar edi va admin "Bekor qilish"ni bossagina
+    # (keyinchalik, tasodifan) chalkash "topilmadi" xabarini ko'rar edi. Endi
+    # bot qayta ishga tushganda _recover_stale_clip_jobs() shu DB yozuvlarini
+    # o'qib, xabarlarni DARHOL o'zi tuzatadi — admin hech narsa bosishi shart emas.
+    try:
+        await asyncio.to_thread(
+            db.set_setting,
+            f"clipjob_{job_id}",
+            json.dumps({"chat_id": progress_msg.chat.id, "message_id": progress_msg.message_id}),
+        )
+    except Exception:
+        pass
     _edit_state = {"t": 0.0, "text": ""}
 
     async def set_progress(text, force=False, show_cancel=True):
@@ -6020,6 +6149,10 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
         raise
     finally:
         _clip_jobs.pop(job_id, None)
+        try:
+            await asyncio.to_thread(db.delete_setting, f"clipjob_{job_id}")
+        except Exception:
+            pass
         for p in (src_path, out_h_path, out_v_path):
             try:
                 if os.path.exists(p):
@@ -9217,6 +9350,7 @@ async def main():
     else:
         logger.warning("API_ID/API_HASH topilmadi — onlayn striming o'chirilgan.")
 
+    await _recover_stale_clip_jobs()
     await start_web_server()
     asyncio.create_task(daily_report_task())
     asyncio.create_task(weekly_ai_report_task())

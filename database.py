@@ -1369,6 +1369,24 @@ def set_setting(key, value):
     conn.commit()
     put_conn(conn)
 
+def delete_setting(key):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM settings WHERE key=%s", (key,))
+    conn.commit()
+    put_conn(conn)
+
+def get_settings_prefix(prefix):
+    """`prefix` bilan boshlanadigan barcha sozlamalarni {key: value} lug'at
+    sifatida qaytaradi. Masalan faol klip-job'larni (clipjob_...) bot qayta
+    ishga tushganda topib, ularni tozalash/xabarlarni yangilash uchun."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT key, value FROM settings WHERE key LIKE %s", (prefix + "%",))
+    rows = c.fetchall()
+    put_conn(conn)
+    return {k: v for k, v in rows}
+
 # ===== WEBAPP UCHUN =====
 # Webapp bosh sahifasi HAR SAFAR ochilganda shu funksiya chaqiriladi va u
 # butun animes+episodes jadvalini JOIN qilib qayta hisoblardi — anime soni
