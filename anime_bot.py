@@ -5463,7 +5463,10 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
     """Nomzod lahzalardan kadr oladi, Gemini'ga (vision, ai_service orqali) yuboradi
     va eng qiziqarlisini tanlashini so'raydi. Muvaffaqiyatsiz bo'lsa (AI o'chirilgan,
     tarmoq xatosi, formatlanmagan javob va h.k.) None qaytaradi — bu holda
-    chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi.
+    chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi. Muvaffaqiyatli bo'lsa
+    `(start_soniya, used_smart)` tuple qaytaradi — `used_smart=True` bo'lsa
+    nomzodlar ovoz+sahna tahlili orqali aqlli tanlangan, `False` bo'lsa (o'sha
+    tahlil natija bermagani uchun) eski bir-tekis nomzodlarga qaytilgan.
     `progress_cb(text, force=False)` — agar berilsa, kadr olish va AI so'rovi
     bosqichlarida chaqiriladi (jarayon "qotib qolgandek" ko'rinmasligi uchun).
 
@@ -5480,6 +5483,7 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
         return None
 
     candidates = None
+    used_smart = False
     try:
         if progress_cb:
             await progress_cb("🔎 Nomzod lahzalar qidirilmoqda (ovoz + sahna tahlili)...", True)
@@ -5498,8 +5502,18 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
         logger.warning(f"[ai-highlight] nomzod tahlili muvaffaqiyatsiz, bir tekis nuqtalarga qaytilmoqda: {e}")
         candidates = None
 
-    if not candidates:
+    if candidates:
+        used_smart = True
+        if progress_cb:
+            await progress_cb(
+                f"✅ {len(candidates)} ta va'dali nomzod topildi (ovoz+sahna tahlili asosida)", True
+            )
+    else:
         candidates = _candidate_start_times(target_duration, total_duration)
+        if progress_cb:
+            await progress_cb(
+                "⚠️ Ovoz/sahna tahlili natija bermadi — bir tekis nomzodlarga o'tildi", True
+            )
 
     tmp_dir = os.path.join(CLIP_TMP_DIR, f"frames_{int(time.time() * 1000)}")
     try:
@@ -5525,7 +5539,7 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
 
         idx = await ai_service.pick_highlight_frame(images_b64)
         if idx is not None and 0 <= idx < len(candidates):
-            return candidates[idx]
+            return candidates[idx], used_smart
         return None
     except Exception as e:
         logger.error(f"[ai-highlight] xato: {e}")
@@ -5604,11 +5618,13 @@ async def _find_highlight_start(path, target_duration, total_duration, progress_
 
     if progress_cb:
         await progress_cb("🤖 AI ishlamoqda: kadrlar tanlanmoqda...", True)
-    ai_start = await _ai_pick_best_window(path, target_duration, total_duration, progress_cb=progress_cb)
-    if ai_start is not None:
+    ai_result = await _ai_pick_best_window(path, target_duration, total_duration, progress_cb=progress_cb)
+    if ai_result is not None:
+        ai_start, used_smart = ai_result
         if progress_cb:
             await progress_cb("✅ AI tanladi — klip tayyorlanmoqda...", True)
-        return ai_start, "🤖 AI tahlili"
+        method = "🤖 AI tahlili (aqlli nomzodlar)" if used_smart else "🤖 AI tahlili (bir tekis nomzodlar)"
+        return ai_start, method
     if progress_cb:
         await progress_cb("⚠️ AI javob bermadi — bepul tahlilga o'tilmoqda...", True)
     return await _free_heuristic()
