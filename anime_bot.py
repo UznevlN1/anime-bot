@@ -6258,7 +6258,23 @@ async def clip_cancel_handler(call: CallbackQuery):
         task.cancel()
         await call.answer("Bekor qilinmoqda...")
     else:
-        await call.answer("Bu jarayon allaqachon tugagan.", show_alert=True)
+        # Task _clip_jobs'da topilmadi — odatda bot qayta ishga tushib
+        # (Render redeploy/restart) xotiradagi lug'at yo'qolganida yuz beradi.
+        # Bunday holda asl jarayon (agar hali tugamagan bo'lsa) hech qachon
+        # o'z finally blokini ishga tushira olmaydi, shu sabab progress xabari
+        # abadiy "tayyorlanmoqda... N%" holatida "muzlab" qoladi va "Bekor
+        # qilish" tugmasi ham ishlamay qoladi. Shu yerda xabarni MAJBURAN
+        # yakunlab qo'yamiz — aks holda admin doim chalkash "allaqachon
+        # tugagan" xabarini ko'raveradi-yu, ekranda esa hech narsa o'zgarmaydi.
+        await call.answer("Bu jarayon allaqachon tugagan yoki bot qayta ishga tushgan.", show_alert=True)
+        try:
+            await call.message.edit_text(
+                "⚠️ Bu jarayon topilmadi (allaqachon tugagan yoki bot qayta ishga "
+                "tushgan bo'lishi mumkin). Kerak bo'lsa klipni qaytadan boshlang.",
+                reply_markup=None
+            )
+        except Exception:
+            pass
 
 # ---- STATISTIKA ----
 @dp.callback_query(F.data == "admin_stats")
