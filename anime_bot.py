@@ -5328,6 +5328,100 @@ def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio
     return min(start_time, max(0, total_duration - target_duration))
 
 
+def _top_candidate_windows(frames, target_duration, total_duration, k=8, edge_margin_ratio=0.05,
+                            cuts=None, high_freq_frames=None, motion_frames=None, silence_intervals=None):
+    """`_pick_best_window` bilan bir xil signallardan (ovoz, sahna-almashinuv,
+    zarba tovushi, harakat, nutq zichligi — qaysi biri berilgan bo'lsa) foydalanib,
+    ENG YAXSHI bitta oyna o'rniga eng yuqori balli TOP-K nuqtani qaytaradi (bir-biridan
+    kamida `target_duration` uzoqlikda, bir xil avjni bir necha marta tanlab
+    qo'ymaslik uchun). Bular keyin AI (vision)'ga ko'rsatiladi — shunda AI butun
+    video bo'ylab tasodifiy/bir tekis (ko'pincha "bo'sh") nuqtalarni emas, balki
+    ovoz/harakat/sahna-almashinuvi bo'yicha ALLAQACHON eng jonli ko'ringan
+    lahzalarni tekshiradi — jang/eng qiziqarli sahnani topish ehtimoli ancha oshadi.
+    Signal yetarli bo'lmasa (masalan `frames` bo'sh) bo'sh ro'yxat qaytaradi —
+    bu holda chaqiruvchi eski bir-tekis usulga qaytishi kerak."""
+    n_windows = max(1, round(target_duration / _CLIP_WINDOW_SEC))
+    edge_margin = max(0, total_duration * edge_margin_ratio)
+    usable = [(t, r) for (t, r) in frames if edge_margin <= t <= max(edge_margin, total_duration - edge_margin)]
+    if len(usable) < n_windows:
+        usable = frames
+    if not usable:
+        return []
+
+    def _normalize(vals):
+        m = max(vals) if vals else 0.0
+        return [v / m for v in vals] if m > 0 else [0.0] * len(vals)
+
+    energy_scores = _normalize([10 ** (r / 10.0) for (_, r) in usable])
+
+    cut_scores = None
+    if cuts:
+        cut_scores = _normalize([
+            sum(1 for c in cuts if t <= c < t + _CLIP_WINDOW_SEC) for (t, _) in usable
+        ])
+
+    hf_scores = None
+    if high_freq_frames:
+        hf_lookup = {round(t): r for (t, r) in high_freq_frames}
+        hf_scores = _normalize([
+            10 ** (hf_lookup.get(round(t), -120.0) / 10.0) for (t, _) in usable
+        ])
+
+    motion_scores = None
+    if motion_frames:
+        motion_scores = _normalize([
+            (lambda pts: sum(pts) / len(pts) if pts else 0.0)(
+                [v for (mt, v) in motion_frames if t <= mt < t + _CLIP_WINDOW_SEC]
+            )
+            for (t, _) in usable
+        ])
+
+    speech_scores = None
+    if silence_intervals is not None:
+        def _speech_ratio(t):
+            win_end = t + _CLIP_WINDOW_SEC
+            silent = 0.0
+            for s, e in silence_intervals:
+                overlap = min(win_end, e) - max(t, s)
+                if overlap > 0:
+                    silent += overlap
+            return max(0.0, 1.0 - silent / _CLIP_WINDOW_SEC)
+        speech_scores = [_speech_ratio(t) for (t, _) in usable]
+
+    weighted = [("energy", energy_scores, 0.30)]
+    if cut_scores is not None:
+        weighted.append(("cuts", cut_scores, 0.25))
+    if hf_scores is not None:
+        weighted.append(("hf", hf_scores, 0.20))
+    if motion_scores is not None:
+        weighted.append(("motion", motion_scores, 0.15))
+    if speech_scores is not None:
+        weighted.append(("speech", speech_scores, 0.10))
+    total_w = sum(w for _, _, w in weighted)
+
+    combined = [0.0] * len(usable)
+    for _, scores, w in weighted:
+        norm_w = w / total_w
+        for i, s in enumerate(scores):
+            combined[i] += norm_w * s
+
+    window_scores = [
+        (usable[i][0], sum(combined[i:i + n_windows]))
+        for i in range(0, len(usable) - n_windows + 1)
+    ]
+    window_scores.sort(key=lambda x: x[1], reverse=True)
+
+    picked = []
+    min_gap = max(target_duration, total_duration * 0.03)
+    for t, _ in window_scores:
+        if all(abs(t - p) >= min_gap for p in picked):
+            picked.append(t)
+        if len(picked) >= k:
+            break
+    picked.sort()
+    return picked
+
+
 # ---- AI (VISION) ORQALI ENG QIZIQARLI JOYNI TOPISH ----
 # Yuqoridagi ovoz-balandligi (RMS) usuli faqat audio energiyasiga qaraydi — u nima
 # tasvirlanayotganini bilmaydi. Bu yerda Gemini'ning vision qobiliyatidan (ai_service
@@ -5371,10 +5465,42 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
     tarmoq xatosi, formatlanmagan javob va h.k.) None qaytaradi — bu holda
     chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi.
     `progress_cb(text, force=False)` — agar berilsa, kadr olish va AI so'rovi
-    bosqichlarida chaqiriladi (jarayon "qotib qolgandek" ko'rinmasligi uchun)."""
+    bosqichlarida chaqiriladi (jarayon "qotib qolgandek" ko'rinmasligi uchun).
+
+    NOMZODLAR QANDAY TANLANADI: avvalgi versiyada video bo'ylab shunchaki BIR
+    TEKIS taqsimlangan nuqtalardan kadr olinar edi — bu ko'pincha AI'ga tinch/
+    "bo'sh" lahzalarni ko'rsatib, jang yoki eng qiziqarli sahnani butunlay
+    o'tkazib yuborishga olib kelardi (masalan sahna videoning 8 nomzoddan
+    hech biriga to'g'ri kelmagan joyida bo'lsa). Endi avval TEZKOR bepul
+    tahlil (ovoz balandligi + sahna-almashinuvi — faqat ffmpeg, arzon) orqali
+    butun video bo'ylab eng "jonli" ko'ringan TOP nuqtalar topiladi, va AI'ga
+    FAQAT o'sha nuqtalardagi kadrlar ko'rsatiladi — shu orqali AI allaqachon
+    ovoz/harakat jihatidan va'dali ko'ringan joylar orasidan tanlaydi."""
     if not ai_service.AI_ENABLED:
         return None
-    candidates = _candidate_start_times(target_duration, total_duration)
+
+    candidates = None
+    try:
+        if progress_cb:
+            await progress_cb("🔎 Nomzod lahzalar qidirilmoqda (ovoz + sahna tahlili)...", True)
+        loud_frames = await _analyze_loudness(path, total_duration)
+        try:
+            cuts = await _analyze_scene_cuts(path, total_duration)
+        except Exception as e:
+            logger.warning(f"[ai-highlight] sahna-almashinuv tahlili muvaffaqiyatsiz: {e}")
+            cuts = None
+        if loud_frames:
+            candidates = _top_candidate_windows(
+                loud_frames, target_duration, total_duration,
+                k=_AI_CANDIDATE_COUNT, cuts=cuts,
+            )
+    except Exception as e:
+        logger.warning(f"[ai-highlight] nomzod tahlili muvaffaqiyatsiz, bir tekis nuqtalarga qaytilmoqda: {e}")
+        candidates = None
+
+    if not candidates:
+        candidates = _candidate_start_times(target_duration, total_duration)
+
     tmp_dir = os.path.join(CLIP_TMP_DIR, f"frames_{int(time.time() * 1000)}")
     try:
         await asyncio.to_thread(os.makedirs, tmp_dir, exist_ok=True)
@@ -5671,8 +5797,15 @@ async def _render_vertical(path, start, duration, out_path, font_path, has_audio
     o'ldirilib, klip adminga umuman yetib bormas edi. 720x1280 xuddi 16:9 bilan
     bir xil piksel sonini beradi (faqat aylantirilgan) — ikkala bosqich ham
     serverga bab-baravar yuk soladi, format esa 9:16 bo'lib qoladi (Reels/TikTok/
-    Stories'da toʻliq HD sifatida ko'rinadi)."""
-    base = "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black"
+    Stories'da toʻliq HD sifatida ko'rinadi).
+    CROP-TO-FILL (pad emas): manba odatda 16:9 (gorizontal) bo'lgani uchun
+    "pad" (kichraytirib, atrofiga qora chiziq qo'shish) tepa-pastda qora
+    chiziqlar qoldirar edi. Endi video markazga moslab KATTALASHTIRILADI va
+    vertikal ramkani to'liq to'ldiradi, ortiqcha chap-o'ng qismi kesib
+    tashlanadi — natijada Instagram/TikTok/Reels'dagi kabi qora joysiz,
+    ekranni to'liq to'ldirgan klip chiqadi. Bu ham bitta oddiy filtr
+    (scale+crop, blur/overlay emas) bo'lgani uchun tezlikka ta'sir qilmaydi."""
+    base = "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280"
     if logo_path:
         filter_complex = f"[0:v]{base}[bg];[1:v]scale=180:-1[logo];[bg][logo]overlay=W-w-20:20[outv]"
         cmd = [
