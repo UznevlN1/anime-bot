@@ -373,6 +373,7 @@ class AddEpisode(StatesGroup):
 class ClipVideo(StatesGroup):
     search_query = State()
     waiting_video = State()
+    logo = State()
 
 class EditAnime(StatesGroup):
     choose_method = State()
@@ -5329,16 +5330,16 @@ def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio
 
 # ---- AI (VISION) ORQALI ENG QIZIQARLI JOYNI TOPISH ----
 # Yuqoridagi ovoz-balandligi (RMS) usuli faqat audio energiyasiga qaraydi — u nima
-# tasvirlanayotganini bilmaydi. Bu yerda Claude'ning vision qobiliyatidan foydalanib,
-# videodan bir nechta nomzod lahza (kadr) olinadi va Claude'dan ENG jonli/qiziqarli
-# lahzani (jang, kulgi, drama cho'qqisi va h.k.) tanlashi so'raladi.
+# tasvirlanayotganini bilmaydi. Bu yerda Gemini'ning vision qobiliyatidan (ai_service
+# orqali, xuddi rasm-moderatsiya/anime-aniqlash funksiyalarida ishlatilgani kabi)
+# foydalanib, videodan bir nechta nomzod lahza (kadr) olinadi va AI'dan ENG
+# jonli/qiziqarli lahzani (jang, kulgi, drama cho'qqisi va h.k.) tanlashi so'raladi.
 #
-# ISHLASHI UCHUN: serverga ANTHROPIC_API_KEY environment o'zgaruvchisi kerak
-# (https://console.anthropic.com dan olinadi). O'rnatilmagan yoki so'rov muvaffaqiyatsiz
-# bo'lsa, bot xato bermaydi — avtomatik ravishda pastdagi ovoz-balandligi usuliga qaytadi.
+# ISHLASHI UCHUN: alohida sozlash SHART emas — ai_service allaqachon GEMINI_API_KEY
+# (yoki GROQ_API_KEY) orqali ishlaydi (bepul tarif). AI o'chirilgan yoki so'rov
+# muvaffaqiyatsiz bo'lsa, bot xato bermaydi — avtomatik ravishda pastdagi
+# ovoz-balandligi usuliga qaytadi.
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-_AI_VISION_MODEL = "claude-haiku-4-5-20251001"  # vision uchun tez va arzon model
 _AI_CANDIDATE_COUNT = 8  # tahlil qilinadigan namunaviy kadrlar soni (ko'p bo'lsa — xarajat oshadi)
 
 def _extract_frame(path, timestamp, out_path):
@@ -5365,30 +5366,19 @@ def _candidate_start_times(target_duration, total_duration, edge_margin_ratio=0.
     return [lo + i * step for i in range(n)]
 
 async def _ai_pick_best_window(path, target_duration, total_duration, progress_cb=None):
-    """Nomzod lahzalardan kadr oladi, Claude'ga (vision) yuboradi va eng
-    qiziqarlisini tanlashini so'raydi. Muvaffaqiyatsiz bo'lsa (API kaliti yo'q,
+    """Nomzod lahzalardan kadr oladi, Gemini'ga (vision, ai_service orqali) yuboradi
+    va eng qiziqarlisini tanlashini so'raydi. Muvaffaqiyatsiz bo'lsa (AI o'chirilgan,
     tarmoq xatosi, formatlanmagan javob va h.k.) None qaytaradi — bu holda
     chaqiruvchi RMS (ovoz-balandligi) usuliga qaytadi.
     `progress_cb(text, force=False)` — agar berilsa, kadr olish va AI so'rovi
     bosqichlarida chaqiriladi (jarayon "qotib qolgandek" ko'rinmasligi uchun)."""
-    if not ANTHROPIC_API_KEY:
+    if not ai_service.AI_ENABLED:
         return None
     candidates = _candidate_start_times(target_duration, total_duration)
     tmp_dir = os.path.join(CLIP_TMP_DIR, f"frames_{int(time.time() * 1000)}")
     try:
         await asyncio.to_thread(os.makedirs, tmp_dir, exist_ok=True)
-        content = [{
-            "type": "text",
-            "text": (
-                f"Quyida bitta anime epizodidan {len(candidates)} ta turli lahzada olingan "
-                f"kadrlar bor, har biri raqamlangan (1 dan {len(candidates)} gacha). Ijtimoiy "
-                f"tarmoq (Instagram Reels/Stories) uchun qisqa reklama klipi shu lahzalardan "
-                f"BIRIDAN boshlanadi — shuning uchun eng \"qiziqarli\"/jonli ko'ringan kadrni "
-                f"tanla. Jang, kulgili moment, kuchli hissiyot yoki chiroyli vizual sahnalarga "
-                f"ustunlik ber. FAQAT quyidagi JSON formatida javob ber, boshqa hech qanday "
-                f"matn (izoh, tushuntirish) yozma: {{\"index\": <raqam>}}"
-            )
-        }]
+        images_b64 = []
         for i, ts in enumerate(candidates, 1):
             frame_path = os.path.join(tmp_dir, f"f{i}.jpg")
             await asyncio.to_thread(_extract_frame, path, ts, frame_path)
@@ -5399,42 +5389,16 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
                     f"{_progress_bar(pct)} {i}/{len(candidates)}"
                 )
             if not os.path.exists(frame_path):
+                images_b64.append(None)
                 continue
             with open(frame_path, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("ascii")
-            content.append({"type": "text", "text": f"Kadr #{i}:"})
-            content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
-            })
+                images_b64.append(base64.b64encode(f.read()).decode("ascii"))
 
         if progress_cb:
             await progress_cb(f"🤖 AI ishlamoqda: {len(candidates)} ta kadr yuborildi, javob kutilmoqda...", True)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": _AI_VISION_MODEL,
-                    "max_tokens": 100,
-                    "messages": [{"role": "user", "content": content}],
-                },
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                data = await resp.json()
-
-        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-        m = re.search(r'"index"\s*:\s*(\d+)', text)
-        if not m:
-            logger.error(f"[ai-highlight] javobni ajratib bo'lmadi: {text[:200]}")
-            return None
-        idx = int(m.group(1)) - 1
-        if 0 <= idx < len(candidates):
+        idx = await ai_service.pick_highlight_frame(images_b64)
+        if idx is not None and 0 <= idx < len(candidates):
             return candidates[idx]
         return None
     except Exception as e:
@@ -5450,10 +5414,10 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
             pass
 
 async def _find_highlight_start(path, target_duration, total_duration, progress_cb=None):
-    """Avval AI (vision) usulini sinaydi; muvaffaqiyatsiz bo'lsa yoki
-    ANTHROPIC_API_KEY o'rnatilmagan bo'lsa, BEPUL evristikaga qaytadi — bu
-    ovoz balandligi (RMS) VA sahna-almashinuv tezligini birlashtiradi (ikkalasi
-    ham faqat ffmpeg orqali, hech qanday tashqi/pullik xizmat kerak emas).
+    """Avval AI (vision, Gemini) usulini sinaydi; muvaffaqiyatsiz bo'lsa yoki AI
+    o'chirilgan bo'lsa, BEPUL evristikaga qaytadi — bu ovoz balandligi (RMS) VA
+    sahna-almashinuv tezligini birlashtiradi (ikkalasi ham faqat ffmpeg orqali,
+    hech qanday tashqi/pullik xizmat kerak emas).
     Qaytaradi: (start_soniya, usul_nomi — status xabarida ko'rsatish uchun).
     `progress_cb(text, force=False)` — AI ishlayaptimi, muvaffaqiyatsizmi yoki
     umuman o'chirilganmi — bu holatlar aniq ajratib xabar qilinadi, shunda admin
@@ -5507,7 +5471,7 @@ async def _find_highlight_start(path, target_duration, total_duration, progress_
         method = "🆓 kombinatsiyalangan tahlil" if frames else "🔊 ovoz tahlili"
         return start, method
 
-    if not ANTHROPIC_API_KEY:
+    if not ai_service.AI_ENABLED:
         if progress_cb:
             await progress_cb("🆓 Bepul tahlil: ovoz + sahna + harakat + nutq tahlili ishlatilmoqda...", True)
         return await _free_heuristic()
@@ -5542,6 +5506,32 @@ def _find_watermark_font():
         if os.path.exists(p):
             return p
     return None
+
+async def _get_watermark_logo_path():
+    """Admin yuklagan watermark logotipini (agar sozlangan bo'lsa) Telegram'dan
+    lokal faylga yuklab, yo'lini qaytaradi. Logotip Render diskida emas, DB'da
+    file_id sifatida saqlanadi — shu sabab Render qayta ishga tushib diskni
+    tozalasa ham (masalan qayta deploy qilinganda) yo'qolmaydi, har safar kerak
+    bo'lganda shu yerda qayta yuklab olinadi. Sozlanmagan yoki yuklab bo'lmasa
+    (masalan fayl o'chirilgan/eskirgan) None qaytaradi — bu holda faqat matnli
+    watermark ishlatiladi, bot xato bermaydi."""
+    file_id = await asyncio.to_thread(db.get_setting, "watermark_logo_file_id")
+    if not file_id:
+        return None
+    try:
+        await asyncio.to_thread(os.makedirs, CLIP_TMP_DIR, exist_ok=True)
+        logo_path = os.path.join(CLIP_TMP_DIR, "watermark_logo.png")
+        file = await bot.get_file(file_id)
+        file_bytes = await bot.download_file(file.file_path)
+
+        def _write():
+            with open(logo_path, "wb") as f:
+                f.write(file_bytes.read())
+        await asyncio.to_thread(_write)
+        return logo_path
+    except Exception as e:
+        logger.warning(f"[watermark-logo] yuklab bo'lmadi: {e}")
+        return None
 
 def _drawtext_filter(text, font_path, fontsize, y_expr):
     escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -5628,23 +5618,31 @@ async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None, stall_timeo
             await result
 
 
-async def _render_horizontal(path, start, duration, out_path, font_path, progress_cb=None):
+async def _render_horizontal(path, start, duration, out_path, font_path, logo_path=None, progress_cb=None):
     """16:9 (1280x720) format — kerak bo'lsa qora chiziqlar (pad) bilan aniq 16:9
-    ga keltiriladi, ustiga suv belgisi qo'yiladi."""
-    fs = 28
-    vf = (
-        "scale=1280:720:force_original_aspect_ratio=decrease,"
-        "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,"
-        + _drawtext_filter(WATERMARK_LINE1, font_path, fs, f"h-th-{fs+36}") + ","
-        + _drawtext_filter(WATERMARK_LINE2, font_path, fs, f"h-th-{fs}")
-    )
-    cmd = [
-        "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-        out_path, "-loglevel", "error"
-    ]
+    ga keltiriladi. `logo_path` berilsa (admin yuklagan watermark rasmi), yuqori-o'ng
+    burchakka qo'yiladi. Matnli watermark endi ishlatilmaydi — faqat logotip."""
+    base = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black"
+    if logo_path:
+        filter_complex = f"[0:v]{base}[bg];[1:v]scale=180:-1[logo];[bg][logo]overlay=W-w-24:24[outv]"
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
+            "-loop", "1", "-i", logo_path,
+            "-filter_complex", filter_complex,
+            "-map", "[outv]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+            "-shortest",
+            out_path, "-loglevel", "error"
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
+            "-vf", base,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+            out_path, "-loglevel", "error"
+        ]
     await _run_ffmpeg_progress(cmd, duration, progress_cb)
 
 def _has_audio_stream(path):
@@ -5657,32 +5655,50 @@ def _has_audio_stream(path):
     )
     return bool(out.stdout.strip())
 
-async def _render_vertical(path, start, duration, out_path, font_path, has_audio=True, progress_cb=None):
-    """9:16 (1080x1920, Instagram Stories/Reels) format.
+async def _render_vertical(path, start, duration, out_path, font_path, has_audio=True, logo_path=None, progress_cb=None):
+    """9:16 (720x1280, Instagram Stories/Reels/TikTok) format.
     MUHIM: avvalgi versiyada fon uchun xiralashtirilgan (blur) kattalashtirilgan
     nusxa + overlay ishlatilar edi — bu ancha og'ir hisoblash bo'lib, serverning
     kuchsiz CPU'sida amalda to'xtab qolar edi (foiz bir joyda "qotib" qolardi).
-    Shu sabab endi 16:9 bilan bir xil, YENGIL usul qo'llaniladi: video 1080 kenlikka
+    Shu sabab endi 16:9 bilan bir xil, YENGIL usul qo'llaniladi: video kenlikka
     moslab kichraytiriladi va yuqori-pastiga oddiy qora chiziqlar (pad) qo'yiladi.
     Bu overlay/blur'siz, bitta oddiy filtr zanjiri bo'lgani uchun ancha tezroq va
-    barqaror ishlaydi."""
-    fs = 34
-    vf = (
-        "scale=1080:1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,"
-        + _drawtext_filter(WATERMARK_LINE1, font_path, fs, f"h-th-{fs+56}") + ","
-        + _drawtext_filter(WATERMARK_LINE2, font_path, fs, f"h-th-{fs+6}")
-    )
-    cmd = [
-        "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
-        "-vf", vf,
-    ]
-    if has_audio:
-        cmd += ["-c:a", "aac", "-b:a", "128k"]
-    cmd += [
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-movflags", "+faststart", out_path, "-loglevel", "error"
-    ]
+    barqaror ishlaydi. `logo_path` berilsa, yuqori-o'ng burchakka logotip qo'yiladi.
+    Matnli watermark endi ishlatilmaydi — faqat logotip.
+    O'LCHAM (720x1280, 1080x1920 emas): 1080x1920'da bu bosqich 16:9'dan (1280x720)
+    ~2.25 marta ko'p piksel qayta ishlar edi — kuchsiz serverda shu sabab 9:16
+    bosqichi xotira yetmasligi/vaqt tugashi bilan qotib qolar yoki ffmpeg
+    o'ldirilib, klip adminga umuman yetib bormas edi. 720x1280 xuddi 16:9 bilan
+    bir xil piksel sonini beradi (faqat aylantirilgan) — ikkala bosqich ham
+    serverga bab-baravar yuk soladi, format esa 9:16 bo'lib qoladi (Reels/TikTok/
+    Stories'da toʻliq HD sifatida ko'rinadi)."""
+    base = "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black"
+    if logo_path:
+        filter_complex = f"[0:v]{base}[bg];[1:v]scale=180:-1[logo];[bg][logo]overlay=W-w-20:20[outv]"
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
+            "-loop", "1", "-i", logo_path,
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+        ]
+        if has_audio:
+            cmd += ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k"]
+        cmd += [
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-movflags", "+faststart", "-shortest",
+            out_path, "-loglevel", "error"
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start), "-i", path, "-t", str(duration),
+            "-vf", base,
+        ]
+        if has_audio:
+            cmd += ["-c:a", "aac", "-b:a", "128k"]
+        cmd += [
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-movflags", "+faststart", out_path, "-loglevel", "error"
+        ]
     await _run_ffmpeg_progress(cmd, duration, progress_cb)
 
 async def _get_channel_message_for_clip(channel_msg_id):
@@ -5823,6 +5839,7 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
             clip_len = float(duration)
 
         font_path = await asyncio.to_thread(_find_watermark_font)
+        logo_path = await _get_watermark_logo_path()
         has_audio = await asyncio.to_thread(_has_audio_stream, src_path)
 
         mm, ss = int(start // 60), int(start % 60)
@@ -5835,12 +5852,12 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
         # tayyor bo'lgan bo'lsa ham adminga umuman yetib bormas edi.
         await set_progress(_stage_progress_text("16:9", 0, int(time.monotonic() - pipeline_start)), force=True)
         await _render_horizontal(src_path, start, clip_len, out_h_path, font_path,
-                                  progress_cb=make_stage_cb("16:9"))
+                                  logo_path=logo_path, progress_cb=make_stage_cb("16:9"))
         await bot.send_video(admin_chat_id, FSInputFile(out_h_path), caption=f"{base_caption}\n📐 16:9")
 
         await set_progress(_stage_progress_text("9:16", 0, int(time.monotonic() - pipeline_start)), force=True)
         await _render_vertical(src_path, start, clip_len, out_v_path, font_path, has_audio,
-                                progress_cb=make_stage_cb("9:16"))
+                                logo_path=logo_path, progress_cb=make_stage_cb("9:16"))
         await bot.send_video(admin_chat_id, FSInputFile(out_v_path), caption=f"{base_caption}\n📱 9:16 (Stories/Reels)")
 
         total_elapsed = int(time.monotonic() - pipeline_start)
@@ -5898,9 +5915,78 @@ async def clip_start(call: CallbackQuery, state: FSMContext):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📂 Bazadagi epizod", callback_data="clip_source_db")],
             [InlineKeyboardButton(text="📤 Video yuborish", callback_data="clip_source_upload")],
+            [InlineKeyboardButton(text="🖼 Watermark logotipi", callback_data="clip_logo_menu")],
             [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
         ]),
         parse_mode="HTML"
+    )
+
+async def _watermark_logo_text():
+    file_id = await asyncio.to_thread(db.get_setting, "watermark_logo_file_id")
+    status = "✅ o'rnatilgan" if file_id else "❌ o'rnatilmagan (klipda watermark bo'lmaydi)"
+    return (
+        "🖼 <b>Watermark logotipi</b>\n\n"
+        f"Holati: {status}\n\n"
+        "Yuklangan logotip klipning yuqori-o'ng burchagiga qo'yiladi.\n\n"
+        "💡 Fon shaffof PNG bo'lsa chiroyliroq ko'rinadi — shaffoflik saqlanishi "
+        "uchun rasmni oddiy \"Photo\" emas, balki \"Fayl\" (document) sifatida yuboring."
+    )
+
+def _watermark_logo_kb(has_logo):
+    rows = [[InlineKeyboardButton(
+        text="🔄 Almashtirish" if has_logo else "📤 Yuklash",
+        callback_data="clip_logo_upload"
+    )]]
+    if has_logo:
+        rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="clip_logo_delete")])
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="clip_start")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+@dp.callback_query(F.data == "clip_logo_menu")
+async def clip_logo_menu(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.clear()
+    file_id = await asyncio.to_thread(db.get_setting, "watermark_logo_file_id")
+    await call.message.edit_text(
+        await _watermark_logo_text(), reply_markup=_watermark_logo_kb(bool(file_id)), parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "clip_logo_upload")
+async def clip_logo_upload_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await state.set_state(ClipVideo.logo)
+    await call.message.edit_text(
+        "🖼 Logotip rasmini yuboring (fon shaffof PNG bo'lsa, \"Fayl\" sifatida yuboring):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="clip_logo_menu")],
+        ])
+    )
+
+@dp.message(ClipVideo.logo, F.photo | F.document)
+async def clip_logo_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    if message.document:
+        if not (message.document.mime_type or "").startswith("image/"):
+            await message.answer("❌ Bu rasm fayli emas ko'rinadi. Iltimos PNG/JPG rasm yuboring.")
+            return
+        file_id = message.document.file_id
+    else:
+        file_id = message.photo[-1].file_id
+    await asyncio.to_thread(db.set_setting, "watermark_logo_file_id", file_id)
+    await state.clear()
+    await message.answer("✅ Logotip saqlandi!")
+    await message.answer(await _watermark_logo_text(), reply_markup=_watermark_logo_kb(True), parse_mode="HTML")
+
+@dp.callback_query(F.data == "clip_logo_delete")
+async def clip_logo_delete(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    await asyncio.to_thread(db.set_setting, "watermark_logo_file_id", "")
+    await call.message.edit_text(
+        await _watermark_logo_text(), reply_markup=_watermark_logo_kb(False), parse_mode="HTML"
     )
 
 @dp.callback_query(F.data == "clip_source_db")

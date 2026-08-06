@@ -1243,3 +1243,56 @@ async def recommend_anime_ids(catalog_text, user_context, max_picks=4):
         return out
     except Exception:
         return []
+
+
+async def pick_highlight_frame(images_base64, mime_type="image/jpeg"):
+    """"Qiziqarli joy kesish" funksiyasi uchun: video bo'ylab bir tekis
+    taqsimlangan bir nechta nomzod kadr (rasm) orasidan Gemini vision
+    yordamida ENG jonli/qiziqarli ko'ringanini tanlaydi (jang, kulgili
+    moment, kuchli hissiyot yoki chiroyli vizual sahnalarga ustunlik
+    beriladi). Ijtimoiy tarmoq (Reels/Stories) uchun qisqa klip shu
+    tanlangan lahzadan boshlanadi.
+
+    `images_base64` — kadrlar ro'yxati, chaqiruvchi tomon aniqlagan tartibda
+    (ba'zilari None bo'lishi mumkin — masalan kadr olishda xato ketgan
+    bo'lsa; bunday None qiymatlar Gemini'ga yuborilmaydi, lekin qaytariladigan
+    indeks HAR DOIM asl (None'lar bilan birga) ro'yxatga mos keladi).
+
+    Qaytaradi: tanlangan kadrning asl ro'yxatdagi 0-based indeksi, yoki AI
+    ishlamasa/aniq javob bera olmasa None (bu holda chaqiruvchi tomon bepul
+    ovoz-balandligi/harakat tahliliga qaytadi — xato bermaydi)."""
+    if not AI_ENABLED:
+        return None
+    valid = [(i, b64) for i, b64 in enumerate(images_base64) if b64]
+    if not valid:
+        return None
+    prompt = (
+        f"Quyida bitta anime epizodidan {len(valid)} ta turli lahzada olingan "
+        f"kadrlar bor, har biri raqamlangan (1 dan {len(valid)} gacha). Ijtimoiy "
+        f"tarmoq (Instagram Reels/Stories) uchun qisqa reklama klipi shu lahzalardan "
+        f"BIRIDAN boshlanadi — shuning uchun eng \"qiziqarli\"/jonli ko'ringan kadrni "
+        f"tanla. Jang, kulgili moment, kuchli hissiyot yoki chiroyli vizual sahnalarga "
+        f"ustunlik ber. FAQAT quyidagi JSON formatda javob ber, boshqa hech qanday "
+        f'matn (izoh, tushuntirish) yozma: {{"index": <raqam>}}'
+    )
+    parts = [{"text": prompt}]
+    for n, (_, b64) in enumerate(valid, 1):
+        parts.append({"text": f"Kadr #{n}:"})
+        parts.append({"inline_data": {"mime_type": mime_type, "data": b64}})
+    contents = [{"role": "user", "parts": parts}]
+
+    result = await _call_gemini(
+        contents, temperature=0.0, max_output_tokens=50, json_mode=True,
+        thinking_level="low",
+    )
+    if not result:
+        return None
+    try:
+        data = json.loads(result)
+        n = int(data.get("index"))
+        if 1 <= n <= len(valid):
+            return valid[n - 1][0]  # asl (None'lar bilan) ro'yxatdagi haqiqiy indeks
+        return None
+    except Exception:
+        logger.error(f"[pick_highlight_frame] javobni ajratib bo'lmadi: {result[:200]}")
+        return None
