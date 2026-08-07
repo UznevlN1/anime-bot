@@ -3902,18 +3902,35 @@ async def _add_done_impl(message: Message, state: FSMContext):
     pending = [t for t in tasks if not t.done()]
     if pending:
         wait_msg = await message.answer(f"⏳ {len(pending)} ta video hali fonda qayta ishlanmoqda, kutib turing...")
-    video_ids = await asyncio.gather(*tasks)
+    # MUHIM: return_exceptions=True — avval bitta video xato bersa (masalan
+    # transkod qulab tushsa), gather BUTUNLAY xato bilan to'xtar edi va hatto
+    # muvaffaqiyatli yuklangan boshqa videolar ham saqlanmay yo'qolib ketardi.
+    # Endi muammoli video(lar) o'tkazib yuboriladi, qolganlari saqlanadi.
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     if pending:
         try:
             await wait_msg.delete()
         except Exception:
             pass
+    ok_pairs = [(i, r) for i, r in enumerate(results, 1) if not isinstance(r, Exception)]
+    failed_nums = [i for i, r in enumerate(results, 1) if isinstance(r, Exception)]
+    if not ok_pairs:
+        await message.answer("❌ Hech qaysi video saqlanmadi (barchasida xato yuz berdi). Qaytadan urinib ko'ring.")
+        return
     anime_id = await asyncio.to_thread(db.add_anime, data["title"], data["year"], data["country"],
         data["genre"], data["description"], data.get("language", "Nomalum"), data["photo_id"], data["media_type"],
         data.get("total_episodes"), data.get("status", "ongoing"))
-    for i, msg_id in enumerate(video_ids, 1):
-        await asyncio.to_thread(db.add_episode, anime_id, i, msg_id)
+    for ep_num, msg_id in ok_pairs:
+        await asyncio.to_thread(db.add_episode, anime_id, ep_num, msg_id)
+    video_ids = [msg_id for _, msg_id in ok_pairs]
     await state.clear()
+    if failed_nums:
+        nums_str = ", ".join(str(n) for n in failed_nums)
+        await message.answer(
+            f"⚠️ {nums_str}-video(lar) saqlanmadi (xato yuz berdi), o'tkazib yuborildi. "
+            f"Qolgan {len(ok_pairs)} ta video muvaffaqiyatli qo'shildi. "
+            f"Muammoli qism(lar)ni keyinroq \"Qism qo'shish\" orqali alohida yuklashingiz mumkin."
+        )
 
     # Yangi anime kartasini ochiq e'lon kanaliga post qilish (ANNOUNCE_CHANNEL
     # o'rnatilgan bo'lsa). anime dict'ini db'dan qayta olamiz — chunki
@@ -4044,33 +4061,52 @@ async def addepi_done(message: Message, state: FSMContext):
     pending = [t for t in tasks if not t.done()]
     if pending:
         wait_msg = await message.answer(f"⏳ {len(pending)} ta qism hali fonda qayta ishlanmoqda, kutib turing...")
-    episode_msg_ids = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     if pending:
         try:
             await wait_msg.delete()
         except Exception:
             pass
-    for i, msg_id in enumerate(episode_msg_ids):
-        await asyncio.to_thread(db.add_episode, data["episode_anime_id"], data["next_ep"] + i, msg_id)
+    ok_pairs = [(data["next_ep"] + i, r) for i, r in enumerate(results) if not isinstance(r, Exception)]
+    failed_nums = [data["next_ep"] + i for i, r in enumerate(results) if isinstance(r, Exception)]
+    if not ok_pairs:
+        await message.answer("❌ Hech qaysi qism saqlanmadi (barchasida xato yuz berdi). Qaytadan urinib ko'ring.")
+        await state.clear()
+        return
+    for ep_num, msg_id in ok_pairs:
+        await asyncio.to_thread(db.add_episode, data["episode_anime_id"], ep_num, msg_id)
+    episode_msg_ids = [msg_id for _, msg_id in ok_pairs]
     await state.clear()
+    if failed_nums:
+        nums_str = ", ".join(str(n) for n in failed_nums)
+        await message.answer(
+            f"⚠️ {nums_str}-qism(lar) saqlanmadi (xato yuz berdi), o'tkazib yuborildi. "
+            f"Qolgan {len(ok_pairs)} ta qism muvaffaqiyatli qo'shildi. "
+            f"Muammoli qism(lar)ni keyinroq qayta yuklashingiz mumkin."
+        )
 
     # Reklama klipi — shu safar yuklangan birinchi (eng yangi) qismdan avtomatik
     # yaratiladi (fonda, javobni bloklamaydi)
     if await is_auto_clip_enabled() and episode_msg_ids:
         asyncio.create_task(_auto_generate_highlight_clip(message, episode_msg_ids[0]))
 
-    # Obunachilarga shaxsiy xabar — yangi qism chiqqani haqida
+    # Obunachilarga shaxsiy xabar — yangi qism chiqqani haqida.
+    # MUHIM: eng birinchi yuklangan qism (data["next_ep"]) endi doim
+    # muvaffaqiyatli bo'lishi shart emas (ba'zilari xato bilan o'tkazib
+    # yuborilishi mumkin) — shu sabab eng OXIRGI (eng yangi) muvaffaqiyatli
+    # saqlangan qism raqami ishlatiladi.
+    latest_ep_num = max(ep_num for ep_num, _ in ok_pairs)
     anime_row = await asyncio.to_thread(db.get_anime, data["episode_anime_id"])
     if anime_row:
         eps = await asyncio.to_thread(db.get_episodes, data["episode_anime_id"])
-        new_ep = next((e for e in eps if e["episode_number"] == data["next_ep"]), None)
+        new_ep = next((e for e in eps if e["episode_number"] == latest_ep_num), None)
         if new_ep:
             ai_text = None
             if ai_service.AI_ENABLED:
                 ai_text = await ai_service.generate_episode_announcement(
-                    anime_row["title"], data["next_ep"], anime_row.get("genre", "")
+                    anime_row["title"], latest_ep_num, anime_row.get("genre", "")
                 )
-            body = ai_text_to_html(ai_text.strip()) if ai_text else f"🎬 <b>{anime_row['title']}</b> — {data['next_ep']}-qism chiqdi!"
+            body = ai_text_to_html(ai_text.strip()) if ai_text else f"🎬 <b>{anime_row['title']}</b> — {latest_ep_num}-qism chiqdi!"
             asyncio.create_task(notify_anime_subscribers(
                 data["episode_anime_id"],
                 f"{body}\n\n👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
@@ -4078,7 +4114,7 @@ async def addepi_done(message: Message, state: FSMContext):
         # Webapp 🔔 paneli uchun bildirishnoma
         await asyncio.to_thread(
             db.create_notification, "episode",
-            f"{anime_row['title']} — {data['next_ep']}-qism chiqdi!",
+            f"{anime_row['title']} — {latest_ep_num}-qism chiqdi!",
             anime_id=data["episode_anime_id"]
         )
 
@@ -8640,7 +8676,7 @@ _NOTIF_ICON = {"episode": "🎬", "anime": "🆕", "announcement": "📣"}
 async def webapp_notifications(request):
     user_id = _webapp_user_id(request)
     rows, unread = await asyncio.gather(
-        asyncio.to_thread(db.get_notifications, 30, user_id),
+        asyncio.to_thread(db.get_notifications, 30),
         asyncio.to_thread(db.get_unread_notification_count, user_id),
     )
     items = [{
@@ -8663,24 +8699,6 @@ async def webapp_notifications_seen(request):
     if not user:
         return web.json_response({"error": "ruxsat yoq"}, status=403)
     await asyncio.to_thread(db.mark_notifications_seen, int(user["id"]))
-    return web.json_response({"ok": True})
-
-async def webapp_notifications_dismiss(request):
-    """POST /api/notifications/dismiss {init_data, notification_id} — bitta
-    bildirishnomani shu foydalanuvchi uchun o'qildi deb belgilaydi va
-    ro'yxatidan butunlay yashiradi."""
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    user = _verified_post_user(data)
-    if not user:
-        return web.json_response({"error": "ruxsat yoq"}, status=403)
-    try:
-        notification_id = int(data.get("notification_id"))
-    except (TypeError, ValueError):
-        return web.json_response({"error": "notification_id notoʻgʻri"}, status=400)
-    await asyncio.to_thread(db.dismiss_notification, int(user["id"]), notification_id)
     return web.json_response({"ok": True})
 
 async def webapp_banners(request):
@@ -9252,7 +9270,6 @@ async def start_web_server():
     app.router.add_get("/api/categories", webapp_categories)
     app.router.add_get("/api/notifications", webapp_notifications)
     app.router.add_post("/api/notifications/seen", webapp_notifications_seen)
-    app.router.add_post("/api/notifications/dismiss", webapp_notifications_dismiss)
     app.router.add_get("/api/public/animes", webapp_public_animes)
     app.router.add_get("/api/public/categories", webapp_public_categories)
     app.router.add_post("/api/site/register", webapp_site_register)
