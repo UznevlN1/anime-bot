@@ -84,10 +84,15 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .notif-modal-title{font-size:15px;font-weight:800;}
 .notif-modal-close{background:none;border:none;color:var(--text-dim);font-size:20px;line-height:1;padding:4px;}
 .notif-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;}
-.notif-item{display:flex;gap:10px;padding:12px;border-radius:13px;background:var(--bg-card2);border:1px solid var(--border);text-align:left;width:100%;}
+.notif-item{display:flex;align-items:stretch;gap:6px;border-radius:13px;background:var(--bg-card2);border:1px solid var(--border);color:var(--text);position:relative;}
+.notif-item.unread{border-color:var(--purple2);background:rgba(139,92,246,.12);}
+.notif-item-main{display:flex;gap:10px;padding:12px;text-align:left;flex:1;min-width:0;background:none;border:none;}
+.notif-dismiss-btn{flex:none;width:30px;margin:8px 8px 8px 0;border-radius:9px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text-dim);font-size:13px;display:flex;align-items:center;justify-content:center;}
+.notif-dismiss-btn:active{background:rgba(255,255,255,.12);color:var(--text);}
 .notif-icon{width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;background:rgba(139,92,246,.16);}
 .notif-body{flex:1;min-width:0;}
-.notif-title-t{font-size:13.5px;font-weight:700;margin-bottom:2px;}
+.notif-title-t{font-size:13.5px;font-weight:700;margin-bottom:2px;color:var(--text);display:flex;align-items:center;gap:6px;}
+.notif-unread-dot{width:7px;height:7px;border-radius:50%;background:var(--purple2);flex:none;box-shadow:0 0 0 3px rgba(139,92,246,.25);}
 .notif-text{font-size:12.5px;color:var(--text-dim);white-space:pre-wrap;}
 .notif-time{font-size:11px;color:var(--text-dim);margin-top:4px;}
 .notif-empty{text-align:center;color:var(--text-dim);font-size:13px;padding:30px 0;}
@@ -1000,7 +1005,11 @@ function applySort(items){
   const sorted=[...items];
   if(ACTIVE_SORT==='popular')sorted.sort((a,b)=>(b.views||0)-(a.views||0));
   else if(ACTIVE_SORT==='az')sorted.sort((a,b)=>a.title.localeCompare(b.title,'uz'));
-  else sorted.sort((a,b)=>b.id-a.id);
+  else sorted.sort((a,b)=>{
+    const ta=a.last_activity_at||'',tb=b.last_activity_at||'';
+    if(tb!==ta)return tb>ta?1:-1;
+    return b.id-a.id;
+  });
   return sorted;
 }
 let CATEGORIES=[];
@@ -1194,15 +1203,25 @@ function cacheSizeKB(){
   for(const k in localStorage){if(k.startsWith('anifilm_'))bytes+=(localStorage.getItem(k)||'').length;}
   return bytes<1024?bytes+' B':(bytes/1024).toFixed(1)+' KB';
 }
+function parseServerDate(iso){
+  // Server sana/vaqtni UTC sifatida saqlaydi (masalan to_char(NOW(),...)),
+  // lekin formatda timezone belgisi yo'q ("YYYY-MM-DD HH:MM:SS"). Buni
+  // brauzer "Z" qo'shilmasa mahalliy vaqt deb o'qib, O'zbekistonda (UTC+5)
+  // ~5 soatlik xato hosil qilardi ("1 daqiqa oldin" o'rniga "5 soat oldin").
+  // Shu sababli UTC ekanini aniq ko'rsatamiz.
+  let s=iso.trim().replace(' ','T');
+  if(!/[Zz]|[+-]\d{2}:?\d{2}$/.test(s))s+='Z';
+  return new Date(s);
+}
 function formatJoinDate(iso){
   if(!iso)return '—';
-  const d=new Date(iso.replace(' ','T'));
+  const d=parseServerDate(iso);
   if(isNaN(d))return '—';
   return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear();
 }
 function timeAgo(iso){
   if(!iso)return '';
-  const d=new Date(iso.replace(' ','T'));
+  const d=parseServerDate(iso);
   if(isNaN(d))return '';
   const diffSec=Math.max(0,Math.floor((Date.now()-d.getTime())/1000));
   if(diffSec<60)return 'hozirgina';
@@ -1214,12 +1233,13 @@ function timeAgo(iso){
 
 /* ---------- bildirishnomalar (🔔) ---------- */
 let NOTIF_ITEMS=[];
+let NOTIF_UNREAD=0;
 async function refreshNotifBadge(){
   try{
     const r=await fetchJSON(`${API}/notifications?${initDataQS()}`);
     NOTIF_ITEMS=r.items||[];
-    const unread=r.unread||0;
-    document.querySelectorAll('.bell .dot').forEach(d=>d.classList.toggle('show',unread>0));
+    NOTIF_UNREAD=r.unread||0;
+    document.querySelectorAll('.bell .dot').forEach(d=>d.classList.toggle('show',NOTIF_UNREAD>0));
   }catch(e){/* jimgina o'tkazamiz - bildirishnoma ikkinchi darajali */}
 }
 function renderNotifList(){
@@ -1228,23 +1248,44 @@ function renderNotifList(){
     list.innerHTML='<div class="notif-empty">Hozircha bildirishnomalar yoʻq</div>';
     return;
   }
-  list.innerHTML=NOTIF_ITEMS.map(n=>`
-    <button class="notif-item" data-anime-id="${n.anime_id||''}">
-      <div class="notif-icon">${n.icon||'🔔'}</div>
-      <div class="notif-body">
-        <div class="notif-title-t">${escapeHtml(n.title)}</div>
-        ${n.body&&n.body!==n.title?`<div class="notif-text">${escapeHtml(n.body)}</div>`:''}
-        <div class="notif-time">${timeAgo(n.created_at)}</div>
-      </div>
-    </button>
+  // Ro'yxat eng yangisidan eskisiga tartiblangan bo'lgani uchun, birinchi
+  // NOTIF_UNREAD dona element aynan o'qilmagan bildirishnomalardir.
+  list.innerHTML=NOTIF_ITEMS.map((n,i)=>`
+    <div class="notif-item${i<NOTIF_UNREAD?' unread':''}" data-notif-id="${n.id}" data-anime-id="${n.anime_id||''}">
+      <button class="notif-item-main" data-anime-id="${n.anime_id||''}">
+        <div class="notif-icon">${n.icon||'🔔'}</div>
+        <div class="notif-body">
+          <div class="notif-title-t">${i<NOTIF_UNREAD?'<span class="notif-unread-dot"></span>':''}${escapeHtml(n.title)}</div>
+          ${n.body&&n.body!==n.title?`<div class="notif-text">${escapeHtml(n.body)}</div>`:''}
+          <div class="notif-time">${timeAgo(n.created_at)}</div>
+        </div>
+      </button>
+      <button class="notif-dismiss-btn" data-notif-id="${n.id}" aria-label="O'qildi deb belgilash">✕</button>
+    </div>
   `).join('');
-  list.querySelectorAll('.notif-item').forEach(el=>{
+  list.querySelectorAll('.notif-item-main').forEach(el=>{
     el.addEventListener('click',()=>{
       const aid=el.dataset.animeId;
       closeNotifPanel();
       if(aid)openDetail(parseInt(aid,10));
     });
   });
+  list.querySelectorAll('.notif-dismiss-btn').forEach(el=>{
+    el.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      dismissNotification(parseInt(el.dataset.notifId,10));
+    });
+  });
+}
+function dismissNotification(notifId){
+  // Darhol ro'yxatdan olib tashlaymiz (optimistik), so'ng serverga xabar beramiz —
+  // foydalanuvchi tarmoq javobini kutib turmaydi.
+  NOTIF_ITEMS=NOTIF_ITEMS.filter(n=>n.id!==notifId);
+  renderNotifList();
+  const initData=getInitData();
+  if(initData){
+    fetch(`${API}/notifications/dismiss`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData,notification_id:notifId})}).catch(()=>{});
+  }
 }
 async function openNotifPanel(){
   document.getElementById('notifModalOverlay').classList.add('active');
@@ -1252,6 +1293,7 @@ async function openNotifPanel(){
   try{
     const r=await fetchJSON(`${API}/notifications?${initDataQS()}`);
     NOTIF_ITEMS=r.items||[];
+    NOTIF_UNREAD=r.unread||0;
     renderNotifList();
   }catch(e){}
   document.querySelectorAll('.bell .dot').forEach(d=>d.classList.remove('show'));
@@ -1545,7 +1587,15 @@ function renderRow(elId,list,variantFn){
   el.appendChild(frag);
 }
 function renderNewArrivals(){
-  const items=[...ALL_ANIME].sort((a,b)=>b.id-a.id).slice(0,8);
+  // Anime.id bo'yicha emas, oxirgi harakat vaqti (yangi anime QOʻSHILGANI
+  // yoki unga yangi QISM chiqqani) bo'yicha tartiblanadi — shu bilan eski
+  // animega yangi qism chiqsa ham, u "Yangi qo'shilganlar" qatorida
+  // birinchilar orasida chiqib turadi.
+  const items=[...ALL_ANIME].sort((a,b)=>{
+    const ta=a.last_activity_at||'',tb=b.last_activity_at||'';
+    if(tb!==ta)return tb>ta?1:-1;
+    return b.id-a.id;
+  }).slice(0,8);
   renderRow('newRow',items,()=>'new');
 }
 function renderPopular(){
