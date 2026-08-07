@@ -4936,6 +4936,15 @@ async def _probe_audio_codec(path):
 _BROWSER_SAFE_VIDEO_CODECS = {"h264", "vp9", "vp8", "av1"}
 _BROWSER_SAFE_AUDIO_CODECS = {"aac", "mp3"}
 
+# TIQILINCH (redeploy paytida yo'qolish) muammosining bir qismi: avval barcha
+# qismlar (masalan 8 tasi) BIR VAQTDA yuklab olinar va transkod qilinar edi —
+# katta fayllarda bu Render'ning xotira/CPU limitidan chiqib, protsessni
+# yiqitib yuborishi mumkin edi (bu esa "qayta deploy"ga o'xshab ko'rinadi).
+# Endi bir vaqtning o'zida ko'pi bilan 2 ta qism yuklab olinadi/transkod
+# qilinadi, qolganlari navbatda kutadi — admin baribir barcha videolarni
+# ketma-ket, kutmasdan yubora oladi (faqat OG'IR qism cheklanadi).
+_episode_upload_semaphore = asyncio.Semaphore(2)
+
 async def _process_episode_upload(message, caption, ep_label):
     """`_upload_episode_to_storage`ni fonda (background task sifatida) ishga
     tushiradi va tugagach adminga xabar beradi. Ilgari bu jarayon sinxron
@@ -4974,80 +4983,81 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
     )
     logger.info(f"[epizod-format] boshlandi: STORAGE_CHANNEL xabari={sent.message_id}")
 
-    await asyncio.to_thread(os.makedirs, EPISODE_TMP_DIR, exist_ok=True)
-    ts = int(time.time() * 1000)
-    src_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_src.mp4")
-    out_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_h264.mp4")
+    async with _episode_upload_semaphore:
+        await asyncio.to_thread(os.makedirs, EPISODE_TMP_DIR, exist_ok=True)
+        ts = int(time.time() * 1000)
+        src_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_src.mp4")
+        out_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_h264.mp4")
 
-    try:
-        channel_msg = await pyro.get_messages(STORAGE_CHANNEL, sent.message_id)
-        media = channel_msg.video or channel_msg.document or channel_msg.animation
-        if not media:
-            logger.warning(f"[epizod-format] xabar {sent.message_id}'da media topilmadi — o'zgarishsiz qoldirildi.")
-            return sent.message_id
-
-        logger.info(f"[epizod-format] yuklab olinmoqda (hajm={getattr(media, 'file_size', '?')} bayt)...")
-        dl_client = _next_stream_client() if _stream_clients else pyro
-        await dl_client.download_media(channel_msg, file_name=src_path)
-        logger.info(f"[epizod-format] yuklab olindi: {src_path}")
-
-        v_codec = await _probe_video_codec(src_path)
-        a_codec = await _probe_audio_codec(src_path)
-        logger.info(f"[epizod-format] aniqlangan kodeklar: video={v_codec!r}, audio={a_codec!r}")
-
-        video_ok = v_codec is not None and v_codec in _BROWSER_SAFE_VIDEO_CODECS
-        audio_ok = a_codec is None or a_codec in _BROWSER_SAFE_AUDIO_CODECS
-        if video_ok and audio_ok:
-            logger.info(f"[epizod-format] kodeklar brauzer bilan mos — o'tkazish shart emas.")
-            return sent.message_id
-        if v_codec is None:
-            # ffprobe video oqimini aniqlay olmadi (masalan ffmpeg/ffprobe
-            # o'rnatilmagan yoki fayl buzilgan) — xavfsiz tomondan qolib,
-            # o'zgartirmaymiz, lekin buni ANIQ logga yozamiz.
-            logger.warning(f"[epizod-format] video kodekini aniqlab bo'lmadi — o'tkazishdan voz kechildi (o'zgarishsiz qoldirildi).")
-            return sent.message_id
-
-        if status_message:
-            try:
-                await status_message.answer(
-                    f"🎞 Format (video={v_codec}, audio={a_codec}) ba'zi brauzerlarda "
-                    f"ishlamasligi mumkin — avtomatik H.264/AAC'ga o'tkazilmoqda. "
-                    f"Fayl hajmiga qarab bu bir necha daqiqa vaqt olishi mumkin, iltimos kuting..."
-                )
-            except Exception:
-                pass
-
-        total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
-        logger.info(f"[epizod-format] transkodlash boshlandi (davomiylik={total_dur}s)...")
-        await _run_ffmpeg_progress(
-            ["ffmpeg", "-y", "-i", src_path,
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-             "-c:a", "aac", "-b:a", "160k",
-             "-movflags", "+faststart", out_path],
-            total_dur or 0, stall_timeout=180
-        )
-        logger.info(f"[epizod-format] transkodlash tugadi: {out_path}")
-
-        new_sent = await pyro.send_video(STORAGE_CHANNEL, out_path, caption=caption or "")
-        logger.info(f"[epizod-format] yangi H.264 fayl saqlandi: msg_id={new_sent.id}")
         try:
-            await bot.delete_message(STORAGE_CHANNEL, sent.message_id)
-        except Exception:
-            logger.warning(f"Eski (transkodlanmagan) xabar {sent.message_id} o'chirilmadi — qo'lda tozalash kerak bo'lishi mumkin.")
-        return new_sent.id
-    except Exception:
-        logger.exception(
-            "[epizod-format] tekshirish/o'tkazishda kutilmagan xato — "
-            f"asl video (msg_id={sent.message_id}) o'zgarishsiz saqlab qolindi."
-        )
-        return sent.message_id
-    finally:
-        for p in (src_path, out_path):
+            channel_msg = await pyro.get_messages(STORAGE_CHANNEL, sent.message_id)
+            media = channel_msg.video or channel_msg.document or channel_msg.animation
+            if not media:
+                logger.warning(f"[epizod-format] xabar {sent.message_id}'da media topilmadi — o'zgarishsiz qoldirildi.")
+                return sent.message_id
+
+            logger.info(f"[epizod-format] yuklab olinmoqda (hajm={getattr(media, 'file_size', '?')} bayt)...")
+            dl_client = _next_stream_client() if _stream_clients else pyro
+            await dl_client.download_media(channel_msg, file_name=src_path)
+            logger.info(f"[epizod-format] yuklab olindi: {src_path}")
+
+            v_codec = await _probe_video_codec(src_path)
+            a_codec = await _probe_audio_codec(src_path)
+            logger.info(f"[epizod-format] aniqlangan kodeklar: video={v_codec!r}, audio={a_codec!r}")
+
+            video_ok = v_codec is not None and v_codec in _BROWSER_SAFE_VIDEO_CODECS
+            audio_ok = a_codec is None or a_codec in _BROWSER_SAFE_AUDIO_CODECS
+            if video_ok and audio_ok:
+                logger.info(f"[epizod-format] kodeklar brauzer bilan mos — o'tkazish shart emas.")
+                return sent.message_id
+            if v_codec is None:
+                # ffprobe video oqimini aniqlay olmadi (masalan ffmpeg/ffprobe
+                # o'rnatilmagan yoki fayl buzilgan) — xavfsiz tomondan qolib,
+                # o'zgartirmaymiz, lekin buni ANIQ logga yozamiz.
+                logger.warning(f"[epizod-format] video kodekini aniqlab bo'lmadi — o'tkazishdan voz kechildi (o'zgarishsiz qoldirildi).")
+                return sent.message_id
+
+            if status_message:
+                try:
+                    await status_message.answer(
+                        f"🎞 Format (video={v_codec}, audio={a_codec}) ba'zi brauzerlarda "
+                        f"ishlamasligi mumkin — avtomatik H.264/AAC'ga o'tkazilmoqda. "
+                        f"Fayl hajmiga qarab bu bir necha daqiqa vaqt olishi mumkin, iltimos kuting..."
+                    )
+                except Exception:
+                    pass
+
+            total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
+            logger.info(f"[epizod-format] transkodlash boshlandi (davomiylik={total_dur}s)...")
+            await _run_ffmpeg_progress(
+                ["ffmpeg", "-y", "-i", src_path,
+                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                 "-c:a", "aac", "-b:a", "160k",
+                 "-movflags", "+faststart", out_path],
+                total_dur or 0, stall_timeout=180
+            )
+            logger.info(f"[epizod-format] transkodlash tugadi: {out_path}")
+
+            new_sent = await pyro.send_video(STORAGE_CHANNEL, out_path, caption=caption or "")
+            logger.info(f"[epizod-format] yangi H.264 fayl saqlandi: msg_id={new_sent.id}")
             try:
-                if os.path.exists(p):
-                    await asyncio.to_thread(os.remove, p)
+                await bot.delete_message(STORAGE_CHANNEL, sent.message_id)
             except Exception:
-                pass
+                logger.warning(f"Eski (transkodlanmagan) xabar {sent.message_id} o'chirilmadi — qo'lda tozalash kerak bo'lishi mumkin.")
+            return new_sent.id
+        except Exception:
+            logger.exception(
+                "[epizod-format] tekshirish/o'tkazishda kutilmagan xato — "
+                f"asl video (msg_id={sent.message_id}) o'zgarishsiz saqlab qolindi."
+            )
+            return sent.message_id
+        finally:
+            for p in (src_path, out_path):
+                try:
+                    if os.path.exists(p):
+                        await asyncio.to_thread(os.remove, p)
+                except Exception:
+                    pass
 
 async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpass_hz=None):
     """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
