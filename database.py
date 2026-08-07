@@ -1000,11 +1000,13 @@ def get_random_anime():
 def add_episode(anime_id, episode_number, channel_message_id):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("INSERT INTO episodes (anime_id, episode_number, channel_message_id) VALUES (%s, %s, %s)",
+    c.execute("INSERT INTO episodes (anime_id, episode_number, channel_message_id) VALUES (%s, %s, %s) RETURNING id",
               (anime_id, episode_number, channel_message_id))
+    new_id = c.fetchone()[0]
     conn.commit()
     put_conn(conn)
     _invalidate_animes_cache()
+    return new_id
 
 def get_episodes(anime_id):
     conn = get_conn()

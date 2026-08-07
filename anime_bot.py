@@ -3912,7 +3912,7 @@ async def _add_done_impl(message: Message, state: FSMContext):
             await wait_msg.delete()
         except Exception:
             pass
-    ok_pairs = [(i, r) for i, r in enumerate(results, 1) if not isinstance(r, Exception)]
+    ok_pairs = [(i, r[0], r[1]) for i, r in enumerate(results, 1) if not isinstance(r, Exception)]
     failed_nums = [i for i, r in enumerate(results, 1) if isinstance(r, Exception)]
     if not ok_pairs:
         await message.answer("❌ Hech qaysi video saqlanmadi (barchasida xato yuz berdi). Qaytadan urinib ko'ring.")
@@ -3920,9 +3920,12 @@ async def _add_done_impl(message: Message, state: FSMContext):
     anime_id = await asyncio.to_thread(db.add_anime, data["title"], data["year"], data["country"],
         data["genre"], data["description"], data.get("language", "Nomalum"), data["photo_id"], data["media_type"],
         data.get("total_episodes"), data.get("status", "ongoing"))
-    for ep_num, msg_id in ok_pairs:
-        await asyncio.to_thread(db.add_episode, anime_id, ep_num, msg_id)
-    video_ids = [msg_id for _, msg_id in ok_pairs]
+    fix_prompts = []
+    for ep_num, msg_id, needs_fix in ok_pairs:
+        ep_id = await asyncio.to_thread(db.add_episode, anime_id, ep_num, msg_id)
+        if needs_fix:
+            fix_prompts.append((ep_id, ep_num))
+    video_ids = [msg_id for _, msg_id, _ in ok_pairs]
     await state.clear()
     if failed_nums:
         nums_str = ", ".join(str(n) for n in failed_nums)
@@ -3973,6 +3976,8 @@ async def _add_done_impl(message: Message, state: FSMContext):
         reply_markup=admin_keyboard(),
         parse_mode="HTML"
     )
+    for ep_id, ep_num in fix_prompts:
+        await _send_format_fix_prompt(message, ep_id, ep_num)
 
 # ---- DAVOM QO'SHISH ----
 @dp.callback_query(F.data == "admin_add_episode")
@@ -4067,15 +4072,18 @@ async def addepi_done(message: Message, state: FSMContext):
             await wait_msg.delete()
         except Exception:
             pass
-    ok_pairs = [(data["next_ep"] + i, r) for i, r in enumerate(results) if not isinstance(r, Exception)]
+    ok_pairs = [(data["next_ep"] + i, r[0], r[1]) for i, r in enumerate(results) if not isinstance(r, Exception)]
     failed_nums = [data["next_ep"] + i for i, r in enumerate(results) if isinstance(r, Exception)]
     if not ok_pairs:
         await message.answer("❌ Hech qaysi qism saqlanmadi (barchasida xato yuz berdi). Qaytadan urinib ko'ring.")
         await state.clear()
         return
-    for ep_num, msg_id in ok_pairs:
-        await asyncio.to_thread(db.add_episode, data["episode_anime_id"], ep_num, msg_id)
-    episode_msg_ids = [msg_id for _, msg_id in ok_pairs]
+    fix_prompts = []
+    for ep_num, msg_id, needs_fix in ok_pairs:
+        ep_id = await asyncio.to_thread(db.add_episode, data["episode_anime_id"], ep_num, msg_id)
+        if needs_fix:
+            fix_prompts.append((ep_id, ep_num))
+    episode_msg_ids = [msg_id for _, msg_id, _ in ok_pairs]
     await state.clear()
     if failed_nums:
         nums_str = ", ".join(str(n) for n in failed_nums)
@@ -4122,6 +4130,8 @@ async def addepi_done(message: Message, state: FSMContext):
         f"✅ {len(episode_msg_ids)} ta qism qoshildi!",
         reply_markup=admin_keyboard()
     )
+    for ep_id, ep_num in fix_prompts:
+        await _send_format_fix_prompt(message, ep_id, ep_num)
 
 # ---- ANIME RO'YXATI ADMIN ----
 @dp.callback_query(F.data.regexp(r"^admin_list_\d+$"))
@@ -4835,7 +4845,7 @@ async def epact_new_video(message: Message, state: FSMContext):
     data = await state.get_data()
     old_ep = await asyncio.to_thread(db.get_episode, data["edit_ep_id"])
     ep_num = old_ep["episode_number"] if old_ep else None
-    new_msg_id = await _upload_episode_to_storage(
+    new_msg_id, needs_fix = await _upload_episode_to_storage(
         message.chat.id, message.message_id,
         episode_caption(ep_num) if ep_num else None, status_message=message
     )
@@ -4843,6 +4853,8 @@ async def epact_new_video(message: Message, state: FSMContext):
     await state.clear()
     asyncio.create_task(_warmup_stream_clients(new_msg_id))
     await message.answer("✅ Qism yangilandi!", reply_markup=admin_keyboard())
+    if needs_fix:
+        await _send_format_fix_prompt(message, data["edit_ep_id"], ep_num)
 
 # ===================== QIZIQARLI JOY KESISH (AUTO-HIGHLIGHT) =====================
 # Ovoz balandligi (RMS) tahliliga asoslanib videoning eng "qiziqarli" (energiyaga
@@ -4951,9 +4963,10 @@ async def _process_episode_upload(message, caption, ep_label):
     edi — admin navbatdagi videoni yuborishdan oldin har safar yuklab olish +
     (kerak bo'lsa) transkod + qayta yuklashni to'liq kutishga majbur bo'lardi.
     Endi admin videolarni ketma-ket, kutmasdan yubora oladi; barcha qismlar
-    /done bosilganda kerak bo'lsa kutib olinadi (add_done/addepi_done'da)."""
+    /done bosilganda kerak bo'lsa kutib olinadi (add_done/addepi_done'da).
+    (message_id, needs_fix) juftligini qaytaradi — qarang: _upload_episode_to_storage."""
     try:
-        new_msg_id = await _upload_episode_to_storage(
+        new_msg_id, needs_fix = await _upload_episode_to_storage(
             message.chat.id, message.message_id, caption, status_message=message
         )
     except Exception:
@@ -4964,19 +4977,24 @@ async def _process_episode_upload(message, caption, ep_label):
     except Exception:
         pass
     asyncio.create_task(_warmup_stream_clients(new_msg_id))
-    return new_msg_id
+    return new_msg_id, needs_fix
 
 async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None):
-    """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi. Video yoki
-    audio kodeki brauzer bilan mos kelmasa (masalan video HEVC yoki audio AC3),
-    avtomatik ravishda H.264/AAC'ga o'tkazadi, shundan keyingina saqlaydi —
-    aks holda webapp pleer videoni umuman ochira olmaydi (garchi Telegram
-    ilovasining o'zida muammosiz o'ynasa ham).
-    Har doim STORAGE_CHANNEL'dagi YAKUNIY xabar message_id'sini qaytaradi.
-    Tekshirish/o'tkazish jarayonida kutilmagan xato yuz bersa, asl (o'tkazilmagan)
-    video saqlab qolinadi — admin oqimi hech qachon butunlay to'xtamaydi.
-    Har bir bosqich [epizod-format] prefiksi bilan logga yoziladi — Render
-    log qidiruvida shu so'z bo'yicha butun jarayonni kuzatish mumkin."""
+    """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi va formatini
+    TEKShiRADI (video/audio kodeki brauzer bilan mos keladimi — masalan HEVC
+    yoki AC3 mos kelmaydi).
+    MUHIM: bu funksiya ENDI avtomatik transkod QILMAYDI — bu bir necha daqiqa
+    cho'zilib, butun yuklash navbatini ushlab turardi. Buning o'rniga format
+    mos kelmasa faqat BELGILAYDI (needs_fix=True) va asl videoni o'sha holida
+    saqlaydi ("shunday qoldirib yuboramiz"). Qism DB'ga saqlangandan keyin
+    chaqiruvchi tomon (_send_format_fix_prompt orqali) adminga "🔄 To'g'irlash"
+    tugmasini ko'rsatadi — admin xohlasa keyinroq bosib, aynan o'sha qismni
+    to'g'irlashi mumkin (qarang: _transcode_episode_in_storage,
+    epfmt_fix_cb/epfmt_skip_cb).
+    Qaytaradi: (STORAGE_CHANNEL'dagi xabar message_id, needs_fix: bool).
+    Tekshirish jarayonida kutilmagan xato yuz bersa ham, asl video saqlab
+    qolinadi (needs_fix=False) — admin oqimi hech qachon butunlay to'xtamaydi.
+    Har bir bosqich [epizod-format] prefiksi bilan logga yoziladi."""
     sent = await bot.copy_message(
         STORAGE_CHANNEL, orig_chat_id, orig_message_id,
         caption=caption, parse_mode=None
@@ -4987,16 +5005,15 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
         await asyncio.to_thread(os.makedirs, EPISODE_TMP_DIR, exist_ok=True)
         ts = int(time.time() * 1000)
         src_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_src.mp4")
-        out_path = os.path.join(EPISODE_TMP_DIR, f"ep_{sent.message_id}_{ts}_h264.mp4")
 
         try:
             channel_msg = await pyro.get_messages(STORAGE_CHANNEL, sent.message_id)
             media = channel_msg.video or channel_msg.document or channel_msg.animation
             if not media:
                 logger.warning(f"[epizod-format] xabar {sent.message_id}'da media topilmadi — o'zgarishsiz qoldirildi.")
-                return sent.message_id
+                return sent.message_id, False
 
-            logger.info(f"[epizod-format] yuklab olinmoqda (hajm={getattr(media, 'file_size', '?')} bayt)...")
+            logger.info(f"[epizod-format] tekshirish uchun yuklab olinmoqda (hajm={getattr(media, 'file_size', '?')} bayt)...")
             dl_client = _next_stream_client() if _stream_clients else pyro
             await dl_client.download_media(channel_msg, file_name=src_path)
             logger.info(f"[epizod-format] yuklab olindi: {src_path}")
@@ -5008,27 +5025,57 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
             video_ok = v_codec is not None and v_codec in _BROWSER_SAFE_VIDEO_CODECS
             audio_ok = a_codec is None or a_codec in _BROWSER_SAFE_AUDIO_CODECS
             if video_ok and audio_ok:
-                logger.info(f"[epizod-format] kodeklar brauzer bilan mos — o'tkazish shart emas.")
-                return sent.message_id
+                logger.info("[epizod-format] kodeklar brauzer bilan mos — to'g'irlash shart emas.")
+                return sent.message_id, False
             if v_codec is None:
                 # ffprobe video oqimini aniqlay olmadi (masalan ffmpeg/ffprobe
                 # o'rnatilmagan yoki fayl buzilgan) — xavfsiz tomondan qolib,
-                # o'zgartirmaymiz, lekin buni ANIQ logga yozamiz.
-                logger.warning(f"[epizod-format] video kodekini aniqlab bo'lmadi — o'tkazishdan voz kechildi (o'zgarishsiz qoldirildi).")
-                return sent.message_id
+                # "to'g'irlash kerak" deb belgilamaymiz, lekin buni ANIQ logga yozamiz.
+                logger.warning("[epizod-format] video kodekini aniqlab bo'lmadi — o'zgarishsiz qoldirildi.")
+                return sent.message_id, False
 
-            if status_message:
-                try:
-                    await status_message.answer(
-                        f"🎞 Format (video={v_codec}, audio={a_codec}) ba'zi brauzerlarda "
-                        f"ishlamasligi mumkin — avtomatik H.264/AAC'ga o'tkazilmoqda. "
-                        f"Fayl hajmiga qarab bu bir necha daqiqa vaqt olishi mumkin, iltimos kuting..."
-                    )
-                except Exception:
-                    pass
+            logger.info(
+                f"[epizod-format] format mos emas (video={v_codec}, audio={a_codec}) — "
+                "asl holida saqlanadi, keyinroq to'g'irlash uchun belgilandi."
+            )
+            return sent.message_id, True
+        except Exception:
+            logger.exception(
+                "[epizod-format] tekshirishda kutilmagan xato — "
+                f"asl video (msg_id={sent.message_id}) o'zgarishsiz saqlab qolindi."
+            )
+            return sent.message_id, False
+        finally:
+            try:
+                if os.path.exists(src_path):
+                    await asyncio.to_thread(os.remove, src_path)
+            except Exception:
+                pass
+
+async def _transcode_episode_in_storage(channel_message_id, caption):
+    """STORAGE_CHANNEL'dagi mavjud xabardagi videoni H.264/AAC formatiga
+    o'tkazadi: qayta yuklab oladi -> ffmpeg bilan qayta kodlaydi -> yangi
+    xabar sifatida qayta yuklaydi -> eskisini o'chiradi. Bu "🔄 To'g'irlash"
+    tugmasi bosilganda (keyinroq, admin xohlagan vaqtda) chaqiriladi — qarang:
+    epfmt_fix_cb. YANGI xabar message_id'sini qaytaradi. Xato bo'lsa exception
+    ko'taradi (chaqiruvchi tomon ushlab, adminga xabar beradi)."""
+    async with _episode_upload_semaphore:
+        await asyncio.to_thread(os.makedirs, EPISODE_TMP_DIR, exist_ok=True)
+        ts = int(time.time() * 1000)
+        src_path = os.path.join(EPISODE_TMP_DIR, f"ep_{channel_message_id}_{ts}_src.mp4")
+        out_path = os.path.join(EPISODE_TMP_DIR, f"ep_{channel_message_id}_{ts}_h264.mp4")
+        try:
+            channel_msg = await pyro.get_messages(STORAGE_CHANNEL, channel_message_id)
+            media = channel_msg.video or channel_msg.document or channel_msg.animation
+            if not media:
+                raise RuntimeError(f"xabar {channel_message_id}'da media topilmadi")
+
+            logger.info(f"[epizod-format-fix] yuklab olinmoqda (hajm={getattr(media, 'file_size', '?')} bayt)...")
+            dl_client = _next_stream_client() if _stream_clients else pyro
+            await dl_client.download_media(channel_msg, file_name=src_path)
 
             total_dur = await asyncio.to_thread(_ffprobe_duration, src_path)
-            logger.info(f"[epizod-format] transkodlash boshlandi (davomiylik={total_dur}s)...")
+            logger.info(f"[epizod-format-fix] transkodlash boshlandi (davomiylik={total_dur}s)...")
             await _run_ffmpeg_progress(
                 ["ffmpeg", "-y", "-i", src_path,
                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -5036,21 +5083,15 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
                  "-movflags", "+faststart", out_path],
                 total_dur or 0, stall_timeout=180
             )
-            logger.info(f"[epizod-format] transkodlash tugadi: {out_path}")
+            logger.info(f"[epizod-format-fix] transkodlash tugadi: {out_path}")
 
             new_sent = await pyro.send_video(STORAGE_CHANNEL, out_path, caption=caption or "")
-            logger.info(f"[epizod-format] yangi H.264 fayl saqlandi: msg_id={new_sent.id}")
+            logger.info(f"[epizod-format-fix] yangi H.264 fayl saqlandi: msg_id={new_sent.id}")
             try:
-                await bot.delete_message(STORAGE_CHANNEL, sent.message_id)
+                await bot.delete_message(STORAGE_CHANNEL, channel_message_id)
             except Exception:
-                logger.warning(f"Eski (transkodlanmagan) xabar {sent.message_id} o'chirilmadi — qo'lda tozalash kerak bo'lishi mumkin.")
+                logger.warning(f"Eski (transkodlanmagan) xabar {channel_message_id} o'chirilmadi — qo'lda tozalash kerak bo'lishi mumkin.")
             return new_sent.id
-        except Exception:
-            logger.exception(
-                "[epizod-format] tekshirish/o'tkazishda kutilmagan xato — "
-                f"asl video (msg_id={sent.message_id}) o'zgarishsiz saqlab qolindi."
-            )
-            return sent.message_id
         finally:
             for p in (src_path, out_path):
                 try:
@@ -5058,6 +5099,77 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
                         await asyncio.to_thread(os.remove, p)
                 except Exception:
                     pass
+
+def _format_fix_keyboard(ep_id):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔄 To'g'irlash", callback_data=f"epfmt_fix_{ep_id}"),
+        InlineKeyboardButton(text="➡️ Shunday qoldirish", callback_data=f"epfmt_skip_{ep_id}"),
+    ]])
+
+async def _send_format_fix_prompt(message, ep_id, ep_num):
+    """Format brauzer bilan mos kelmagan qism uchun adminga "keyinroq
+    to'g'irlash" so'rovini yuboradi. Qism DB'ga saqlangandan (yoki
+    yangilangandan) KEYIN chaqirilishi shart — chunki tugma callback_data'si
+    episode.id'ga bog'liq."""
+    try:
+        await message.answer(
+            f"🎞 {ep_num}-qism formati ba'zi brauzerlarda (masalan Chrome/webapp) "
+            "ishlamasligi mumkin bo'lgan holda saqlandi. Hozir to'g'irlaysizmi "
+            "(fayl hajmiga qarab bir necha daqiqa vaqt olishi mumkin), yoki "
+            "shunday qoldirib, keyinroq to'g'irlaymizmi?",
+            reply_markup=_format_fix_keyboard(ep_id)
+        )
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("epfmt_fix_"))
+async def epfmt_fix_cb(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        await call.answer("Ruxsat yo'q", show_alert=True)
+        return
+    ep_id = int(call.data.split("_")[2])
+    ep = await asyncio.to_thread(db.get_episode, ep_id)
+    if not ep:
+        await call.answer("Qism topilmadi (o'chirilgan bo'lishi mumkin)", show_alert=True)
+        return
+    await call.answer()
+    try:
+        await call.message.edit_text(f"🔄 {ep['episode_number']}-qism formati to'g'irlanmoqda, kuting...")
+    except Exception:
+        pass
+    try:
+        new_msg_id = await _transcode_episode_in_storage(
+            ep["channel_message_id"], episode_caption(ep["episode_number"])
+        )
+        await asyncio.to_thread(db.update_episode, ep_id, new_msg_id)
+        asyncio.create_task(_warmup_stream_clients(new_msg_id))
+        try:
+            await call.message.edit_text(f"✅ {ep['episode_number']}-qism formati to'g'irlandi!")
+        except Exception:
+            pass
+    except Exception:
+        logger.exception(f"[epizod-format-fix] keyinroq to'g'irlashda xato (ep_id={ep_id})")
+        try:
+            await call.message.edit_text(
+                f"❌ {ep['episode_number']}-qism formatini to'g'irlashda xato yuz berdi. Qaytadan urinib ko'rishingiz mumkin.",
+                reply_markup=_format_fix_keyboard(ep_id)
+            )
+        except Exception:
+            pass
+
+@dp.callback_query(F.data.startswith("epfmt_skip_"))
+async def epfmt_skip_cb(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id):
+        await call.answer("Ruxsat yo'q", show_alert=True)
+        return
+    ep_id = int(call.data.split("_")[2])
+    ep = await asyncio.to_thread(db.get_episode, ep_id)
+    ep_num = ep["episode_number"] if ep else "?"
+    await call.answer("Shunday qoldirildi")
+    try:
+        await call.message.edit_text(f"➡️ {ep_num}-qism asl formatida qoldirildi.")
+    except Exception:
+        pass
 
 async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpass_hz=None):
     """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
