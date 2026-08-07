@@ -343,6 +343,19 @@ def init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_id_desc ON notifications(id DESC)")
 
+    # Foydalanuvchi bitta bildirishnomani "o'qildi" deb belgilab, oʻz roʻyxatidan
+    # yashirishi mumkin (masalan svayp/× tugmasi orqali). Bildirishnomalar jadvali
+    # barcha foydalanuvchilar uchun umumiy boʻlgani sabab, bu yerda faqat shu
+    # foydalanuvchi uchun "yashirilgan" deb belgilanadi — boshqalarga taʼsir qilmaydi.
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS notification_dismissals (
+        user_id BIGINT NOT NULL,
+        notification_id INTEGER NOT NULL,
+        dismissed_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+        PRIMARY KEY (user_id, notification_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_notif_dismissals_user ON notification_dismissals(user_id)")
+
     # --- Tezlik uchun indekslar (mavjud ma'lumot yoki xulq-atvorni o'zgartirmaydi,
     # faqat qidiruv/filtrlashni tezlashtiradi) ---
     c.execute("CREATE INDEX IF NOT EXISTS idx_animes_media_type ON animes(media_type)")
@@ -1412,7 +1425,8 @@ def get_animes_for_webapp():
     c.execute("""
         SELECT a.id, a.title, a.year, a.genre, a.category, a.description, a.photo_id,
                a.media_type, a.views, a.total_episodes, a.is_premium_only,
-               COUNT(e.id) AS episode_count
+               COUNT(e.id) AS episode_count,
+               GREATEST(a.created_at, COALESCE(MAX(e.created_at), a.created_at)) AS last_activity_at
         FROM animes a
         LEFT JOIN episodes e ON e.anime_id = a.id
         GROUP BY a.id
@@ -1924,13 +1938,37 @@ def create_notification(ntype, title, body=None, anime_id=None):
     conn.commit()
     put_conn(conn)
 
-def get_notifications(limit=30):
+def get_notifications(limit=30, user_id=None):
+    """user_id berilsa, shu foydalanuvchi allaqachon yashirgan (dismiss qilgan)
+    bildirishnomalar ro'yxatdan chiqarib tashlanadi."""
     conn = get_conn()
     c = psycopg2.extras.RealDictCursor(conn)
-    c.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT %s", (limit,))
+    if user_id:
+        c.execute("""
+            SELECT n.* FROM notifications n
+            WHERE NOT EXISTS (
+                SELECT 1 FROM notification_dismissals d
+                WHERE d.notification_id = n.id AND d.user_id = %s
+            )
+            ORDER BY n.id DESC LIMIT %s
+        """, (user_id, limit))
+    else:
+        c.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT %s", (limit,))
     rows = [dict(r) for r in c.fetchall()]
     put_conn(conn)
     return rows
+
+def dismiss_notification(user_id, notification_id):
+    """Foydalanuvchi bitta bildirishnomani o'qildi deb belgilaydi va uni oʻz
+    roʻyxatidan butunlay yashiradi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO notification_dismissals (user_id, notification_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+        (user_id, notification_id)
+    )
+    conn.commit()
+    put_conn(conn)
 
 def get_unread_notification_count(user_id):
     """Foydalanuvchi hali ko'rmagan bildirishnomalar soni. Mehmon (user_id=0/None)
@@ -1943,7 +1981,13 @@ def get_unread_notification_count(user_id):
     c.execute("SELECT COALESCE(last_seen_notification_id,0) FROM users WHERE user_id=%s", (user_id,))
     row = c.fetchone()
     last_seen = row[0] if row else 0
-    c.execute("SELECT COUNT(*) FROM notifications WHERE id > %s", (last_seen,))
+    c.execute("""
+        SELECT COUNT(*) FROM notifications n
+        WHERE n.id > %s AND NOT EXISTS (
+            SELECT 1 FROM notification_dismissals d
+            WHERE d.notification_id = n.id AND d.user_id = %s
+        )
+    """, (last_seen, user_id))
     count = c.fetchone()[0]
     put_conn(conn)
     return count
