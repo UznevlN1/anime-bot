@@ -8883,7 +8883,7 @@ _NOTIF_ICON = {"episode": "🎬", "anime": "🆕", "announcement": "📣"}
 async def webapp_notifications(request):
     user_id = _webapp_user_id(request)
     rows, unread = await asyncio.gather(
-        asyncio.to_thread(db.get_notifications, 30),
+        asyncio.to_thread(db.get_notifications, 30, user_id),
         asyncio.to_thread(db.get_unread_notification_count, user_id),
     )
     items = [{
@@ -8906,6 +8906,23 @@ async def webapp_notifications_seen(request):
     if not user:
         return web.json_response({"error": "ruxsat yoq"}, status=403)
     await asyncio.to_thread(db.mark_notifications_seen, int(user["id"]))
+    return web.json_response({"ok": True})
+
+async def webapp_notifications_dismiss(request):
+    """Bitta bildirishnomani (✕ tugmasi) foydalanuvchi ro'yxatidan butunlay
+    yashiradi. Frontend bu endpointni chaqirar edi, lekin u ro'yxatdan
+    o'tkazilmagan edi — shu sabab dismiss hech qachon serverga saqlanmas,
+    bildirishnoma panel qayta ochilganda "o'chirilgan" xabarlar qaytadan
+    paydo bo'lardi."""
+    try:
+        data = await request.json()
+        notification_id = int(data.get("notification_id"))
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
+    user = _verified_post_user(data)
+    if not user:
+        return web.json_response({"error": "ruxsat yoq"}, status=403)
+    await asyncio.to_thread(db.dismiss_notification, int(user["id"]), notification_id)
     return web.json_response({"ok": True})
 
 async def webapp_banners(request):
@@ -9477,6 +9494,7 @@ async def start_web_server():
     app.router.add_get("/api/categories", webapp_categories)
     app.router.add_get("/api/notifications", webapp_notifications)
     app.router.add_post("/api/notifications/seen", webapp_notifications_seen)
+    app.router.add_post("/api/notifications/dismiss", webapp_notifications_dismiss)
     app.router.add_get("/api/public/animes", webapp_public_animes)
     app.router.add_get("/api/public/categories", webapp_public_categories)
     app.router.add_post("/api/site/register", webapp_site_register)
