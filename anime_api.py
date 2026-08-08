@@ -71,6 +71,11 @@ query ($search: String) {
 }
 """
 
+# AniList tavsiflari <br> (qator ko'chirish) va <i> kabi teglar bilan keladi.
+# <br> -> "\n" ga aylantiriladi, qolgan teglar esa BO'SH emas, BO'SHLIQ bilan
+# almashtiriladi — aks holda "so'z.<i>Izoh</i>" kabi joylarda teglar olib
+# tashlanganda "so'z.Izoh" deb qo'shilib qolar edi (bo'sh joy yo'qolib ketib).
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -102,7 +107,10 @@ async def search_anilist(title: str) -> dict | None:
         return None
 
     desc_raw = media.get("description") or ""
-    desc_clean = _TAG_RE.sub("", desc_raw).replace("\n\n", "\n").strip()
+    desc_clean = _BR_RE.sub("\n", desc_raw)
+    desc_clean = _TAG_RE.sub(" ", desc_clean)
+    desc_clean = re.sub(r"[ \t]+", " ", desc_clean)
+    desc_clean = re.sub(r"\n{3,}", "\n\n", desc_clean).strip()
 
     country_code = media.get("countryOfOrigin") or ""
     country = _COUNTRY_MAP.get(country_code, country_code or "")
