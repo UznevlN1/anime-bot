@@ -918,6 +918,11 @@ async def guess_anime_title_from_image(image_base64, mime_type="image/jpeg"):
     mumkin, shu sabab natija HAR DOIM admin'ga "AI taxmini, tekshiring"
     deb aniq belgilab ko'rsatilishi SHART (chaqiruvchi tomon).
 
+    MUHIM: "title" maydoni admin uchun O'ZBEK TILIGA TARJIMA qilingan
+    holda qaytariladi (masalan yapon/ingliz original nomi emas, uning
+    o'zbekcha maʼnosi) — botning boshqa joylarida ham anime nomlari
+    odatda o'zbekchalashtirilgan holda kiritiladi.
+
     Qaytaradi: {"title": str, "year": str, "confidence": "low/medium/high"}
       Hech narsa aniqlay olmasa — barcha maydonlar bo'sh, confidence="low"."""
     empty = {"title": "", "year": "", "confidence": "low"}
@@ -933,9 +938,15 @@ async def guess_anime_title_from_image(image_base64, mime_type="image/jpeg"):
         "notanish bo'lsa, nom o'ylab topma — bo'sh (\"\") qoldir. "
         "Noto'g'ri taxmin qilishdan ko'ra \"bilmayman\" deyish "
         "YAXSHIROQ.\n\n"
+        "Agar anime nomini aniqlay olsang, uni asl (yapon/ingliz/romaji) "
+        "shaklida emas, balki O'ZBEK TILIGA TARJIMA QILINGAN holda yoz "
+        "(masalan asl nomi \"Himekishi wa Barbaroi no Yome\" bo'lsa, "
+        "o'zbekcha maʼnosini, masalan \"Malika ritsar vahshiylar kelini\" "
+        "kabi yoz — original nomni emas).\n\n"
         'FAQAT quyidagi JSON formatda javob ber: {"title": "aniq bo\'lsa '
-        'anime nomi, aks holda \\"\\"", "year": "chiqqan yili bilsang, '
-        'aks holda \\"\\"", "confidence": "low/medium/high"}'
+        'anime nomining o\'zbekcha tarjimasi, aks holda \\"\\"", "year": '
+        '"chiqqan yili bilsang, aks holda \\"\\"", "confidence": '
+        '"low/medium/high"}'
     )
     contents = [{
         "role": "user",

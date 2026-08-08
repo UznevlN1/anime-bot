@@ -3382,39 +3382,142 @@ async def add_photo(message: Message, state: FSMContext):
 
     await state.set_state(AddAnime.title)
 
-@dp.message(AddAnime.title)
-async def add_title(message: Message, state: FSMContext):
-    title = message.text.strip()
-    await state.update_data(title=title)
+# ---- Qo'lda kiritilgan maydonlarni tasdiqlash ----
+# Admin nom/yil/davlat/janr/tavsifni yozgach (yoki AI orqali tavsif
+# yaratilgach), bot buni DARHOL saqlab keyingi savolga o'tib ketmaydi —
+# avval "Siz kiritdingiz: X — to'g'rimi?" deb ko'rsatadi va faqat ✅
+# tasdiqlangandan keyingina haqiqiy maydonga saqlanadi. Qiymat shu
+# tasdiqlash bosqichida state'da vaqtincha `_pending_<field>` sifatida
+# saqlanadi (state HOLATI o'zgartirilmaydi — shu bilan admin ✅ bosish
+# o'rniga to'g'ridan-to'g'ri qayta yozib yuborsa ham, xuddi shu maydon
+# handler'i ushlab, yangi tasdiqlash so'raydi).
+_MANUAL_CONFIRM_LABELS = {
+    "title": "📌 Nomi",
+    "year": "📅 Yili",
+    "country": "🌍 Davlati",
+    "genre": "🎭 Janri",
+    "description": "📝 Tavsifi",
+}
+_MANUAL_RETRY_PROMPTS = {
+    "title": "📌 Anime nomini qayta yozing:",
+    "year": "📅 Yilini qayta yozing:",
+    "country": "🌍 Davlatini qayta yozing:",
+    "genre": "🎭 Janrini qayta yozing:",
+}
 
-    # Dublikatlarni oldini olish: bazadagi nomi o'xshash animelarni topib,
-    # aynan bir xil bo'lishi mumkinligini tekshiramiz (aniq mos kelish
-    # darhol, boshqacha yozilishlar esa AI orqali).
-    candidates = await asyncio.to_thread(db.search_anime, title)
-    candidates = [c for c in candidates if c.get("title")][:5]
-    duplicate_title = None
-    if candidates:
-        cand_titles = [c["title"] for c in candidates]
-        exact = next((t for t in cand_titles if t.strip().lower() == title.lower()), None)
-        if exact:
-            duplicate_title = exact
-        elif ai_service.AI_ENABLED:
-            duplicate_title = await ai_service.find_duplicate_anime(title, cand_titles)
 
-    if duplicate_title:
-        await state.set_state(AddAnime.dup_check)
-        await message.answer(
-            f"⚠️ Bazada shunga o'xshash anime allaqachon bor: \"{duplicate_title}\".\n\n"
-            "Baribir davom etasizmi? (Agar bu yangi fasl yoki boshqa dublyaj bo'lsa, "
-            "davom eting)",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Baribir davom etish", callback_data="adddup_continue")],
-                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_back")],
+def _manual_confirm_kb(field):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"addconfirm:{field}:yes"),
+        InlineKeyboardButton(text="✏️ Qayta yozish", callback_data=f"addconfirm:{field}:retry"),
+    ]])
+
+
+async def _ask_manual_confirm(target, state: FSMContext, field, value):
+    """Kiritilgan qiymatni saqlashdan oldin ko'rsatib, tasdiqlashni so'raydi."""
+    await state.update_data(**{f"_pending_{field}": value})
+    label = _MANUAL_CONFIRM_LABELS.get(field, field)
+    shown = value if len(str(value)) <= 500 else str(value)[:500] + "…"
+    await target.answer(f"{label}: {shown}\n\nTo'g'rimi?", reply_markup=_manual_confirm_kb(field))
+
+
+async def _commit_manual_field(target, state: FSMContext, field, value):
+    """Admin ✅ tasdiqlagandan keyin qiymatni haqiqiy maydonga saqlaydi va
+    navbatdagi bosqichga o'tkazadi (avvalgi add_title/add_year/... mantig'i)."""
+    if field == "title":
+        await state.update_data(title=value)
+        # Dublikatlarni oldini olish: bazadagi nomi o'xshash animelarni topib,
+        # aynan bir xil bo'lishi mumkinligini tekshiramiz (aniq mos kelish
+        # darhol, boshqacha yozilishlar esa AI orqali).
+        candidates = await asyncio.to_thread(db.search_anime, value)
+        candidates = [c for c in candidates if c.get("title")][:5]
+        duplicate_title = None
+        if candidates:
+            cand_titles = [c["title"] for c in candidates]
+            exact = next((t for t in cand_titles if t.strip().lower() == value.lower()), None)
+            if exact:
+                duplicate_title = exact
+            elif ai_service.AI_ENABLED:
+                duplicate_title = await ai_service.find_duplicate_anime(value, cand_titles)
+
+        if duplicate_title:
+            await state.set_state(AddAnime.dup_check)
+            await target.answer(
+                f"⚠️ Bazada shunga o'xshash anime allaqachon bor: \"{duplicate_title}\".\n\n"
+                "Baribir davom etasizmi? (Agar bu yangi fasl yoki boshqa dublyaj bo'lsa, "
+                "davom eting)",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Baribir davom etish", callback_data="adddup_continue")],
+                    [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_back")],
+                ])
+            )
+            return
+        await _add_anime_ask_year(target, state)
+
+    elif field == "year":
+        await state.update_data(year=value)
+        await state.set_state(AddAnime.country)
+        await target.answer("🌍 Davlatini yozing:")
+
+    elif field == "country":
+        await state.update_data(country=value)
+        await state.set_state(AddAnime.genre)
+        await target.answer("🎭 Janrini yozing:")
+
+    elif field == "genre":
+        await state.update_data(genre=value)
+        await state.set_state(AddAnime.description)
+        kb = None
+        if ai_service.AI_ENABLED:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🤖 AI yordamida yaratish", callback_data="ai_gen_desc")]
             ])
-        )
+        await target.answer("📝 Qisqa malumot yozing:", reply_markup=kb)
+
+    elif field == "description":
+        await state.update_data(description=value)
+        await state.set_state(AddAnime.language)
+        await target.answer("🗣 Tilini yozing (masalan: O'zbek, Rus, Yapon):")
+
+
+@dp.callback_query(F.data.startswith("addconfirm:"))
+async def addconfirm_cb(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    try:
+        _, field, action = call.data.split(":", 2)
+    except ValueError:
+        await call.answer()
         return
 
-    await _add_anime_ask_year(message, state)
+    data = await state.get_data()
+    pending = data.get(f"_pending_{field}")
+    if pending is None:
+        # Eski/allaqachon ishlatilgan tugma bosilgan — endi amal qilmaydi.
+        await call.answer()
+        return
+
+    if action == "retry":
+        await call.answer()
+        if field == "description":
+            kb = None
+            if ai_service.AI_ENABLED:
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🤖 AI yordamida yaratish", callback_data="ai_gen_desc")]
+                ])
+            await call.message.edit_text("📝 Qisqa malumot yozing:", reply_markup=kb)
+        else:
+            await call.message.edit_text(_MANUAL_RETRY_PROMPTS.get(field, "Qayta yozing:"))
+        return
+
+    await call.answer("✅ Qabul qilindi")
+    await state.update_data(**{f"_pending_{field}": None})
+    await _commit_manual_field(call.message, state, field, pending)
+
+
+@dp.message(AddAnime.title)
+async def add_title(message: Message, state: FSMContext):
+    await _ask_manual_confirm(message, state, "title", message.text.strip())
 
 async def _add_anime_ask_year(target, state: FSMContext):
     await state.set_state(AddAnime.year)
@@ -3725,32 +3828,19 @@ async def _run_anilist_autofill(target, state: FSMContext, title):
 
 @dp.message(AddAnime.year)
 async def add_year(message: Message, state: FSMContext):
-    await state.update_data(year=message.text)
-    await state.set_state(AddAnime.country)
-    await message.answer("🌍 Davlatini yozing:")
+    await _ask_manual_confirm(message, state, "year", message.text.strip())
 
 @dp.message(AddAnime.country)
 async def add_country(message: Message, state: FSMContext):
-    await state.update_data(country=message.text)
-    await state.set_state(AddAnime.genre)
-    await message.answer("🎭 Janrini yozing:")
+    await _ask_manual_confirm(message, state, "country", message.text.strip())
 
 @dp.message(AddAnime.genre)
 async def add_genre(message: Message, state: FSMContext):
-    await state.update_data(genre=message.text)
-    await state.set_state(AddAnime.description)
-    kb = None
-    if ai_service.AI_ENABLED:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🤖 AI yordamida yaratish", callback_data="ai_gen_desc")]
-        ])
-    await message.answer("📝 Qisqa malumot yozing:", reply_markup=kb)
+    await _ask_manual_confirm(message, state, "genre", message.text.strip())
 
 @dp.message(AddAnime.description)
 async def add_desc(message: Message, state: FSMContext):
-    await state.update_data(description=message.text)
-    await state.set_state(AddAnime.language)
-    await message.answer("🗣 Tilini yozing (masalan: O'zbek, Rus, Yapon):")
+    await _ask_manual_confirm(message, state, "description", message.text.strip())
 
 @dp.callback_query(AddAnime.description, F.data == "ai_gen_desc")
 async def ai_gen_desc(call: CallbackQuery, state: FSMContext):
@@ -3768,12 +3858,7 @@ async def ai_gen_desc(call: CallbackQuery, state: FSMContext):
     if not desc:
         await call.message.answer("😕 AI javob bermadi, iltimos tavsifni qo'lda yozing.")
         return
-    await state.update_data(description=desc)
-    await state.set_state(AddAnime.language)
-    await call.message.answer(
-        f"📝 AI tavsifi:\n\n{desc}\n\n"
-        f"✅ Qabul qilindi. Endi tilini yozing (masalan: O'zbek, Rus, Yapon):"
-    )
+    await _ask_manual_confirm(call.message, state, "description", desc)
 
 @dp.message(AddAnime.language)
 async def add_language(message: Message, state: FSMContext):
