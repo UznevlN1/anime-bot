@@ -2273,7 +2273,7 @@ async def post_anime_to_announce_channel(anime):
 def search_method_keyboard(prefix):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Ro'yxatdan tanlash", callback_data=f"{prefix}_list")],
-        [InlineKeyboardButton(text="🔍 Nomi orqali qidirish", callback_data=f"{prefix}_search")],
+        [InlineKeyboardButton(text="🔍 Nomi yoki ID orqali qidirish", callback_data=f"{prefix}_search")],
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
@@ -2309,7 +2309,9 @@ async def help_handler(message: Message):
     support_url = await asyncio.to_thread(db.get_setting, "profile_support_url")
     text = (
         "🆘 <b>Yordam — botdan qanday foydalanish kerak</b>\n\n"
-        "🔍 <b>Qidiruv</b> — anime nomini yozib qidiring\n\n"
+        "🔍 <b>Qidiruv</b> — anime nomini yozib qidiring; nomi oʻrniga "
+        "ID/kod raqamini yozsangiz ham boʻladi, shunda toʻgʻridan-toʻgʻri "
+        "oʻsha anime topiladi\n\n"
         "🎬 <b>Anime Film</b> / 📺 <b>Anime Serial</b> — turlari bo'yicha roʻyxatni koʻring\n\n"
         "🎲 <b>Random</b> — tasodifiy anime tavsiya qiladi\n\n"
         "🎌 <b>«Animelarni koʻrish»</b> tugmasi mini-ilovani ochadi. U yerda:\n"
@@ -2983,7 +2985,7 @@ async def ai_mood_message(message: Message, state: FSMContext):
 async def search_callback(call: CallbackQuery, state: FSMContext):
     await state.set_state(SearchState.query)
     await call.message.edit_text(
-        "🔍 Anime nomini yozing (to'liq nom):",
+        "🔍 Anime nomini yozing (to'liq nom) yoki uning ID/kod raqamini yuboring:",
         reply_markup=back_to_main()
     )
 
@@ -4202,7 +4204,7 @@ async def addepi_sel_page(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "addepi_search")
 async def addepi_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(AddEpisode.choose_method)
-    await call.message.edit_text("🔍 Serial nomini yozing:")
+    await call.message.edit_text("🔍 Serial nomini yoki ID/kod raqamini yozing:")
 
 @dp.message(AddEpisode.choose_method)
 async def addepi_search_result(message: Message, state: FSMContext):
@@ -4430,7 +4432,7 @@ async def editsel_page(call: CallbackQuery):
 @dp.callback_query(F.data == "edit_search")
 async def edit_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(EditAnime.search_query)
-    await call.message.edit_text("🔍 Anime nomini yozing:")
+    await call.message.edit_text("🔍 Anime nomini yoki ID/kod raqamini yozing:")
 
 @dp.message(EditAnime.search_query)
 async def edit_search_result(message: Message, state: FSMContext):
@@ -4561,13 +4563,13 @@ async def banner_title(message: Message, state: FSMContext):
 async def banner_subtitle_skip(message: Message, state: FSMContext):
     await state.update_data(subtitle="")
     await state.set_state(AddBanner.anime_link)
-    await message.answer("🔗 Ushbu bannerni qaysi anime'ga bog'laymiz? Anime nomini yozing yoki /skip:")
+    await message.answer("🔗 Ushbu bannerni qaysi anime'ga bog'laymiz? Anime nomini yoki ID/kod raqamini yozing, yoki /skip:")
 
 @dp.message(AddBanner.subtitle)
 async def banner_subtitle(message: Message, state: FSMContext):
     await state.update_data(subtitle=message.text)
     await state.set_state(AddBanner.anime_link)
-    await message.answer("🔗 Ushbu bannerni qaysi anime'ga bog'laymiz? Anime nomini yozing yoki /skip:")
+    await message.answer("🔗 Ushbu bannerni qaysi anime'ga bog'laymiz? Anime nomini yoki ID/kod raqamini yozing, yoki /skip:")
 
 @dp.message(AddBanner.anime_link, Command("skip"))
 async def banner_link_skip(message: Message, state: FSMContext):
@@ -4647,7 +4649,7 @@ async def admin_comments_anime(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(ModerateComment.search_query)
-    await call.message.edit_text("🔍 Izohlarini ko'rmoqchi bo'lgan anime nomini yozing:", reply_markup=admin_back())
+    await call.message.edit_text("🔍 Izohlarini ko'rmoqchi bo'lgan anime nomini yoki ID/kod raqamini yozing:", reply_markup=admin_back())
 
 @dp.message(ModerateComment.search_query)
 async def admin_comments_result(message: Message, state: FSMContext):
@@ -4794,7 +4796,7 @@ async def delsel_page(call: CallbackQuery):
 @dp.callback_query(F.data == "del_search")
 async def del_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(DeleteAnime.search_query)
-    await call.message.edit_text("🔍 Anime nomini yozing:")
+    await call.message.edit_text("🔍 Anime nomini yoki ID/kod raqamini yozing:")
 
 @dp.message(DeleteAnime.search_query)
 async def del_search_result(message: Message, state: FSMContext):
@@ -4977,7 +4979,7 @@ async def epact_sel_page(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "epact_search")
 async def epact_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(EditEpisode.search_query)
-    await call.message.edit_text("🔍 Serial nomini yozing:")
+    await call.message.edit_text("🔍 Serial nomini yoki ID/kod raqamini yozing:")
 
 @dp.message(EditEpisode.search_query)
 async def epact_search_result(message: Message, state: FSMContext):
@@ -6637,7 +6639,7 @@ async def clipa_list(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "clipa_search")
 async def clipa_search(call: CallbackQuery, state: FSMContext):
     await state.set_state(ClipVideo.search_query)
-    await call.message.edit_text("🔍 Nomini yozing:")
+    await call.message.edit_text("🔍 Nomini yoki ID/kod raqamini yozing:")
 
 @dp.message(ClipVideo.search_query)
 async def clipa_search_result(message: Message, state: FSMContext):
@@ -8025,7 +8027,12 @@ async def admin_help(call: CallbackQuery):
         "🖼 Bannerlar: Webapp bosh sahifasidagi reklama suratlarini "
         "qoʻshish/oʻchirish\n"
         "🔍 Videolarni tekshirish — barcha qismlarni kanaldagi original xabar "
-        "bilan solishtirib, oʻchirilgan/buzilgan video havolalarini topib beradi\n\n"
+        "bilan solishtirib, oʻchirilgan/buzilgan video havolalarini topib beradi\n"
+        "🔢 Tezkor qidiruv (ID/kod) — nom soʻraladigan istalgan joyda (qism "
+        "qoʻshish, tahrirlash, oʻchirish, banner bogʻlash, izohlarni koʻrish) "
+        "nom oʻrniga animening ID raqamini (kodini) yuborish ham mumkin — "
+        "aynan shu anime darhol topiladi. Kodni Premium boʻlimidagi anime "
+        "tafsilotida koʻrish mumkin\n\n"
 
         "👥 <b>Foydalanuvchilar</b>\n"
         "🔍 ID yoki @username orqali foydalanuvchini topish, maʼlumotlarini koʻrish\n"
