@@ -109,36 +109,100 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# AI (Gemini) javoblari ba'zan Markdown belgilari bilan qaytadi (**qalin**,
-# `kod`, va h.k.). Bot esa hamma joyda parse_mode="HTML" ishlatadi, shuning
-# uchun bu belgilar tirnoq ichida tom ma'noda ("**...**") chiqib qolar edi.
-# Quyidagi funksiya AI matnini avval xavfsiz HTML'ga escape qiladi (< > &),
-# so'ng oddiy Markdown belgilarini mos HTML teglariga aylantiradi.
-_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
+# AI (Gemini) javoblari endi birinchi navbatda Telegram Bot API 10.1+ "Rich
+# Message" imkoniyati orqali yuboriladi (pastda, send_ai_text ichida) — bunda
+# Markdown matn to'g'ridan-to'g'ri Telegram tomonidan formatlanadi va bizning
+# qo'lda yozgan konvertorimizga bog'liqlik deyarli qolmaydi. InputRichMessage
+# aiogram 3.29+ da mavjud; eski versiyada import xato beradi va quyida
+# _RICH_MESSAGE_SUPPORTED=False bo'ladi — bunday holatda pastdagi HTML zaxira
+# yo'li avtomatik ishga tushadi, bot hech qachon shu sabab bilan qulamaydi.
+try:
+    from aiogram.types import InputRichMessage as _InputRichMessage
+    _RICH_MESSAGE_SUPPORTED = True
+except ImportError:
+    _InputRichMessage = None
+    _RICH_MESSAGE_SUPPORTED = False
+
+# Quyidagilar FAQAT zaxira (fallback) yo'l uchun ishlatiladi: agar Rich
+# Message biror sababga ko'ra ishlamasa, AI matni shu regexlar bilan qo'lda
+# HTML'ga aylantiriladi. Kod bo'laklari (``` va `) boshqa qoidalardan
+# "himoyalanadi" — avval vaqtinchalik belgilovchiga almashtirilib, eng oxirida
+# asl <pre>/<code> ko'rinishida qaytariladi (aks holda ichidagi * yoki _ kabi
+# belgilar formatlash sifatida noto'g'ri o'qilib qolar edi).
+_MD_CODE_BLOCK_RE = re.compile(r"```(?:\w+)?\n?(.*?)```", re.DOTALL)
 _MD_CODE_RE = re.compile(r"`([^`]+?)`")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+_MD_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+_MD_BULLET_RE = re.compile(r"^(\s*)[-*]\s+", re.MULTILINE)
+_MD_STRIKE_RE = re.compile(r"~~(.+?)~~")
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__")
+# Ichki matn bo'sh joy bilan boshlanmasa/tugamasa ham moslashadi — shu orqali
+# "3 * 4 * 5" kabi matematik ifodalar xato ravishda kursivga aylanmaydi.
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)([^\s*](?:[^*]*?[^\s*])?)(?<!\*)\*(?!\*)")
+# So'z ichidagi pastki chiziqlarga (snake_case, fayl_nomi) tegmaslik uchun
+# faqat so'z bo'lmagan chegaralarda ishlaydi.
+_MD_ITALIC_UNDERSCORE_RE = re.compile(r"(?<!\w)_([^\s_](?:[^_]*?[^\s_])?)_(?!\w)")
 
 
 def ai_text_to_html(text: str) -> str:
-    """AI (Gemini) matnini Telegram parse_mode='HTML' uchun xavfsiz qiladi."""
+    """AI (Gemini) matnini Telegram parse_mode='HTML' uchun xavfsiz qiladi.
+    Bu faqat send_ai_text() dagi Rich Message urinishi muvaffaqiyatsiz
+    bo'lgan holatlar (masalan eski aiogram) uchun zaxira yo'l."""
     if not text:
         return text
     escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    escaped = _MD_CODE_RE.sub(r"<code>\1</code>", escaped)
+
+    code_blocks = []
+
+    def _stash_block(m):
+        code_blocks.append(f"<pre><code>{m.group(1).strip()}</code></pre>")
+        return f"\x00CB{len(code_blocks) - 1}\x00"
+
+    def _stash_inline(m):
+        code_blocks.append(f"<code>{m.group(1)}</code>")
+        return f"\x00CB{len(code_blocks) - 1}\x00"
+
+    escaped = _MD_CODE_BLOCK_RE.sub(_stash_block, escaped)
+    escaped = _MD_CODE_RE.sub(_stash_inline, escaped)
+    escaped = _MD_LINK_RE.sub(r'<a href="\2">\1</a>', escaped)
+    escaped = _MD_HEADER_RE.sub(r"<b>\1</b>", escaped)
+    escaped = _MD_BULLET_RE.sub(r"\1• ", escaped)
+    escaped = _MD_STRIKE_RE.sub(r"<s>\1</s>", escaped)
     escaped = _MD_BOLD_RE.sub(r"<b>\1</b>", escaped)
+    escaped = _MD_BOLD_UNDERSCORE_RE.sub(r"<b>\1</b>", escaped)
     escaped = _MD_ITALIC_RE.sub(r"<i>\1</i>", escaped)
+    escaped = _MD_ITALIC_UNDERSCORE_RE.sub(r"<i>\1</i>", escaped)
+
+    for i, block in enumerate(code_blocks):
+        escaped = escaped.replace(f"\x00CB{i}\x00", block)
     return escaped
 
 
 async def send_ai_text(target, text, **kwargs):
-    """AI javobini yuboradi: avval formatlangan HTML bilan, agar Telegram
-    biror sababga ko'ra uni qabul qilmasa (masalan noto'g'ri joylashgan teg),
-    formatlanmagan oddiy matn bilan qayta yuboradi — foydalanuvchi hech qachon
-    xatolik tufayli javobsiz qolmaydi.
-    `target` — Message (u holda target.answer chaqiriladi) yoki chat_id
-    (u holda bot.send_message chaqiriladi)."""
-    html_text = ai_text_to_html(text)
+    """AI javobini yuboradi — foydalanuvchi hech qachon formatlash xatosi
+    tufayli javobsiz qolmasligi uchun uch bosqichli zanjir orqali:
+    1) Rich Message (Telegram Bot API 10.1+, aiogram >= 3.29) — Markdown matn
+       to'g'ridan-to'g'ri Telegram tomonidan formatlanadi; aynan AI javoblari
+       uchun mo'ljallangan, eng ishonchli yo'l.
+    2) Agar u ishlamasa (eski aiogram/mijoz yoki boshqa xatolik) — o'zimizning
+       ai_text_to_html() konvertorimiz bilan HTML sifatida.
+    3) Agar u ham ishlamasa — formatlanmagan oddiy matn bilan.
+    `target` — Message (target.answer_rich/.answer chaqiriladi) yoki chat_id
+    (bot.send_rich_message/.send_message chaqiriladi)."""
     is_message_obj = hasattr(target, "answer")
+
+    if _RICH_MESSAGE_SUPPORTED:
+        rich_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+        try:
+            rich_message = _InputRichMessage(markdown=text)
+            if is_message_obj:
+                return await target.answer_rich(rich_message=rich_message, **rich_kwargs)
+            return await bot.send_rich_message(chat_id=target, rich_message=rich_message, **rich_kwargs)
+        except Exception as e:
+            logger.debug("Rich Message bilan yuborib bo'lmadi (%s), HTML'ga o'tilyapti", e)
+
+    html_text = ai_text_to_html(text)
     try:
         if is_message_obj:
             return await target.answer(html_text, parse_mode="HTML", **kwargs)
@@ -148,6 +212,44 @@ async def send_ai_text(target, text, **kwargs):
         if is_message_obj:
             return await target.answer(text, **kwargs)
         return await bot.send_message(target, text, **kwargs)
+
+
+async def send_ai_html(target, html_text, **kwargs):
+    """send_ai_text() bilan bir xil falsafa, lekin allaqachon TAYYOR HTML
+    matn uchun — masalan ai_text_to_html() orqali o'girilgan AI parchasi
+    boshqa qo'lda yozilgan HTML (sarlavha, emoji va h.k.) bilan f-string'da
+    birlashtirilgan holatlarda ishlatiladi. Avval Rich Message (Bot API
+    10.1+, html= maydoni orqali), ishlamasa oddiy HTML parse_mode bilan.
+    `target` — Message (target.answer_rich/.answer) yoki chat_id
+    (bot.send_rich_message/.send_message)."""
+    is_message_obj = hasattr(target, "answer")
+    if _RICH_MESSAGE_SUPPORTED:
+        rich_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+        try:
+            rich_message = _InputRichMessage(html=html_text)
+            if is_message_obj:
+                return await target.answer_rich(rich_message=rich_message, **rich_kwargs)
+            return await bot.send_rich_message(chat_id=target, rich_message=rich_message, **rich_kwargs)
+        except Exception as e:
+            logger.debug("Rich Message (HTML) bilan yuborib bo'lmadi (%s), oddiy HTML'ga o'tilyapti", e)
+    if is_message_obj:
+        return await target.answer(html_text, parse_mode="HTML", **kwargs)
+    return await bot.send_message(target, html_text, parse_mode="HTML", **kwargs)
+
+
+async def edit_ai_html(message_obj, html_text, **kwargs):
+    """Mavjud xabarni (odatda call.message) tayyor HTML matn bilan
+    tahrirlaydi — avval Rich Message (rich_message= maydoni orqali),
+    ishlamasa oddiy HTML parse_mode bilan. send_ai_html() ning
+    edit_text-versiyasi."""
+    if _RICH_MESSAGE_SUPPORTED:
+        rich_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+        try:
+            rich_message = _InputRichMessage(html=html_text)
+            return await message_obj.edit_text(rich_message=rich_message, **rich_kwargs)
+        except Exception as e:
+            logger.debug("Rich Message (HTML) bilan tahrirlab bo'lmadi (%s), oddiy HTML'ga o'tilyapti", e)
+    return await message_obj.edit_text(html_text, parse_mode="HTML", **kwargs)
 
 
 _extra_admin_cache = {"ids": set(), "loaded_at": 0}
@@ -492,7 +594,7 @@ async def notify_anime_subscribers(anime_id, text, exclude_user_id=None):
         if uid == exclude_user_id:
             continue
         try:
-            await bot.send_message(uid, text, parse_mode="HTML", disable_web_page_preview=True)
+            await send_ai_html(uid, text, disable_web_page_preview=True)
         except TelegramForbiddenError:
             await mark_user_left(uid)
         except Exception as e:
@@ -6707,12 +6809,12 @@ async def admin_ai_stats(call: CallbackQuery):
         analysis = "😕 AI tahlil bera olmadi, birozdan keyin qayta urinib ko'ring."
     else:
         analysis = ai_text_to_html(analysis)
-    await call.message.edit_text(
+    await edit_ai_html(
+        call.message,
         f"🤖 <b>AI tahlil</b>\n\n{analysis}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
         ]),
-        parse_mode="HTML"
     )
 
 @dp.callback_query(F.data == "admin_comment_trends")
@@ -6747,13 +6849,13 @@ async def admin_comment_trends(call: CallbackQuery):
     else:
         trend = ai_text_to_html(trend)
     animes_line = ", ".join(f"{item['title']} ({item['comment_count']})" for item in trend_data[:8])
-    await call.message.edit_text(
+    await edit_ai_html(
+        call.message,
         f"💬 <b>Izohlar trendi (so'nggi 7 kun)</b>\n\n{trend}\n\n"
         f"📋 <i>Eng ko'p izohlangan animelar: {animes_line}</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
         ]),
-        parse_mode="HTML"
     )
 
 def _sparkline(values):
@@ -6858,10 +6960,9 @@ async def _send_ai_push_to_user(user_id, animes, id_to_title, catalog_text, popu
         reason = await ai_service.generate_recommendation_reason(title, user_context)
         reason_text = f"\n\n💡 {ai_text_to_html(reason.strip())}" if reason else ""
     try:
-        await bot.send_message(
+        await send_ai_html(
             user_id,
             f"🤖 Senga maxsus tavsiya: <b>{title}</b>{reason_text}",
-            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="▶️ Ko'rish", callback_data=f"anime_{anime_id}")]
             ])
@@ -6933,7 +7034,7 @@ async def _send_comeback_message_to_user(user_id):
     if not text:
         return False
     try:
-        await bot.send_message(user_id, f"🔁 {ai_text_to_html(text.strip())}", parse_mode="HTML")
+        await send_ai_html(user_id, f"🔁 {ai_text_to_html(text.strip())}")
         return True
     except TelegramForbiddenError:
         await mark_user_left(user_id)
@@ -7027,8 +7128,8 @@ async def _send_premium_pitch_to_user(user_id, plan_summary):
     if not text:
         return False
     try:
-        await bot.send_message(
-            user_id, f"💎 {ai_text_to_html(text.strip())}", parse_mode="HTML",
+        await send_ai_html(
+            user_id, f"💎 {ai_text_to_html(text.strip())}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="💎 Premium haqida", callback_data="premium_menu")]
             ])
@@ -7104,9 +7205,9 @@ async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
     text = ai_text_to_html(text)
     users = await asyncio.to_thread(db.get_users_never_used_ai)
     await state.update_data(ai_invite_text=text, ai_invite_users=users)
-    await call.message.edit_text(
+    await edit_ai_html(
+        call.message,
         f"🤖 <b>Tayyor xabar</b> ({len(users)} ta foydalanuvchiga yuboriladi):\n\n{text}",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Yuborish", callback_data="bc_ai_invite_send")],
             [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
@@ -7130,7 +7231,7 @@ async def bc_ai_invite_send(call: CallbackQuery, state: FSMContext):
     for user_id in users:
         for attempt in range(2):
             try:
-                await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
+                await send_ai_html(user_id, text, reply_markup=kb)
                 sent += 1
                 break
             except TelegramForbiddenError:
@@ -8197,8 +8298,8 @@ async def weekly_ai_report_task():
             except Exception as e:
                 logger.warning(f"Haftalik izohlar trendi tahlili xatosi: {e}")
             if report:
-                await bot.send_message(
-                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{ai_text_to_html(report)}{trend_text}", parse_mode="HTML"
+                await send_ai_html(
+                    ADMIN_ID, f"🤖 <b>Haftalik AI-hisobot</b>\n\n{ai_text_to_html(report)}{trend_text}"
                 )
         except Exception as e:
             logger.error(f"Haftalik AI-hisobot xatosi: {e}")
@@ -9560,6 +9661,12 @@ async def main():
     global BOT_USERNAME
     await asyncio.to_thread(db.init_db)
     logger.info("Bot ishga tushmoqda...")
+    try:
+        import aiogram as _aiogram_pkg
+        rich_status = "YOQILGAN ✅" if _RICH_MESSAGE_SUPPORTED else "O'CHIQ ❌ — aiogram >= 3.29 kerak, hozircha eski HTML yo'l ishlatilyapti"
+        logger.info(f"aiogram versiyasi: {_aiogram_pkg.__version__} | Rich Message (AI javoblari uchun): {rich_status}")
+    except Exception as e:
+        logger.warning(f"aiogram versiyasini aniqlab bo'lmadi: {e}")
     try:
         me = await bot.get_me()
         BOT_USERNAME = me.username
