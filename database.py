@@ -4,8 +4,27 @@ import psycopg2.pool
 import os
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+# O'zbekiston vaqt zonasi. Bazadagi barcha ulanishlar shu zonada ochiladi
+# (pastga qarang: options="-c timezone=..."), shuning uchun Postgres'ning
+# NOW() / CURRENT_DATE funksiyalari va to_char(NOW(),...) orqali saqlangan
+# barcha vaqt ustunlari endi to'g'ridan-to'g'ri Toshkent mahalliy vaqtida
+# bo'ladi (server qayerda joylashganidan qat'iy nazar — Render/Neon odatda
+# UTC ishlatadi). Python tomonida shu bazaviy qiymatlar bilan solishtiriladigan
+# "hozir" kerak bo'lsa, oddiy datetime.now() emas, shu quyidagi now_tz()
+# funksiyasi ishlatilishi kerak — aks holda ikki taraf orasida ~5 soatlik
+# nomuvofiqlik paydo bo'ladi.
+TASHKENT_TZ = ZoneInfo("Asia/Tashkent")
+
+def now_tz():
+    """Bazadagi vaqt ustunlari bilan bir xil zonadagi (Asia/Tashkent), lekin
+    tzinfo'siz ("naive") datetime qaytaradi — shu bilan bazadan o'qilgan
+    "YYYY-MM-DD HH:MI:SS" satrlarini strptime qilib to'g'ridan-to'g'ri
+    solishtirish mumkin."""
+    return datetime.now(TASHKENT_TZ).replace(tzinfo=None)
 
 # Connection pool: har safar yangi ulanish ochish/yopish oʻrniga
 # tayyor ulanishlardan foydalaniladi (tezroq va samaraliroq).
@@ -13,11 +32,16 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # keyin oʻzi yopib qoʻyadi ("SSL connection has been closed unexpectedly"),
 # shuning uchun har bir ulanish pool'dan olinganda tekshiriladi va,
 # agar oʻlik boʻlsa, avtomatik yangisi bilan almashtiriladi.
+# options="-c timezone=..." — ulanish ochilishidayoq sessiya vaqt zonasini
+# belgilaydi (har bir so'rovda qo'shimcha "SET TIME ZONE" round-trip shart
+# emas), shu bilan NOW()/CURRENT_DATE doim Toshkent vaqtida ishlaydi.
+_CONN_OPTIONS = "-c timezone=Asia/Tashkent"
 _pool = psycopg2.pool.ThreadedConnectionPool(
     minconn=1,
     maxconn=25,  # 10 dan oshirildi: bot + webapp bir vaqtda ko'p so'rov yuborganda
                  # ulanish yetishmay ("pool exhausted") xatolik/sekinlashuv bo'lmasligi uchun
     dsn=DATABASE_URL,
+    options=_CONN_OPTIONS,
 )
 
 # Ulanish tirikligini har safar tekshirish (SELECT 1) qoʻshimcha DB round-trip
@@ -47,7 +71,7 @@ def get_conn():
                 _pool.putconn(conn, close=True)
             except Exception:
                 pass
-            conn = psycopg2.connect(DATABASE_URL)
+            conn = psycopg2.connect(DATABASE_URL, options=_CONN_OPTIONS)
             _last_checked[id(conn)] = now
     return conn
 
@@ -227,6 +251,17 @@ def init_db():
         PRIMARY KEY (site_user_id, anime_id)
     )""")
 
+    # Parolni tiklash uchun bir martalik tokenlar (faqat email bilan ro'yxatdan
+    # o'tgan sayt foydalanuvchilari uchun — SMTP orqali yuboriladi).
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS site_password_resets (
+        token TEXT PRIMARY KEY,
+        site_user_id INTEGER NOT NULL REFERENCES site_users(id) ON DELETE CASCADE,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+        used INTEGER DEFAULT 0
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_site_pwreset_user ON site_password_resets(site_user_id)")
+
     # ===== QO'SHIMCHA ADMINLAR (asosiy ADMIN_ID'dan tashqari) =====
     c.execute("""
     CREATE TABLE IF NOT EXISTS admins (
@@ -235,6 +270,16 @@ def init_db():
         added_by BIGINT,
         added_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
     )""")
+    # Admin darajalari: 'moderator' (kontent/jamoat — anime/qism qo'shish,
+    # tahrirlash, banner, izohlar moderatsiyasi, foydalanuvchi bloklash),
+    # 'moliya' (to'lovlarni tasdiqlash/rad etish, Premium narxlari/sovg'a,
+    # daromad statistikasi), 'super' (hammasi, shu jumladan admin
+    # boshqaruvi, xabar yuborish, texnik sozlamalar, DB backup).
+    # DEFAULT 'super' — bu ustun qo'shilishidan OLDIN qo'shilgan barcha
+    # adminlar hech narsa yo'qotmasligi uchun (ular ilgari to'liq huquqli
+    # edi). Yangi qo'shiladigan adminlarga rolni add_admin() chaqiruvchi
+    # tomon aniq beradi (pastga qarang, standart 'moderator').
+    c.execute("ALTER TABLE admins ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'super'")
 
     # ===== ADMIN FAOLIYATI LOGI =====
     c.execute("""
@@ -563,6 +608,27 @@ def set_payment_status(payment_id, status):
     )
     conn.commit()
     put_conn(conn)
+
+def try_claim_pending_payment(payment_id, new_status):
+    """set_payment_status'dan farqli o'laroq, "hali 'pending'mi?" tekshiruvi va
+    holatni o'zgartirish BITTA atomik so'rovda bajariladi (WHERE status='pending').
+    Shu bilan admin "✅ Tasdiqlash" tugmasini tasodifan/tez-tez ikki marta bossa
+    yoki ikkita callback deyarli bir vaqtda kelib qolsa ham, Premium faqat BIR
+    marta beriladi — chunki UPDATE faqat hali chindan ham 'pending' bo'lgan
+    qatorga tegadi, shu bazaviy operatsiya PostgreSQL darajasida qulflanadi.
+    Muvaffaqiyatli bo'lsa yangilangan qatorni, aks holda (allaqachon boshqa
+    holatga o'tgan bo'lsa) None qaytaradi."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute(
+        "UPDATE premium_payments SET status=%s, processed_at=to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS') "
+        "WHERE id=%s AND status='pending' RETURNING *",
+        (new_status, payment_id)
+    )
+    row = c.fetchone()
+    conn.commit()
+    put_conn(conn)
+    return dict(row) if row else None
 
 def set_payment_amount(payment_id, amount):
     """Admin chekni ko'rib, haqiqatda tushgan summa so'ralgandan kam/ko'p bo'lsa,
@@ -924,8 +990,31 @@ def search_anime(query):
     return results[:30]
 
 def delete_anime(anime_id):
+    """Animeni va u bilan bog'liq BARCHA ma'lumotlarni o'chiradi. Ilgari faqat
+    episodes+animes o'chirilar, qolgan jadvallarda (favorites, watch_log,
+    watch_activity, comments/comment_likes, anime_subscriptions, banners,
+    notifications, site_favorites, site_history, watch_positions) o'sha
+    anime_id'ga ishora qiluvchi "yetim" qatorlar abadiy qolib ketardi —
+    masalan o'chirilgan animega ishora qiluvchi banner yoki bildirishnoma
+    bosilganda xatolikka olib kelardi."""
     conn = get_conn()
     c = conn.cursor()
+    # watch_positions episode_id orqali bog'langan — anime o'chirilishidan
+    # oldin shu anime'ning barcha qism ID'larini olib qo'yamiz.
+    c.execute("SELECT id FROM episodes WHERE anime_id=%s", (anime_id,))
+    episode_ids = [r[0] for r in c.fetchall()]
+    if episode_ids:
+        c.execute("DELETE FROM watch_positions WHERE episode_id=ANY(%s)", (episode_ids,))
+    c.execute("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE anime_id=%s)", (anime_id,))
+    c.execute("DELETE FROM comments WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM favorites WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM watch_log WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM watch_activity WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM anime_subscriptions WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM banners WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM notifications WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM site_favorites WHERE anime_id=%s", (anime_id,))
+    c.execute("DELETE FROM site_history WHERE anime_id=%s", (anime_id,))
     c.execute("DELETE FROM episodes WHERE anime_id=%s", (anime_id,))
     c.execute("DELETE FROM animes WHERE id=%s", (anime_id,))
     conn.commit()
@@ -1019,6 +1108,9 @@ def get_episodes(anime_id):
 def delete_episode(episode_id):
     conn = get_conn()
     c = conn.cursor()
+    # Xuddi delete_anime'dagidek — watch_positions shu episode_id'ga bog'liq
+    # bo'lgani uchun avval tozalanadi, aks holda yetim qator qolib ketadi.
+    c.execute("DELETE FROM watch_positions WHERE episode_id=%s", (episode_id,))
     c.execute("DELETE FROM episodes WHERE id=%s", (episode_id,))
     conn.commit()
     put_conn(conn)
@@ -1206,7 +1298,7 @@ def get_profile_stats(user_id):
     # Streak (ketma-ket kunlar) — bugun yoki kechadan boshlab hisoblanadi
     streak = 0
     if dates:
-        today = datetime.now().date()
+        today = now_tz().date()
         cur = today if dates[0] == today else (today - timedelta(days=1))
         date_set = set(dates)
         while cur in date_set:
@@ -1707,6 +1799,59 @@ def update_site_user_name(site_user_id, display_name):
     conn.commit()
     put_conn(conn)
 
+def get_site_user_by_email(email):
+    """Faqat email bo'yicha qidiradi (parol tiklash faqat email orqali ishlaydi —
+    SMS xizmati ulanmagan). Telefon bilan ro'yxatdan o'tgan, emaili bo'lmagan
+    hisoblar uchun None qaytadi."""
+    if not email:
+        return None
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute("SELECT * FROM site_users WHERE email=%s", (email,))
+    row = c.fetchone()
+    put_conn(conn)
+    return dict(row) if row else None
+
+def update_site_user_password(site_user_id, password_hash):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE site_users SET password_hash=%s WHERE id=%s", (password_hash, site_user_id))
+    conn.commit()
+    put_conn(conn)
+
+def create_password_reset(token, site_user_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO site_password_resets (token, site_user_id) VALUES (%s,%s)",
+        (token, site_user_id)
+    )
+    conn.commit()
+    put_conn(conn)
+
+def get_password_reset(token):
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    c.execute("SELECT * FROM site_password_resets WHERE token=%s", (token,))
+    row = c.fetchone()
+    put_conn(conn)
+    return dict(row) if row else None
+
+def mark_password_reset_used(token):
+    """set_payment_status singari emas, bu yerda ham bitta tokenning ikki marta
+    ishlatilishining oldini olish uchun atomik qilib qilingan: faqat hali
+    used=0 bo'lgan qatorga tegadi va shu holatni RETURNING bilan tasdiqlaydi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE site_password_resets SET used=1 WHERE token=%s AND used=0 RETURNING site_user_id",
+        (token,)
+    )
+    row = c.fetchone()
+    conn.commit()
+    put_conn(conn)
+    return row[0] if row else None
+
 def toggle_site_favorite(site_user_id, anime_id):
     """Sevimlilarga qo'shadi/olib tashlaydi. Yangi holatni (True=sevimli) qaytaradi."""
     conn = get_conn()
@@ -1761,13 +1906,20 @@ def clear_site_history(site_user_id):
     put_conn(conn)
 
 # ===== QO'SHIMCHA ADMINLAR =====
-def add_admin(user_id, username, added_by):
+ADMIN_ROLES = {"moderator", "moliya", "super"}
+
+def add_admin(user_id, username, added_by, role="moderator"):
+    """Yangi qo'shimcha admin qo'shadi. role — 'moderator' (standart,
+    kontent/jamoat), 'moliya' (to'lovlar) yoki 'super' (hammasi). Notogri
+    qiymat kelsa xavfsiz standart 'moderator'ga tushiriladi."""
+    if role not in ADMIN_ROLES:
+        role = "moderator"
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO admins (user_id, username, added_by) VALUES (%s,%s,%s) "
-        "ON CONFLICT (user_id) DO UPDATE SET username=EXCLUDED.username",
-        (user_id, username, added_by)
+        "INSERT INTO admins (user_id, username, added_by, role) VALUES (%s,%s,%s,%s) "
+        "ON CONFLICT (user_id) DO UPDATE SET username=EXCLUDED.username, role=EXCLUDED.role",
+        (user_id, username, added_by, role)
     )
     conn.commit()
     put_conn(conn)
@@ -1794,6 +1946,29 @@ def is_extra_admin(user_id):
     row = c.fetchone()
     put_conn(conn)
     return bool(row)
+
+def get_admin_role(user_id):
+    """Qo'shimcha admin jadvalidagi rolini qaytaradi ('moderator'/'moliya'/'super'),
+    yoki bu user admins jadvalida umuman yo'q bo'lsa None. Asosiy ADMIN_ID (.env)
+    bu jadvalda qatnashmaydi — u har doim 'super' deb hisoblanadi, buni
+    chaqiruvchi (anime_bot.py) alohida tekshiradi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT role FROM admins WHERE user_id=%s", (user_id,))
+    row = c.fetchone()
+    put_conn(conn)
+    return row[0] if row else None
+
+def set_admin_role(user_id, role):
+    if role not in ADMIN_ROLES:
+        raise ValueError(f"Notogri admin rol: {role}")
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE admins SET role=%s WHERE user_id=%s", (role, user_id))
+    updated = c.rowcount
+    conn.commit()
+    put_conn(conn)
+    return bool(updated)
 
 # ===== ADMIN FAOLIYATI LOGI =====
 def log_admin_action(admin_id, admin_name, action, details=None):

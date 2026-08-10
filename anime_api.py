@@ -24,6 +24,13 @@ ANILIST_URL = "https://graphql.anilist.co"
 _session = None
 _session_lock = asyncio.Lock()
 
+# Bir xil nom qayta-qayta qidirilganda (masalan admin anime qo'shishda bir
+# necha marta orqaga qaytib qayta urinsa, yoki bir xil serial nomi turli
+# vaqtda qidirilsa) har safar tashqi AniList API'ga so'rov ketmasligi uchun
+# oddiy xotiradagi TTL kesh. Kalit — normallashtirilgan (lower+strip) nom.
+_CACHE_TTL = 6 * 3600  # 6 soat — anime metama'lumotlari kamdan-kam o'zgaradi
+_cache: dict[str, tuple] = {}  # normalized_title -> (expires_at, result)
+
 
 async def _get_session():
     global _session
@@ -87,6 +94,12 @@ async def search_anilist(title: str) -> dict | None:
     title = (title or "").strip()
     if not title:
         return None
+
+    cache_key = title.lower()
+    cached = _cache.get(cache_key)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+
     try:
         session = await _get_session()
         async with session.post(

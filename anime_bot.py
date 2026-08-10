@@ -5,8 +5,11 @@ import hmac
 import logging
 import math
 import re
+import secrets
+import smtplib
 import subprocess
 import time
+from email.mime.text import MIMEText
 from urllib.parse import parse_qsl
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
@@ -78,6 +81,40 @@ if not STORAGE_CHANNEL_raw:
     )
 STORAGE_CHANNEL = int(STORAGE_CHANNEL_raw)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://anime-bot-fd8r.onrender.com/webapp")
+# Parolni tiklash havolasi shu bazaga qo'shiladi (masalan https://anifilm.uz/reset-password?token=...).
+# Alohida sozlanmasa, WEBAPP_URL'dan "/webapp" qismi olib tashlanib chiqariladi.
+SITE_URL = os.environ.get("SITE_URL") or WEBAPP_URL.rsplit("/webapp", 1)[0]
+
+# ===== EMAIL (SMTP) — parolni tiklash xatlarini yuborish uchun =====
+# Sozlanmasa (SMTP_HOST bo'sh bo'lsa), email yuborish funksiyasi jim
+# ravishda o'chiriladi (False qaytaradi, log'ga yozadi) — boshqa ixtiyoriy
+# integratsiyalar (masalan AI kalitlari) kabi xuddi shunday.
+SMTP_HOST = os.environ.get("SMTP_HOST")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER")
+SMTP_PASS = os.environ.get("SMTP_PASS")
+SMTP_FROM = os.environ.get("SMTP_FROM") or SMTP_USER
+
+def _send_email_sync(to_addr: str, subject: str, body: str) -> bool:
+    """DIQQAT: bloklovchi (sinxron) tarmoq chaqiruvi — asyncio event loop'ni
+    to'xtatib qo'ymaslik uchun chaqiruvchi tomon buni har doim
+    asyncio.to_thread(...) orqali ishga tushirishi kerak."""
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
+        logger.warning(f"SMTP sozlanmagan (SMTP_HOST/SMTP_USER/SMTP_PASS yo'q) — email yuborilmadi: {to_addr}")
+        return False
+    try:
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_addr
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM, [to_addr], msg.as_string())
+        return True
+    except Exception as e:
+        logger.error(f"Email yuborish xatosi ({to_addr}): {e}")
+        return False
 
 # Qism videolari STORAGE_CHANNEL'ga saqlanganda avtomatik qo'yiladigan caption.
 # Raqam (qism tartib raqami) har safar avtomatik hisoblanadi — admin qo'lda
@@ -252,24 +289,51 @@ async def edit_ai_html(message_obj, html_text, **kwargs):
     return await message_obj.edit_text(html_text, parse_mode="HTML", **kwargs)
 
 
-_extra_admin_cache = {"ids": set(), "loaded_at": 0}
+_extra_admin_cache = {"roles": {}, "loaded_at": 0}
 _EXTRA_ADMIN_TTL = 60
 
-async def is_admin_user(user_id):
-    """Asosiy ADMIN_ID yoki DB'ga qo'shilgan qo'shimcha adminlardan biri bo'lsa True.
-    Qo'shimcha adminlar ro'yxati DB'dan olinadi, tez-tez so'ralmasligi uchun
-    qisqa muddat (60s) keshlanadi."""
-    if user_id == ADMIN_ID:
-        return True
+async def _refresh_admin_cache():
     now = time.time()
     if now - _extra_admin_cache["loaded_at"] > _EXTRA_ADMIN_TTL:
         try:
             admins = await asyncio.to_thread(db.get_admins)
-            _extra_admin_cache["ids"] = {a["user_id"] for a in admins}
+            _extra_admin_cache["roles"] = {a["user_id"]: (a.get("role") or "super") for a in admins}
             _extra_admin_cache["loaded_at"] = now
         except Exception:
             pass
-    return user_id in _extra_admin_cache["ids"]
+
+async def is_admin_user(user_id, min_role=None):
+    """Asosiy ADMIN_ID yoki DB'ga qo'shilgan qo'shimcha adminlardan biri bo'lsa True.
+    Qo'shimcha adminlar ro'yxati DB'dan olinadi, tez-tez so'ralmasligi uchun
+    qisqa muddat (60s) keshlanadi.
+
+    min_role — bu amal uchun kamida qaysi daraja kerakligini bildiradi:
+      None (standart)  — istalgan admin darajasi yetarli (moderator/moliya/super)
+      "moderator"      — moderator yoki super yetarli
+      "moliya"         — moliya yoki super yetarli
+      "super"          — faqat super
+    Asosiy ADMIN_ID (.env orqali) doim 'super' hisoblanadi va har qanday
+    min_role talabidan avtomatik o'tadi."""
+    if user_id == ADMIN_ID:
+        return True
+    await _refresh_admin_cache()
+    role = _extra_admin_cache["roles"].get(user_id)
+    if role is None:
+        return False
+    if min_role is None or role == "super":
+        return True
+    return role == min_role
+
+def admin_role_cached(user_id):
+    """is_admin_user'ning sinxron/kesh-only varianti — faqat UI qurishda
+    (masalan menyuda qaysi tugmalarni ko'rsatish/yashirishni hal qilishda)
+    ishlatiladi, chunki menyu funksiyalari odatda async emas. Kesh hali
+    yuklanmagan yoki eskirgan bo'lishi mumkin — lekin bu faqat KO'RINISHGA
+    ta'sir qiladi (haqiqiy ruxsat tekshiruvi har doim is_admin_user orqali,
+    handlerning o'zida amalga oshiriladi), shuning uchun bu yetarli."""
+    if user_id == ADMIN_ID:
+        return "super"
+    return _extra_admin_cache["roles"].get(user_id)
 
 def _invalidate_extra_admin_cache():
     _extra_admin_cache["loaded_at"] = 0
@@ -561,6 +625,7 @@ class FindUserState(StatesGroup):
 
 class AdminManageState(StatesGroup):
     add_id = State()
+    choosing_role = State()
 
 class AdminPremiumGiftState(StatesGroup):
     user_id = State()
@@ -1032,16 +1097,20 @@ async def premium_screenshot_wrong(message: Message):
 
 @dp.callback_query(F.data.startswith("pay_ok_"))
 async def premium_approve(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moliya"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     payment_id = int(call.data.split("_")[-1])
-    payment = await asyncio.to_thread(db.get_payment_request, payment_id)
-    if not payment or payment["status"] != "pending":
+    # try_claim_pending_payment: "hali pendingmi" tekshiruvi va holatni
+    # o'zgartirish bitta atomik SQL amalida bajariladi — shu bilan admin
+    # tugmani tez-tez ikki marta bossa ham (yoki callback takrorlansa),
+    # Premium faqat BIR marta beriladi (ilgari bu ikki alohida qadam edi).
+    payment = await asyncio.to_thread(db.try_claim_pending_payment, payment_id, "approved")
+    if not payment:
         await call.answer("Bu so'rov allaqachon ko'rib chiqilgan", show_alert=True)
         return
     days = PLAN_DAYS.get(payment["plan"], 30)
     new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
-    await asyncio.to_thread(db.set_payment_status, payment_id, "approved")
     _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
     try:
         await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ <b>Tasdiqlandi</b>", parse_mode="HTML")
@@ -1072,7 +1141,8 @@ PAYMENT_REJECT_REASONS = {
 
 @dp.callback_query(F.data.startswith("pay_no_"))
 async def premium_reject(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moliya"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     payment_id = int(call.data.split("_")[-1])
     payment = await asyncio.to_thread(db.get_payment_request, payment_id)
@@ -1176,14 +1246,13 @@ async def _finalize_payment_rejection(admin_id, payment_id, reason_for_ai, sugge
     yangilaydi, asl to'lov xabari captionini "Rad etildi" deb belgilaydi
     va foydalanuvchiga AI tuzgan (yoki AI ishlamasa zaxira) xushmuomala
     xabarni yuboradi."""
-    payment = await asyncio.to_thread(db.get_payment_request, payment_id)
-    if not payment or payment["status"] != "pending":
+    payment = await asyncio.to_thread(db.try_claim_pending_payment, payment_id, "rejected")
+    if not payment:
         try:
             await bot.send_message(admin_id, "Bu so'rov allaqachon ko'rib chiqilgan.")
         except Exception:
             pass
         return
-    await asyncio.to_thread(db.set_payment_status, payment_id, "rejected")
 
     user_message = await ai_service.generate_payment_rejection_message(reason_for_ai, suggest_retry=suggest_retry)
     if not user_message:
@@ -1254,8 +1323,8 @@ async def premium_edit_amount(message: Message, state: FSMContext):
     message_id = data.get("message_id")
     await state.clear()
 
-    payment = await asyncio.to_thread(db.get_payment_request, payment_id)
-    if not payment or payment["status"] != "pending":
+    payment = await asyncio.to_thread(db.try_claim_pending_payment, payment_id, "approved")
+    if not payment:
         await message.answer("Bu so'rov allaqachon ko'rib chiqilgan.")
         return
 
@@ -1267,7 +1336,6 @@ async def premium_edit_amount(message: Message, state: FSMContext):
 
     await asyncio.to_thread(db.set_payment_amount, payment_id, real_amount)
     new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
-    await asyncio.to_thread(db.set_payment_status, payment_id, "approved")
     _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
 
     if chat_id and message_id:
@@ -1584,7 +1652,8 @@ async def padm_unlock_old(call: CallbackQuery):
 
 @dp.callback_query(F.data == "admin_premium")
 async def admin_premium(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moliya"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
     await call.message.edit_text(await _premium_admin_text(), reply_markup=_premium_admin_kb(), parse_mode="HTML")
@@ -1620,7 +1689,8 @@ async def _admgift_grant(admin_id, target_id, plan, days):
 
 @dp.callback_query(F.data == "padm_gift_start")
 async def padm_gift_start(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moliya"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(AdminPremiumGiftState.user_id)
     await call.message.edit_text(
@@ -2019,8 +2089,14 @@ def back_to_main():
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")]
     ])
 
-def admin_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
+def admin_keyboard(role=None):
+    """role=None — hammasi ko'rsatiladi (masalan biror amal tugagandan keyin
+    qaytariladigan fallback menyularda — u yerda foydalanuvchi allaqachon
+    kamida shu bo'limga ruxsati borligini isbotlagan). Aniq rol berilganda
+    (admin panelga birinchi marta kirishda bo'lgani kabi) shu rolga yopiq
+    bo'limlar (Sozlamalar — faqat super, Premium — moliya/super) menyudan
+    butunlay yashiriladi."""
+    rows = [
         [
             InlineKeyboardButton(text="📚 Kontent boshqaruvi", callback_data="admin_cat_content", style="primary"),
             InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin_cat_users", style="primary"),
@@ -2029,14 +2105,16 @@ def admin_keyboard():
             InlineKeyboardButton(text="📊 Statistika", callback_data="admin_cat_stats", style="primary"),
             InlineKeyboardButton(text="📨 Muloqot", callback_data="admin_cat_comm", style="primary"),
         ],
-        [
-            InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="admin_cat_settings", style="primary"),
-            InlineKeyboardButton(text="💎 Premium", callback_data="admin_premium", style="success"),
-        ],
-        [
-            InlineKeyboardButton(text="📖 Qo'llanma", callback_data="admin_help", style="primary"),
-        ],
-    ])
+    ]
+    row3 = []
+    if role is None or role == "super":
+        row3.append(InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="admin_cat_settings", style="primary"))
+    if role is None or role in ("moliya", "super"):
+        row3.append(InlineKeyboardButton(text="💎 Premium", callback_data="admin_premium", style="success"))
+    if row3:
+        rows.append(row3)
+    rows.append([InlineKeyboardButton(text="📖 Qo'llanma", callback_data="admin_help", style="primary")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_cat_content_keyboard():
     """Kontent boshqaruvi — endi 7 ta tugma bitta tekis roʻyxatda emas,
@@ -2072,44 +2150,53 @@ def admin_cat_content_episodes_keyboard():
         [InlineKeyboardButton(text="🔙 Kontent boshqaruvi", callback_data="admin_cat_content")],
     ])
 
-def admin_cat_users_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔍 Foydalanuvchi", callback_data="admin_find_user", style="primary"),
-            InlineKeyboardButton(text="👑 Admin qo'shish", callback_data="admin_add_admin", style="success"),
-        ],
-        [
-            InlineKeyboardButton(text="🗑 Admin o'chirish", callback_data="admin_list_admins", style="danger"),
-            InlineKeyboardButton(text="🚫 Bloklash", callback_data="admin_block", style="danger"),
-        ],
-        [InlineKeyboardButton(text="📜 Admin faoliyati", callback_data="admin_activity_log", style="primary")],
-        [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
-    ])
+def admin_cat_users_keyboard(role=None):
+    rows = []
+    row1 = []
+    if role is None or role in ("moderator", "super"):
+        row1.append(InlineKeyboardButton(text="🔍 Foydalanuvchi", callback_data="admin_find_user", style="primary"))
+    if role is None or role == "super":
+        row1.append(InlineKeyboardButton(text="👑 Admin qo'shish", callback_data="admin_add_admin", style="success"))
+    if row1:
+        rows.append(row1)
+    row2 = []
+    if role is None or role == "super":
+        row2.append(InlineKeyboardButton(text="🗑 Admin o'chirish", callback_data="admin_list_admins", style="danger"))
+    if role is None or role in ("moderator", "super"):
+        row2.append(InlineKeyboardButton(text="🚫 Bloklash", callback_data="admin_block", style="danger"))
+    if row2:
+        rows.append(row2)
+    if role is None or role == "super":
+        rows.append([InlineKeyboardButton(text="📜 Admin faoliyati", callback_data="admin_activity_log", style="primary")])
+    rows.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def admin_cat_stats_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats", style="primary"),
-            InlineKeyboardButton(text="📅 Hisobot", callback_data="admin_report", style="primary"),
-        ],
-        [InlineKeyboardButton(text="💰 Daromad", callback_data="admin_revenue", style="primary")],
-        [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
-    ])
+def admin_cat_stats_keyboard(role=None):
+    rows = [[
+        InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats", style="primary"),
+        InlineKeyboardButton(text="📅 Hisobot", callback_data="admin_report", style="primary"),
+    ]]
+    if role is None or role in ("moliya", "super"):
+        rows.append([InlineKeyboardButton(text="💰 Daromad", callback_data="admin_revenue", style="primary")])
+    rows.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def admin_cat_comm_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📨 Xabar yuborish", callback_data="admin_broadcast", style="success"),
-            InlineKeyboardButton(text="💬 Izohlar", callback_data="admin_comments_anime", style="primary"),
-        ],
-        [
-            InlineKeyboardButton(text="📢 Sponsor baner", callback_data="admin_sponsor", style="primary"),
-        ],
-        [InlineKeyboardButton(text="🤖 AI push-tavsiya", callback_data="admin_ai_push", style="primary")],
-        [InlineKeyboardButton(text="🔁 Qaytmagan userlarga xabar", callback_data="admin_comeback", style="primary")],
-        [InlineKeyboardButton(text="💎 Premium taklif (faol userlarga)", callback_data="admin_premium_pitch", style="primary")],
-        [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
-    ])
+def admin_cat_comm_keyboard(role=None):
+    rows = []
+    row1 = []
+    if role is None or role == "super":
+        row1.append(InlineKeyboardButton(text="📨 Xabar yuborish", callback_data="admin_broadcast", style="success"))
+    if role is None or role in ("moderator", "super"):
+        row1.append(InlineKeyboardButton(text="💬 Izohlar", callback_data="admin_comments_anime", style="primary"))
+    if row1:
+        rows.append(row1)
+    if role is None or role == "super":
+        rows.append([InlineKeyboardButton(text="📢 Sponsor baner", callback_data="admin_sponsor", style="primary")])
+        rows.append([InlineKeyboardButton(text="🤖 AI push-tavsiya", callback_data="admin_ai_push", style="primary")])
+        rows.append([InlineKeyboardButton(text="🔁 Qaytmagan userlarga xabar", callback_data="admin_comeback", style="primary")])
+        rows.append([InlineKeyboardButton(text="💎 Premium taklif (faol userlarga)", callback_data="admin_premium_pitch", style="primary")])
+    rows.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_cat_settings_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -2833,6 +2920,13 @@ async def ai_chat_message(message: Message, state: FSMContext):
     if not text:
         await message.answer("Iltimos, matn ko'rinishida savol yozing.")
         return
+    # Bitta faol foydalanuvchi tez-tez xabar yozib, bepul AI kvotasini (Gemini)
+    # yakka o'zi tugatib qo'yishining oldini olish uchun cheklov. AI push/comeback
+    # kabi fon vazifalarida admin buni ataylab 150 userga cheklagan — bu yerda
+    # ham xuddi shu maqsadda, lekin interaktiv chat uchun mos oynada.
+    if _rate_limited(f"ai_chat:{message.from_user.id}", max_hits=15, window_seconds=300):
+        await message.answer("⏳ Juda tez-tez yozyapsiz, birozdan keyin qayta urinib ko'ring.")
+        return
     data = await state.get_data()
     history = data.get("ai_history", [])
     try:
@@ -3209,7 +3303,11 @@ def _episode_locked(episode, user_id, prices, is_premium, anime=None):
         created_dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
     except Exception:
         return False
-    if datetime.now() - created_dt >= timedelta(hours=early_hours):
+    # db.now_tz(): created_at baza ustuni endi Toshkent vaqtida saqlanadi
+    # (database.py'dagi ulanish vaqt zonasiga qarang) — oddiy datetime.now()
+    # bilan solishtirilsa, server/DB vaqt zonasi farqi tufayli "oldinroq
+    # kirish" muddati soatlab noto'g'ri hisoblanib qolar edi.
+    if db.now_tz() - created_dt >= timedelta(hours=early_hours):
         return False
     return not is_premium
 
@@ -3243,7 +3341,7 @@ async def is_episode_locked_for_user(episode, user_id):
         created_dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
     except Exception:
         return False
-    if datetime.now() - created_dt >= timedelta(hours=early_hours):
+    if db.now_tz() - created_dt >= timedelta(hours=early_hours):
         return False
     return not is_premium
 
@@ -3353,14 +3451,14 @@ async def admin_handler(message: Message):
     if not await is_admin_user(message.from_user.id):
         await message.answer("❌ Ruxsat yoq!")
         return
-    await message.answer("👑 <b>Admin Panel</b>", reply_markup=admin_keyboard(), parse_mode="HTML")
+    await message.answer("👑 <b>Admin Panel</b>", reply_markup=admin_keyboard(admin_role_cached(message.from_user.id)), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_back")
 async def admin_back_handler(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
     await state.clear()
-    await call.message.edit_text("👑 <b>Admin Panel</b>", reply_markup=admin_keyboard(), parse_mode="HTML")
+    await call.message.edit_text("👑 <b>Admin Panel</b>", reply_markup=admin_keyboard(admin_role_cached(call.from_user.id)), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_content")
 async def admin_cat_content(call: CallbackQuery):
@@ -3384,23 +3482,24 @@ async def admin_cat_content_episodes(call: CallbackQuery):
 async def admin_cat_users(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
-    await call.message.edit_text("👥 <b>Foydalanuvchilar</b>", reply_markup=admin_cat_users_keyboard(), parse_mode="HTML")
+    await call.message.edit_text("👥 <b>Foydalanuvchilar</b>", reply_markup=admin_cat_users_keyboard(admin_role_cached(call.from_user.id)), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_stats")
 async def admin_cat_stats(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
-    await call.message.edit_text("📊 <b>Statistika</b>", reply_markup=admin_cat_stats_keyboard(), parse_mode="HTML")
+    await call.message.edit_text("📊 <b>Statistika</b>", reply_markup=admin_cat_stats_keyboard(admin_role_cached(call.from_user.id)), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_comm")
 async def admin_cat_comm(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
-    await call.message.edit_text("📨 <b>Muloqot</b>", reply_markup=admin_cat_comm_keyboard(), parse_mode="HTML")
+    await call.message.edit_text("📨 <b>Muloqot</b>", reply_markup=admin_cat_comm_keyboard(admin_role_cached(call.from_user.id)), parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_cat_settings")
 async def admin_cat_settings(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text("⚙️ <b>Sozlamalar</b>", reply_markup=admin_cat_settings_keyboard(), parse_mode="HTML")
 
@@ -3426,7 +3525,8 @@ async def _moderate_uploaded_photo(file_id, status_message=None):
 # ---- ANIME QO'SHISH ----
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(AddAnime.photo)
     await call.message.edit_text("🖼 Anime rasmini yuboring:", reply_markup=admin_back())
@@ -4077,6 +4177,34 @@ async def add_done(message: Message, state: FSMContext):
         _add_done_in_progress.discard(user_id)
 
 
+async def _notify_all_new_anime(anime_id, title):
+    """Yangi qo'shilgan anime haqida barcha faol (bloklanmagan) foydalanuvchilarga
+    fonda xabar yuboradi. bc_send() bilan bir xil FLOOD_WAIT qayta urinish
+    mantiqidan foydalanadi — Telegram vaqtincha to'xtatsa, xabar tashlab
+    yuborilmasdan, kutib qayta yuboriladi."""
+    users = await asyncio.to_thread(db.get_all_active_users)
+    for user_id in users:
+        for attempt in range(2):
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"🆕 Yangi anime qo'shildi!\n\n📌 {title}",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="👁 Ko'rish", callback_data=f"anime_{anime_id}")]
+                    ])
+                )
+                break
+            except TelegramForbiddenError:
+                await mark_user_left(user_id)
+                break
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception:
+                break
+        await asyncio.sleep(BROADCAST_DELAY)
+
+
 async def _add_done_impl(message: Message, state: FSMContext):
     # Qulf ichida ham state hali "videos" bosqichida ekanini tekshiramiz —
     # agar allaqachon tugallanib bo'lgan bo'lsa (masalan boshqa yo'l bilan
@@ -4136,20 +4264,13 @@ async def _add_done_impl(message: Message, state: FSMContext):
     if await is_auto_clip_enabled() and video_ids:
         asyncio.create_task(_auto_generate_highlight_clip(message, video_ids[0]))
 
-    # Faqat BLOKLNMAGAN foydalanuvchilarga xabar
-    users = await asyncio.to_thread(db.get_all_active_users)
-    for user_id in users:
-        try:
-            await bot.send_message(
-                user_id,
-                f"🆕 Yangi anime qo'shildi!\n\n📌 {data['title']}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="👁 Ko'rish", callback_data=f"anime_{anime_id}")]
-                ])
-            )
-            await asyncio.sleep(0.05)  # flood limiti uchun
-        except Exception:
-            pass
+    # Faqat BLOKLNMAGAN foydalanuvchilarga xabar — fon vazifasi sifatida
+    # (asyncio.create_task): ilgari bu tsikl shu handler ichida to'g'ridan-to'g'ri
+    # kutilardi, ya'ni ko'p foydalanuvchili botda admin "✅ qoshildi" tasdiqni
+    # daqiqalab kutib turishga majbur bo'lardi va bot "osilib qoldi" degan
+    # taassurot qoldirardi. Endi xuddi AI push/comeback xabarlaridagi kabi
+    # fonda yuboriladi, admin esa javobni zudlik bilan oladi.
+    asyncio.create_task(_notify_all_new_anime(anime_id, data['title']))
 
     total = data.get("total_episodes")
     progress_line = f"\n📦 Yuklandi: {len(video_ids)}/{total} qism" if total else f"\n📹 {len(video_ids)} ta video"
@@ -4171,7 +4292,8 @@ async def _add_done_impl(message: Message, state: FSMContext):
 # ---- DAVOM QO'SHISH ----
 @dp.callback_query(F.data == "admin_add_episode")
 async def admin_add_episode(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text(
         "➕ Davom qo'shish — serial tanlash usuli:",
@@ -4403,7 +4525,8 @@ async def unlockanime(call: CallbackQuery):
 # ---- TAHRIRLASH ----
 @dp.callback_query(F.data == "admin_edit")
 async def admin_edit(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text(
         "✏️ Tahrirlash — anime tanlash usuli:",
@@ -4524,7 +4647,8 @@ def banner_list_keyboard(banners):
 
 @dp.callback_query(F.data == "admin_banners")
 async def admin_banners(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
     banners = await asyncio.to_thread(db.get_banners, False)
@@ -4646,7 +4770,8 @@ _comment_reply_suggestions = {}
 
 @dp.callback_query(F.data == "admin_comments_anime")
 async def admin_comments_anime(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(ModerateComment.search_query)
     await call.message.edit_text("🔍 Izohlarini ko'rmoqchi bo'lgan anime nomini yoki ID/kod raqamini yozing:", reply_markup=admin_back())
@@ -4767,7 +4892,8 @@ async def _admin_send_comment_reply(event, comment_id, reply_text):
 # ---- O'CHIRISH ----
 @dp.callback_query(F.data == "admin_delete")
 async def admin_delete(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text(
         "🗑 O'chirish — anime tanlash usuli:",
@@ -4840,7 +4966,8 @@ async def del_confirm(call: CallbackQuery, state: FSMContext):
 # ---- QISMLAR ----
 @dp.callback_query(F.data == "admin_episodes")
 async def admin_episodes(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text(
         "🎬 <b>Qism boshqaruvi</b>",
@@ -4862,7 +4989,8 @@ _VIDEO_CHECK_CHUNK = 100
 
 @dp.callback_query(F.data == "admin_check_videos")
 async def admin_check_videos(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     if not STREAM_ENABLED or not pyro:
         await call.answer(
@@ -6532,7 +6660,8 @@ def _clip_duration_keyboard():
 
 @dp.callback_query(F.data == "clip_start")
 async def clip_start(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
     await call.message.edit_text(
@@ -6891,7 +7020,8 @@ async def admin_growth_chart(call: CallbackQuery):
 # ---- ADMIN FAOLIYATI LOGI ----
 @dp.callback_query(F.data == "admin_activity_log")
 async def admin_activity_log(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     logs = await asyncio.to_thread(db.get_admin_logs, 20)
     if not logs:
@@ -6912,7 +7042,8 @@ BROADCAST_DELAY = 0.05  # ~20 xabar/soniya
 
 @dp.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(BroadcastState.choose_type)
     await call.message.edit_text(
@@ -7002,7 +7133,8 @@ async def _run_ai_push_job(status_message):
 
 @dp.callback_query(F.data == "admin_ai_push")
 async def admin_ai_push(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     if not ai_service.AI_ENABLED:
         await call.answer("AI hozircha sozlanmagan", show_alert=True)
@@ -7059,7 +7191,8 @@ async def _run_comeback_job(status_message, days):
 
 @dp.callback_query(F.data == "admin_comeback")
 async def admin_comeback(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     if not ai_service.AI_ENABLED:
         await call.answer("AI hozircha sozlanmagan", show_alert=True)
@@ -7159,7 +7292,8 @@ async def _run_premium_pitch_job(status_message):
 
 @dp.callback_query(F.data == "admin_premium_pitch")
 async def admin_premium_pitch(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     if not ai_service.AI_ENABLED:
         await call.answer("AI hozircha sozlanmagan", show_alert=True)
@@ -7359,7 +7493,8 @@ async def bc_send(call: CallbackQuery, state: FSMContext):
 # ---- KANALLAR ----
 @dp.callback_query(F.data == "admin_channels")
 async def admin_channels(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     channels = await asyncio.to_thread(db.get_channels)
     text = "📢 <b>Majburiy kanallar</b>\n\n"
@@ -7429,7 +7564,8 @@ async def ch_del_done(call: CallbackQuery):
 # ---- BLOKLASH ----
 @dp.callback_query(F.data == "admin_block")
 async def admin_block_menu(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text(
         "🚫 <b>Bloklash</b>",
@@ -7506,7 +7642,8 @@ async def unblock_action(message: Message, state: FSMContext):
 # ---- TEXNIK ISHLAR ----
 @dp.callback_query(F.data == "admin_maintenance")
 async def admin_maintenance(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     current = await asyncio.to_thread(db.get_setting, "maintenance")
     status = "✅ Yoqiq" if current == "1" else "❌ Ochiq"
@@ -7534,7 +7671,8 @@ async def set_maintenance(call: CallbackQuery):
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
 async def admin_content(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     current = await asyncio.to_thread(db.get_setting, "content_protect")
     status = "✅ Yoqiq" if current == "1" else "❌ Ochiq"
@@ -7564,7 +7702,8 @@ async def set_content(call: CallbackQuery):
 # O'chiq bo'lsa — faqat "nofaol" deb belgilanadi, qaytib kelsa erkin foydalanadi.
 @dp.callback_query(F.data == "admin_autoblock")
 async def admin_autoblock(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     current = await asyncio.to_thread(db.get_setting, "auto_block_on_leave")
     enabled = current != "0"  # standart holat — yoqiq
@@ -7639,7 +7778,8 @@ async def mark_user_left(user_id, tg_user=None):
 
 @dp.callback_query(F.data == "admin_autoclip")
 async def admin_autoclip(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     enabled = await is_auto_clip_enabled()
     status = "✅ Yoqiq" if enabled else "❌ O'chirilgan"
@@ -7676,7 +7816,8 @@ async def _links_text():
 
 @dp.callback_query(F.data == "admin_links")
 async def admin_links(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
     await call.message.edit_text(
@@ -7741,7 +7882,8 @@ def _wordfilter_kb():
 
 @dp.callback_query(F.data == "admin_wordfilter")
 async def admin_wordfilter(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
     await call.message.edit_text(await _wordfilter_text(), reply_markup=_wordfilter_kb(), parse_mode="HTML")
@@ -7808,7 +7950,8 @@ def _sponsor_kb():
 
 @dp.callback_query(F.data == "admin_sponsor")
 async def admin_sponsor(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
     await call.message.edit_text(await _sponsor_text(), reply_markup=_sponsor_kb(), parse_mode="HTML")
@@ -7884,7 +8027,8 @@ async def sp_delete(call: CallbackQuery):
 # ---- FOYDALANUVCHI QIDIRISH ----
 @dp.callback_query(F.data == "admin_find_user")
 async def admin_find_user(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(FindUserState.query)
     await call.message.edit_text("🔍 Foydalanuvchi ID yoki @username yozing:")
@@ -7926,9 +8070,8 @@ async def find_user_result(message: Message, state: FSMContext):
 async def admin_report(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
-    from datetime import datetime
     s = await asyncio.to_thread(db.get_daily_stats)
-    today = datetime.now().strftime("%d.%m.%Y")
+    today = db.now_tz().strftime("%d.%m.%Y")
     await call.message.edit_text(
         f"📅 <b>Kunlik hisobot — {today}</b>\n\n"
         f"👥 Bugun qoshildi: {s['new_users']}\n"
@@ -7944,7 +8087,8 @@ _PLAN_LABELS = {"1m": "1 oy", "3m": "3 oy", "1y": "1 yil"}
 
 @dp.callback_query(F.data == "admin_revenue")
 async def admin_revenue(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="moliya"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     r = await asyncio.to_thread(db.get_revenue_stats)
 
@@ -8094,10 +8238,15 @@ def admin_manage_kb():
 # ---- ADMIN QO'SHISH ----
 # FAQAT asosiy egasi (ADMIN_ID) yangi admin qo'sha oladi — qo'shimcha adminlar
 # o'zlari boshqa admin qo'sha olmaydi, aks holda nazoratdan chiqib ketishi mumkin.
+_ROLE_LABELS = {"moderator": "🛡 Moderator", "moliya": "💰 Moliya", "super": "👑 Super-admin"}
+
+def _role_label(role):
+    return _ROLE_LABELS.get(role, role or "?")
+
 @dp.callback_query(F.data == "admin_add_admin")
 async def admin_add_admin(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        await call.answer("Faqat asosiy admin yangi admin qo'sha oladi", show_alert=True)
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.message.edit_text(
         "👑 Yangi admin ID sini yozing:",
@@ -8107,8 +8256,8 @@ async def admin_add_admin(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminManageState.add_id)
 async def admin_add_admin_save(message: Message, state: FSMContext):
-    await state.clear()
-    if message.from_user.id != ADMIN_ID:
+    if not await is_admin_user(message.from_user.id, min_role="super"):
+        await state.clear()
         return
     try:
         new_admin_id = int(message.text.strip())
@@ -8118,44 +8267,122 @@ async def admin_add_admin_save(message: Message, state: FSMContext):
     if new_admin_id == ADMIN_ID:
         await message.answer("❌ Bu ID allaqachon asosiy admin.", reply_markup=admin_back())
         return
+    await state.update_data(new_admin_id=new_admin_id)
+    await state.set_state(AdminManageState.choosing_role)
+    await message.answer(
+        "Bu admin qaysi darajada bo'lsin?\n\n"
+        "🛡 <b>Moderator</b> — kontent (anime/qism/banner), izohlar, foydalanuvchi qidirish/bloklash\n"
+        "💰 <b>Moliya</b> — to'lovlarni tasdiqlash, Premium narxlari, daromad statistikasi\n"
+        "👑 <b>Super-admin</b> — hammasi, shu jumladan boshqa adminlarni boshqarish",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛡 Moderator", callback_data="admin_newrole_moderator")],
+            [InlineKeyboardButton(text="💰 Moliya", callback_data="admin_newrole_moliya")],
+            [InlineKeyboardButton(text="👑 Super-admin", callback_data="admin_newrole_super")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("admin_newrole_"))
+async def admin_add_admin_finish(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    if await state.get_state() != AdminManageState.choosing_role.state:
+        return
+    role = call.data.replace("admin_newrole_", "")
+    data = await state.get_data()
+    new_admin_id = data.get("new_admin_id")
+    await state.clear()
+    if not new_admin_id or role not in db.ADMIN_ROLES:
+        return
     u = await asyncio.to_thread(db.get_user, new_admin_id)
     username = f"@{u['username']}" if u and u.get("username") else None
-    await asyncio.to_thread(db.add_admin, new_admin_id, username, message.from_user.id)
+    await asyncio.to_thread(db.add_admin, new_admin_id, username, call.from_user.id, role)
     _invalidate_extra_admin_cache()
-    await log_admin_action(message.from_user, "Admin qo'shdi", f"ID: {new_admin_id}")
-    await message.answer(
-        f"✅ Yangi admin qo'shildi!\n🆔 ID: <code>{new_admin_id}</code>" + (f"\n👤 {username}" if username else ""),
+    await log_admin_action(call.from_user, "Admin qo'shdi", f"ID: {new_admin_id}, rol: {role}")
+    await call.message.edit_text(
+        f"✅ Yangi admin qo'shildi!\n🆔 ID: <code>{new_admin_id}</code>"
+        + (f"\n👤 {username}" if username else "")
+        + f"\n🎚 Daraja: {_role_label(role)}",
         reply_markup=admin_manage_kb(),
         parse_mode="HTML"
     )
     try:
-        await bot.send_message(new_admin_id, "👑 Sizga botda admin huquqi berildi!")
+        await bot.send_message(new_admin_id, f"👑 Sizga botda admin huquqi berildi! Daraja: {_role_label(role)}")
     except Exception:
         pass
 
-# ---- ADMINLAR RO'YXATI / O'CHIRISH ----
+# ---- ADMINLAR RO'YXATI / ROLINI O'ZGARTIRISH / O'CHIRISH ----
 @dp.callback_query(F.data == "admin_list_admins")
 async def admin_list_admins(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     admins = await asyncio.to_thread(db.get_admins)
-    rows = [[InlineKeyboardButton(
-        text=f"🗑 {(a['username'] or a['user_id'])}",
-        callback_data=f"admin_remove_admin_{a['user_id']}",
-        style="danger"
-    )] for a in admins]
+    rows = []
+    for a in admins:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"🎚 {(a['username'] or a['user_id'])} — {_role_label(a.get('role'))}",
+                callback_data=f"admin_rolepick_{a['user_id']}"
+            ),
+            InlineKeyboardButton(text="🗑", callback_data=f"admin_remove_admin_{a['user_id']}", style="danger"),
+        ])
     rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_cat_users")])
     text = "📋 <b>Qo'shimcha adminlar:</b>\n\n" + (
-        "\n".join(f"🆔 <code>{a['user_id']}</code> — {a['username'] or 'username yoq'}" for a in admins)
+        "Darajani o'zgartirish uchun ismiga, o'chirish uchun 🗑 tugmasiga bosing.\n\n" +
+        "\n".join(f"🆔 <code>{a['user_id']}</code> — {a['username'] or 'username yoq'} ({_role_label(a.get('role'))})" for a in admins)
         if admins else "Hozircha qo'shimcha admin yo'q."
     )
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
 
+@dp.callback_query(F.data.startswith("admin_rolepick_"))
+async def admin_role_pick(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    target_id = int(call.data.replace("admin_rolepick_", ""))
+    await call.message.edit_text(
+        f"🎚 <code>{target_id}</code> uchun yangi daraja tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛡 Moderator", callback_data=f"admin_setrole_{target_id}_moderator")],
+            [InlineKeyboardButton(text="💰 Moliya", callback_data=f"admin_setrole_{target_id}_moliya")],
+            [InlineKeyboardButton(text="👑 Super-admin", callback_data=f"admin_setrole_{target_id}_super")],
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_list_admins")],
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("admin_setrole_"))
+async def admin_role_set(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    try:
+        _, _, target_id, role = call.data.split("_", 3)
+        target_id = int(target_id)
+    except Exception:
+        return
+    if role not in db.ADMIN_ROLES:
+        return
+    ok = await asyncio.to_thread(db.set_admin_role, target_id, role)
+    if not ok:
+        await call.answer("Bu admin topilmadi (allaqachon o'chirilgan bo'lishi mumkin)", show_alert=True)
+        return
+    _invalidate_extra_admin_cache()
+    await log_admin_action(call.from_user, "Admin darajasini o'zgartirdi", f"ID: {target_id} -> {role}")
+    await call.answer(f"✅ Daraja o'zgartirildi: {_role_label(role)}", show_alert=True)
+    try:
+        await bot.send_message(target_id, f"🎚 Admin darajangiz o'zgartirildi: {_role_label(role)}")
+    except Exception:
+        pass
+    await admin_list_admins(call)
+
 @dp.callback_query(F.data.startswith("admin_remove_admin_"))
 async def admin_remove_admin(call: CallbackQuery):
-    # Qo'shimcha admin o'chirishni ham faqat asosiy admin qila oladi.
-    if call.from_user.id != ADMIN_ID:
-        await call.answer("Faqat asosiy admin adminlikdan chiqara oladi", show_alert=True)
+    # Qo'shimcha admin o'chirishni ham faqat super-admin qila oladi.
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     target_id = int(call.data.replace("admin_remove_admin_", ""))
     await asyncio.to_thread(db.remove_admin, target_id)
@@ -8167,14 +8394,18 @@ async def admin_remove_admin(call: CallbackQuery):
     except Exception:
         pass
     admins = await asyncio.to_thread(db.get_admins)
-    rows = [[InlineKeyboardButton(
-        text=f"🗑 {(a['username'] or a['user_id'])}",
-        callback_data=f"admin_remove_admin_{a['user_id']}",
-        style="danger"
-    )] for a in admins]
+    rows = []
+    for a in admins:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"🎚 {(a['username'] or a['user_id'])} — {_role_label(a.get('role'))}",
+                callback_data=f"admin_rolepick_{a['user_id']}"
+            ),
+            InlineKeyboardButton(text="🗑", callback_data=f"admin_remove_admin_{a['user_id']}", style="danger"),
+        ])
     rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_cat_users")])
     text = "📋 <b>Qo'shimcha adminlar:</b>\n\n" + (
-        "\n".join(f"🆔 <code>{a['user_id']}</code> — {a['username'] or 'username yoq'}" for a in admins)
+        "\n".join(f"🆔 <code>{a['user_id']}</code> — {a['username'] or 'username yoq'} ({_role_label(a.get('role'))})" for a in admins)
         if admins else "Hozircha qo'shimcha admin yo'q."
     )
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML")
@@ -8206,7 +8437,8 @@ async def send_db_backup(chat_id=None, reason="qoʻlda"):
 
 @dp.callback_query(F.data == "admin_db_backup")
 async def admin_db_backup(call: CallbackQuery):
-    if not await is_admin_user(call.from_user.id):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await call.answer("🗄 Backup tayyorlanmoqda...")
     try:
@@ -8314,9 +8546,8 @@ async def weekly_ai_report_task():
 async def daily_report_task():
     while True:
         await asyncio.sleep(86400)
-        from datetime import datetime
         s = await asyncio.to_thread(db.get_daily_stats)
-        today = datetime.now().strftime("%d.%m.%Y")
+        today = db.now_tz().strftime("%d.%m.%Y")
         try:
             await bot.send_message(
                 ADMIN_ID,
@@ -8432,7 +8663,20 @@ def _verified_post_user(data):
 # ===================== SAYT AUTENTIFIKATSIYASI (email/telefon + parol) =====================
 # Bu Telegram Mini App'dagi initData tekshiruvidan butunlay alohida tizim —
 # anifilm.uz saytiga Telegramsiz ham roʻyxatdan oʻtish/kirish imkonini beradi.
-SITE_AUTH_SECRET = os.environ.get("SITE_AUTH_SECRET", BOT_TOKEN)
+SITE_AUTH_SECRET = os.environ.get("SITE_AUTH_SECRET")
+if not SITE_AUTH_SECRET:
+    # BOT_TOKEN'ga tushib qolish ishlayveradi, lekin BOT_TOKEN boshqa ko'plab
+    # joyda (Telegram API so'rovlarida, loglarda va h.k.) aylanadi — agar u
+    # qandaydir tarzda sizib chiqsa, sayt login tokenlari ham soxtalashtirilishi
+    # mumkin bo'lib qoladi. Shuning uchun productionda alohida, faqat shu
+    # maqsad uchun tasodifiy uzun qiymat (masalan `openssl rand -hex 32`)
+    # SITE_AUTH_SECRET sifatida o'rnatilishi qat'iy tavsiya etiladi.
+    logger.warning(
+        "OGOHLANTIRISH: SITE_AUTH_SECRET muhit o'zgaruvchisi o'rnatilmagan — "
+        "BOT_TOKEN vaqtinchalik o'rniga ishlatilyapti. Productionda buni alohida "
+        "tasodifiy qiymat bilan sozlang (masalan: openssl rand -hex 32)."
+    )
+    SITE_AUTH_SECRET = BOT_TOKEN
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_RE = re.compile(r"^\+?\d{9,15}$")
 
@@ -8448,6 +8692,37 @@ def _verify_password(password: str, stored: str) -> bool:
         return hmac.compare_digest(calc, digest)
     except Exception:
         return False
+
+# ===== ODDIY XOTIRADAGI RATE-LIMIT =====
+# Bot bitta jarayon (process) sifatida ishlaydi, shuning uchun Redis kabi
+# tashqi xotiraga hojat yo'q — oddiy dict yetarli. key -> [urinish vaqtlari].
+# Login/register'da brute-force/spam'dan himoya, AI chatda esa bepul AI
+# kvotasining bitta foydalanuvchi tomonidan tugatilib qo'yilishining oldini
+# olish uchun ishlatiladi.
+_rate_hits: dict[str, list[float]] = {}
+
+def _rate_limited(key: str, max_hits: int, window_seconds: float) -> bool:
+    """True qaytarsa — limit oshgan (rad etish kerak). Oynadan chiqib ketgan
+    eski urinishlar avtomatik tozalanadi, shuning uchun xotira vaqt o'tishi
+    bilan cheksiz o'smaydi."""
+    now = time.time()
+    hits = _rate_hits.setdefault(key, [])
+    cutoff = now - window_seconds
+    while hits and hits[0] < cutoff:
+        hits.pop(0)
+    if len(hits) >= max_hits:
+        return True
+    hits.append(now)
+    return False
+
+def _client_ip(request) -> str:
+    """Render/nginx kabi teskari proksi ortida to'g'ridan-to'g'ri request.remote
+    proksining o'z IP'ini qaytaradi, shuning uchun avval X-Forwarded-For
+    sarlavhasiga qaraladi (birinchi qiymat — haqiqiy mijoz IP'i)."""
+    fwd = request.headers.get("X-Forwarded-For")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote or "noma'lum"
 
 def _make_site_token(site_user_id: int) -> str:
     expires = int(time.time()) + 60 * 60 * 24 * 30  # 30 kun
@@ -8488,6 +8763,10 @@ def _public_site_user(u: dict) -> dict:
     }
 
 async def webapp_site_register(request):
+    # Spam-akkaunt ochishning oldini olish: bitta IP soatiga cheklangan
+    # miqdorda ro'yxatdan o'ta oladi.
+    if _rate_limited(f"reg:{_client_ip(request)}", max_hits=5, window_seconds=3600):
+        return web.json_response({"error": "juda ko'p urinish, birozdan keyin qayta urining"}, status=429)
     try:
         data = await request.json()
         email = (data.get("email") or "").strip().lower() or None
@@ -8520,6 +8799,13 @@ async def webapp_site_register(request):
     return web.json_response({"token": token, "user": _public_site_user(user)})
 
 async def webapp_site_login(request):
+    # Brute-force himoyasi: bitta IP daqiqalar ichida cheklangan miqdorda
+    # urinishi mumkin, va bitta hisobga (identifier) ko'p turli IP'lardan
+    # tarqoq hujum qilinishining oldini olish uchun identifier bo'yicha ham
+    # alohida, kengroq oynali limit qo'yiladi.
+    ip = _client_ip(request)
+    if _rate_limited(f"login_ip:{ip}", max_hits=10, window_seconds=600):
+        return web.json_response({"error": "juda ko'p urinish, birozdan keyin qayta urining"}, status=429)
     try:
         data = await request.json()
         identifier = str(data.get("identifier") or "").strip()
@@ -8530,11 +8816,84 @@ async def webapp_site_login(request):
         identifier = identifier.lower()
     else:
         identifier = re.sub(r"[\s\-\(\)]", "", identifier)
+    if identifier and _rate_limited(f"login_id:{identifier}", max_hits=8, window_seconds=900):
+        return web.json_response({"error": "juda ko'p urinish, birozdan keyin qayta urining"}, status=429)
     user = await asyncio.to_thread(db.get_site_user_by_login, identifier)
     if not user or not _verify_password(password, user["password_hash"]):
         return web.json_response({"error": "email/telefon yoki parol notoʻgʻri"}, status=401)
     token = _make_site_token(user["id"])
     return web.json_response({"token": token, "user": _public_site_user(user)})
+
+async def webapp_site_forgot_password(request):
+    """Parolni tiklash havolasini emailga yuboradi. Email ro'yxatdan o'tган-
+    o'tmaganidan qat'iy nazar HAR DOIM bir xil muvaffaqiyat xabari qaytariladi —
+    aks holda javobning o'zidan "bu email ro'yxatdan o'tganmi yo'qmi" deb bilib
+    olish mumkin bo'lardi (hisob mavjudligini bilib olish/enumeration)."""
+    ip = _client_ip(request)
+    generic_ok = web.json_response({
+        "ok": True,
+        "message": "Agar bu email ro'yxatdan o'tgan bo'lsa, tiklash havolasi emailingizga yuborildi."
+    })
+    if _rate_limited(f"fpw_ip:{ip}", max_hits=5, window_seconds=3600):
+        return generic_ok
+    try:
+        data = await request.json()
+        email = (data.get("email") or "").strip().lower()
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
+    if not email or not _EMAIL_RE.match(email):
+        return generic_ok
+    if _rate_limited(f"fpw_id:{email}", max_hits=3, window_seconds=3600):
+        return generic_ok
+    user = await asyncio.to_thread(db.get_site_user_by_email, email)
+    if not user:
+        return generic_ok
+    token = secrets.token_urlsafe(32)
+    await asyncio.to_thread(db.create_password_reset, token, user["id"])
+    reset_link = f"{SITE_URL}/reset-password?token={token}"
+    name_part = f" {user['display_name']}" if user.get("display_name") else ""
+    body = (
+        f"Salom{name_part}!\n\n"
+        f"AniFilm hisobingiz uchun parolni tiklash so'ralgan edi. Agar bu siz "
+        f"bo'lmasangiz, xatni e'tiborsiz qoldiring — parolingiz o'zgarmaydi.\n\n"
+        f"Yangi parol o'rnatish uchun havola (1 soat amal qiladi):\n{reset_link}\n"
+    )
+    sent = await asyncio.to_thread(_send_email_sync, email, "AniFilm — parolni tiklash", body)
+    if not sent:
+        # SMTP sozlanmagan yoki xatolik — foydalanuvchiga baribir aniq bo'lmagan
+        # xabar qaytariladi (enumeration'dan himoya), lekin log'da admin buni ko'radi.
+        logger.error(f"Parol tiklash xati yuborilmadi: {email}")
+    return generic_ok
+
+async def webapp_site_reset_password(request):
+    try:
+        data = await request.json()
+        token = str(data.get("token") or "")
+        new_password = str(data.get("password") or "")
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
+    if len(new_password) < 6:
+        return web.json_response({"error": "parol kamida 6 ta belgidan iborat boʻlishi kerak"}, status=400)
+    if not token:
+        return web.json_response({"error": "havola notoʻgʻri yoki eskirgan"}, status=400)
+    reset = await asyncio.to_thread(db.get_password_reset, token)
+    if not reset or reset.get("used"):
+        return web.json_response({"error": "havola notoʻgʻri yoki eskirgan"}, status=400)
+    try:
+        created_dt = datetime.strptime(reset["created_at"], "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return web.json_response({"error": "havola notoʻgʻri yoki eskirgan"}, status=400)
+    if db.now_tz() - created_dt >= timedelta(hours=1):
+        return web.json_response({"error": "havola muddati tugagan, parolni qaytadan so'rang"}, status=400)
+    # Atomik: token faqat hali used=0 bo'lsa "sarflanadi" — shu bilan bir token
+    # ikki marta ishlatib bo'lmaydi (masalan foydalanuvchi havolani ikki marta
+    # bossa yoki bir nechta tabda ochsa).
+    site_user_id = await asyncio.to_thread(db.mark_password_reset_used, token)
+    if not site_user_id:
+        return web.json_response({"error": "havola notoʻgʻri yoki eskirgan"}, status=400)
+    password_hash = _hash_password(new_password)
+    await asyncio.to_thread(db.update_site_user_password, site_user_id, password_hash)
+    return web.json_response({"ok": True})
 
 async def webapp_site_me(request):
     uid = _site_user_id(request)
@@ -8860,6 +9219,10 @@ async def webapp_ai_chat(request):
         return web.json_response({"error": "boʻsh savol"}, status=400)
     if len(question) > 300:
         return web.json_response({"error": "savol juda uzun (max 300)"}, status=400)
+    # ai_chat_message'dagi bilan bir xil kalit fazosi — foydalanuvchi bot va
+    # webapp o'rtasida almashib limitni chetlab o'tolmaydi.
+    if _rate_limited(f"ai_chat:{user_id}", max_hits=15, window_seconds=300):
+        return web.json_response({"error": "juda tez-tez, birozdan keyin qayta urining"}, status=429)
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     if not anime:
         return web.json_response({"error": "topilmadi"}, status=404)
@@ -9127,8 +9490,7 @@ async def webapp_add_comment(request):
     last_at = await asyncio.to_thread(db.get_last_comment_at, user_id)
     if last_at:
         try:
-            from datetime import datetime
-            delta = (datetime.now() - datetime.strptime(last_at, "%Y-%m-%d %H:%M:%S")).total_seconds()
+            delta = (db.now_tz() - datetime.strptime(last_at, "%Y-%m-%d %H:%M:%S")).total_seconds()
             if delta < 20:
                 return web.json_response({"error": "juda tez, biroz kuting"}, status=429)
         except Exception:
@@ -9292,7 +9654,7 @@ async def debug_path(request):
     # ochiq edi — istalgan kishi server fayl tuzilishini ko'rishi mumkin edi.
     # Endi faqat DEBUG_TOKEN muhit o'zgaruvchisi o'rnatilgan bo'lsa va
     # so'rovda to'g'ri ?token=... berilgan bo'lsagina javob qaytaradi.
-    if not DEBUG_TOKEN or request.query.get("token") != DEBUG_TOKEN:
+    if not DEBUG_TOKEN or not hmac.compare_digest(request.query.get("token") or "", DEBUG_TOKEN):
         return web.Response(status=404)
     import os
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -9607,6 +9969,8 @@ async def start_web_server():
     app.router.add_get("/api/public/categories", webapp_public_categories)
     app.router.add_post("/api/site/register", webapp_site_register)
     app.router.add_post("/api/site/login", webapp_site_login)
+    app.router.add_post("/api/site/forgot-password", webapp_site_forgot_password)
+    app.router.add_post("/api/site/reset-password", webapp_site_reset_password)
     app.router.add_get("/api/site/me", webapp_site_me)
     app.router.add_get("/api/site/favorites", webapp_site_favorites)
     app.router.add_post("/api/site/favorite", webapp_site_toggle_favorite)
