@@ -1333,6 +1333,17 @@ GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-imag
 # xuddi Groq matn uchun zaxira bo'lgani kabi.
 POLLINATIONS_IMAGE_URL = "https://gen.pollinations.ai/image/{prompt}"
 POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux")
+# MUHIM (2026-avgust holatiga ko'ra): Pollinations o'zining yangi
+# birlashtirilgan "gen.pollinations.ai" endpoint'iga o'tgan va u ENDI API
+# kalit talab qiladi (avval umuman kalitsiz ishlar edi). Kalitsiz so'rov
+# "Missing or invalid API key" xatosi bilan qaytishi (yoki anonim rejimda
+# juda qattiq — ~15 soniyada 1 ta so'rov — cheklanishi) mumkin.
+# Bepul kalitni https://enter.pollinations.ai sahifasidan olish mumkin
+# ("Spore" darajasi — haftasiga 1.5 Pollen, bu bir necha yuz Flux rasmiga
+# yetadi). Kalit sozlanmagan bo'lsa ham so'rov baribir yuboriladi (ehtimol
+# anonim/qattiq cheklangan rejimda ishlaydi), lekin barqarorlik uchun
+# kalit qo'shish tavsiya etiladi.
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY")
 
 
 async def _call_gemini_image(prompt, timeout=40):
@@ -1380,12 +1391,18 @@ async def _call_pollinations_image(prompt, timeout=40):
     session = await _get_session()
     url = POLLINATIONS_IMAGE_URL.format(prompt=quote(prompt))
     params = {"model": POLLINATIONS_MODEL, "width": "1024", "height": "1024", "nologo": "true"}
+    headers = {}
+    if POLLINATIONS_API_KEY:
+        headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
     try:
         async with session.get(
-            url, params=params, timeout=aiohttp.ClientTimeout(total=timeout)
+            url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)
         ) as resp:
             if resp.status != 200:
-                logger.warning("Pollinations rasm so'rovida xato javob: %s", resp.status)
+                body = await resp.text()
+                logger.warning(
+                    "Pollinations rasm so'rovida xato javob: %s - %s", resp.status, body[:300]
+                )
                 return None
             return await resp.read()
     except Exception:
