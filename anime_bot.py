@@ -613,6 +613,7 @@ class SearchState(StatesGroup):
 class AIChatState(StatesGroup):
     chatting = State()
     mood = State()
+    image = State()  # 🎨 AI rasm chizish (Premium) — promptni shu holatda kutadi
 
 class BlockState(StatesGroup):
     user_id = State()
@@ -960,7 +961,8 @@ async def build_premium_menu(user_id):
         "✅ Majburiy kanal obunasi shart emas\n"
         "✅ Reklama bannersiz\n"
         f"✅ Yangi qismlarga {prices['early_hours']} soat oldinroq kirish\n"
-        "✅ Izohlaringiz yuqorida va 👑 belgi bilan chiqadi\n\n"
+        "✅ Izohlaringiz yuqorida va 👑 belgi bilan chiqadi\n"
+        "✅ AI bilan rasm chizdirish (🎨 AI Yordamchi bo'limida)\n\n"
         f"{_promo_banner_line(prices)}"
         "Tarifni tanlang:"
     )
@@ -2767,12 +2769,18 @@ def ai_menu_keyboard():
         [InlineKeyboardButton(text="💬 AI bilan suhbat", callback_data="ai_chat_start")],
         [InlineKeyboardButton(text="🎯 Menga anime tavsiya qil", callback_data="ai_recommend")],
         [InlineKeyboardButton(text="🎭 Kayfiyatimga mos tanla", callback_data="ai_mood_start")],
+        [InlineKeyboardButton(text="🎨 AI rasm chizish 💎", callback_data="ai_image_start")],
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu")],
     ])
 
 def ai_chat_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚪 Suhbatni tugatish", callback_data="ai_chat_stop")]
+    ])
+
+def ai_image_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop")]
     ])
 
 @dp.callback_query(F.data == "ai_menu")
@@ -2963,6 +2971,98 @@ async def ai_chat_message(message: Message, state: FSMContext):
     await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
+
+@dp.callback_query(F.data == "ai_image_start")
+async def ai_image_start(call: CallbackQuery, state: FSMContext):
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    # Premium-only imkoniyat — bepul AI chat'dan farqli o'laroq, rasm
+    # yaratish kvota jihatidan ancha "qimmat" bo'lgani uchun Premium
+    # foydalanuvchilarga imtiyoz sifatida ajratilgan.
+    status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
+    if not status["is_premium"]:
+        await call.answer()
+        text, kb = await build_premium_menu(call.from_user.id)
+        text = "🎨 <b>AI rasm chizish</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        return
+    await call.answer()
+    await state.set_state(AIChatState.image)
+    await call.message.edit_text(
+        "🎨 Qanday rasm chizib berishimni istaysiz? Tavsifini yozing "
+        "(masalan: \"tog' yonbag'rida turgan samuray, quyosh botishi, anime uslubida\").\n\n"
+        "Chiqish uchun pastdagi tugmani bosing.",
+        reply_markup=ai_image_keyboard()
+    )
+
+@dp.callback_query(F.data == "ai_image_stop")
+async def ai_image_stop(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.answer("Yakunlandi")
+    try:
+        await call.message.edit_text(
+            f"👋 Salom, {call.from_user.full_name}!\n"
+            f"🎌 AniFilm Bot ga xush kelibsiz\n\n"
+            f"👇 Nimani qidiryapsiz?",
+            reply_markup=main_keyboard()
+        )
+    except Exception:
+        await bot.send_message(call.message.chat.id, "🏠 Bosh menu", reply_markup=main_keyboard())
+
+@dp.message(AIChatState.image, Command("stop"))
+async def ai_image_stop_cmd(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("🚪 Yakunlandi.", reply_markup=main_keyboard())
+
+@dp.message(AIChatState.image)
+async def ai_image_message(message: Message, state: FSMContext):
+    if not await guard_access(message, is_callback=False):
+        return
+    # Premium tekshiruvi shu yerda ham QAYTA qilinadi — chunki suhbat
+    # ochilgan payt bilan xabar yozilgan payt orasida Premium muddati
+    # tugab qolishi mumkin.
+    status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
+    if not status["is_premium"]:
+        await state.clear()
+        text, kb = await build_premium_menu(message.from_user.id)
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
+        return
+    prompt = (message.text or "").strip()
+    if not prompt:
+        await message.answer("Iltimos, rasm tavsifini matn ko'rinishida yozing.")
+        return
+    # Bitta foydalanuvchi tez-tez so'rab, bepul rasm kvotasini yakka o'zi
+    # tugatib qo'yishining oldini olish (xuddi ai_chat'dagi kabi, lekin
+    # rasm ancha "qimmat" bo'lgani uchun oynasi kengroq/limiti qattiqroq).
+    if _rate_limited(f"ai_image:{message.from_user.id}", max_hits=10, window_seconds=600):
+        await message.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.")
+        return
+    try:
+        await bot.send_chat_action(message.chat.id, "upload_photo")
+    except Exception:
+        pass
+    status_msg = await message.answer("🎨 Chizyapman, kuting...")
+    image_bytes, gen_status, reason = await _generate_moderated_image(prompt)
+    if gen_status == "generate_failed":
+        await status_msg.edit_text("😕 Hozircha rasm yaratib bo'lmadi, birozdan keyin qayta urinib ko'ring.")
+        return
+    if gen_status == "unsafe":
+        await status_msg.edit_text(
+            "🚫 Yaratilgan rasm nomaqbul deb topildi"
+            + (f" ({reason})" if reason else "") + ". Boshqa tavsif bilan urinib ko'ring."
+        )
+        return
+    await status_msg.delete()
+    await message.answer_photo(
+        BufferedInputFile(image_bytes, filename="ai_rasm.jpg"),
+        caption=f"🎨 {prompt[:200]}",
+        reply_markup=ai_image_keyboard(),
+    )
+    await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
 
 @dp.callback_query(F.data == "ai_recommend")
 async def ai_recommend_handler(call: CallbackQuery, state: FSMContext):
@@ -3522,6 +3622,30 @@ async def _moderate_uploaded_photo(file_id, status_message=None):
         logger.exception("[_moderate_uploaded_photo] tekshiruvda xato — rasm o'zgarishsiz qabul qilindi.")
         return True, ""
 
+async def _generate_moderated_image(prompt):
+    """AI orqali (ai_service.generate_image) rasm yaratadi va uni
+    foydalanuvchiga/ommaga yuborishdan oldin AI moderatsiyasidan o'tkazadi
+    — xuddi admin qo'lda yuklagan rasmlar tekshirilgani kabi, AI o'zi
+    yaratgan rasm ham nazoratsiz qoldirilmaydi.
+
+    Qaytaradi: (image_bytes, status, reason)
+      status == "ok"              -> image_bytes tayyor, ishlatsa bo'ladi
+      status == "generate_failed" -> rasm umuman yaratilmadi (image_bytes=None)
+      status == "unsafe"          -> yaratildi, lekin moderatsiya rad etdi (image_bytes=None)
+    """
+    image_bytes = await ai_service.generate_image(prompt)
+    if not image_bytes:
+        return None, "generate_failed", ""
+    try:
+        img_b64 = base64.b64encode(image_bytes).decode("ascii")
+        safe, reason = await ai_service.moderate_image(img_b64)
+    except Exception:
+        logger.exception("[_generate_moderated_image] moderatsiyada xato — rasm o'zgarishsiz qabul qilindi.")
+        safe, reason = True, ""
+    if not safe:
+        return None, "unsafe", reason
+    return image_bytes, "ok", ""
+
 # ---- ANIME QO'SHISH ----
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(call: CallbackQuery, state: FSMContext):
@@ -3529,7 +3653,14 @@ async def admin_add(call: CallbackQuery, state: FSMContext):
         await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(AddAnime.photo)
-    await call.message.edit_text("🖼 Anime rasmini yuboring:", reply_markup=admin_back())
+    ai_hint = (
+        "\n\nYoki AI'ga chizdirish uchun tavsif yozing (masalan: \"fentezi "
+        "uslubidagi anime posteri, sehrgar qiz, ko'k-binafsha ranglar\"). "
+        "Eslatma: bu asl anime posteri emas, sun'iy yaratilgan rasm — "
+        "faqat asl poster topilmasa ishlating."
+        if ai_service.AI_ENABLED else ""
+    )
+    await call.message.edit_text(f"🖼 Anime rasmini yuboring:{ai_hint}", reply_markup=admin_back())
 
 @dp.message(AddAnime.photo, F.photo)
 async def add_photo(message: Message, state: FSMContext):
@@ -3585,6 +3716,68 @@ async def add_photo(message: Message, state: FSMContext):
         await message.answer("🖼 Rasm qabul qilindi. Endi anime nomini yozing:")
 
     await state.set_state(AddAnime.title)
+
+@dp.message(AddAnime.photo, F.text)
+async def add_photo_ai_prompt(message: Message, state: FSMContext):
+    if not ai_service.AI_ENABLED:
+        await message.answer("🖼 Iltimos, anime rasmini rasm (fayl) sifatida yuboring.")
+        return
+    prompt = message.text.strip()
+    if not prompt or prompt.startswith("/"):
+        return
+    if _rate_limited(f"ai_image:{message.from_user.id}", max_hits=10, window_seconds=600):
+        await message.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.")
+        return
+    status_msg = await message.answer("🎨 AI rasm chizyapti, kuting...")
+    await _send_ai_image_preview(
+        message, prompt, state, "anime_ai_use", "anime_ai_retry", "anime_ai_cancel",
+        filename="ai_anime.jpg",
+    )
+    await status_msg.delete()
+
+@dp.callback_query(F.data == "anime_ai_retry")
+async def anime_ai_retry(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    prompt = data.get("_pending_ai_prompt")
+    if not prompt:
+        await call.answer("Muddati o'tgan, tavsifni qaytadan yozing.", show_alert=True)
+        return
+    if _rate_limited(f"ai_image:{call.from_user.id}", max_hits=10, window_seconds=600):
+        await call.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.", show_alert=True)
+        return
+    await call.answer("🎨 Qayta yaratilyapti...")
+    await _send_ai_image_preview(
+        call.message, prompt, state, "anime_ai_use", "anime_ai_retry", "anime_ai_cancel",
+        filename="ai_anime.jpg",
+    )
+
+@dp.callback_query(F.data == "anime_ai_use")
+async def anime_ai_use(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    photo_id = data.get("_pending_ai_photo_id")
+    if not photo_id:
+        await call.answer("Muddati o'tgan, qaytadan urinib ko'ring.", show_alert=True)
+        return
+    await call.answer()
+    await state.update_data(photo_id=photo_id)
+    try:
+        await call.message.edit_caption(caption="✅ Tanlandi.")
+    except Exception:
+        pass
+    # AI yaratgan rasm — bu haqiqiy anime kadri emas, shu sabab
+    # trace.moe/vision orqali nom taxmin qilishning ma'nosi yo'q;
+    # to'g'ridan-to'g'ri nomni so'raymiz.
+    await state.set_state(AddAnime.title)
+    await call.message.answer("Endi anime nomini yozing:")
+
+@dp.callback_query(F.data == "anime_ai_cancel")
+async def anime_ai_cancel(call: CallbackQuery, state: FSMContext):
+    await call.answer("Bekor qilindi")
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await call.message.answer("🖼 Anime rasmini yuboring, yoki AI uchun tavsif yozing:")
 
 # ---- Qo'lda kiritilgan maydonlarni tasdiqlash ----
 # Admin nom/yil/davlat/janr/tavsifni yozgach (yoki AI orqali tavsif
@@ -4660,7 +4853,12 @@ async def banner_add(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
     await state.set_state(AddBanner.photo)
-    await call.message.edit_text("🖼 Banner rasmini yuboring:", reply_markup=admin_back())
+    ai_hint = (
+        "\n\nYoki AI'ga chizdirish uchun tavsif yozing (masalan: "
+        "\"kuzgi anime banner, sariq barglar, romantik kayfiyat\")."
+        if ai_service.AI_ENABLED else ""
+    )
+    await call.message.edit_text(f"🖼 Banner rasmini yuboring:{ai_hint}", reply_markup=admin_back())
 
 @dp.message(AddBanner.photo, F.photo)
 async def banner_photo(message: Message, state: FSMContext):
@@ -4676,6 +4874,104 @@ async def banner_photo(message: Message, state: FSMContext):
     await state.update_data(photo_id=file_id)
     await state.set_state(AddBanner.title)
     await message.answer("📌 Banner sarlavhasini yozing:")
+
+async def _send_ai_image_preview(target_message, prompt, state: FSMContext,
+                                  use_cb, retry_cb, cancel_cb, filename="ai_image.jpg"):
+    """AI orqali rasm yaratadi (moderatsiyadan o'tkazib) va tasdiqlash
+    klaviaturasi (✅ Ishlatish / 🔄 Qayta yaratish / ❌ Bekor qilish) bilan
+    yuboradi. Bir nechta oqim uchun umumiy (banner, anime rasmi) — faqat
+    tugmalarning callback_data'lari (use_cb/retry_cb/cancel_cb) farq qiladi,
+    shunda har bir oqim tasdiqlangach o'zining keyingi qadamiga o'tadi.
+    `target_message` — Message yoki CallbackQuery.message bo'lishi mumkin
+    (ikkalasida ham .answer()/.answer_photo() mavjud)."""
+    image_bytes, status, reason = await _generate_moderated_image(prompt)
+    if status == "generate_failed":
+        await target_message.answer(
+            "😕 Rasm yaratib bo'lmadi. Boshqa tavsif bilan urinib ko'ring "
+            "yoki rasmni qo'lda yuboring."
+        )
+        return
+    if status == "unsafe":
+        await target_message.answer(
+            "🚫 Yaratilgan rasm nomaqbul deb topildi"
+            + (f" ({reason})" if reason else "") + ". Boshqa tavsif yozing."
+        )
+        return
+    sent = await target_message.answer_photo(
+        BufferedInputFile(image_bytes, filename=filename),
+        caption="Shu rasmni ishlatamizmi?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Ishlatish", callback_data=use_cb)],
+            [InlineKeyboardButton(text="🔄 Qayta yaratish", callback_data=retry_cb)],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=cancel_cb)],
+        ])
+    )
+    await state.update_data(_pending_ai_photo_id=sent.photo[-1].file_id, _pending_ai_prompt=prompt)
+
+@dp.message(AddBanner.photo, F.text)
+async def banner_photo_ai_prompt(message: Message, state: FSMContext):
+    if not ai_service.AI_ENABLED:
+        await message.answer("🖼 Iltimos, banner rasmini rasm (fayl) sifatida yuboring.")
+        return
+    prompt = message.text.strip()
+    if not prompt or prompt.startswith("/"):
+        return
+    if _rate_limited(f"ai_image:{message.from_user.id}", max_hits=10, window_seconds=600):
+        await message.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.")
+        return
+    status_msg = await message.answer("🎨 AI rasm chizyapti, kuting...")
+    await _send_ai_image_preview(
+        message, prompt, state, "banner_ai_use", "banner_ai_retry", "banner_ai_cancel",
+        filename="ai_banner.jpg",
+    )
+    await status_msg.delete()
+
+@dp.callback_query(F.data == "banner_ai_retry")
+async def banner_ai_retry(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    prompt = data.get("_pending_ai_prompt")
+    if not prompt:
+        await call.answer("Muddati o'tgan, tavsifni qaytadan yozing.", show_alert=True)
+        return
+    if _rate_limited(f"ai_image:{call.from_user.id}", max_hits=10, window_seconds=600):
+        await call.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.", show_alert=True)
+        return
+    await call.answer("🎨 Qayta yaratilyapti...")
+    await _send_ai_image_preview(
+        call.message, prompt, state, "banner_ai_use", "banner_ai_retry", "banner_ai_cancel",
+        filename="ai_banner.jpg",
+    )
+
+@dp.callback_query(F.data == "banner_ai_use")
+async def banner_ai_use(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    photo_id = data.get("_pending_ai_photo_id")
+    if not photo_id:
+        await call.answer("Muddati o'tgan, qaytadan urinib ko'ring.", show_alert=True)
+        return
+    await call.answer()
+    await state.update_data(photo_id=photo_id)
+    try:
+        await call.message.edit_caption(caption="✅ Tanlandi.")
+    except Exception:
+        pass
+    await state.set_state(AddBanner.title)
+    await call.message.answer("📌 Banner sarlavhasini yozing:")
+
+@dp.callback_query(F.data == "banner_ai_cancel")
+async def banner_ai_cancel(call: CallbackQuery, state: FSMContext):
+    await call.answer("Bekor qilindi")
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await state.clear()
+    await call.message.answer(
+        "❌ Bekor qilindi.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Bannerlar", callback_data="admin_banners")]
+        ])
+    )
 
 @dp.message(AddBanner.title)
 async def banner_title(message: Message, state: FSMContext):

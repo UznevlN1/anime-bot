@@ -6,6 +6,7 @@ o'z ichiga oladi:
   - moderate_comment()          -> izohlarni spam/haqorat uchun tekshirish
   - generate_anime_description()-> admin uchun anime tavsifini AI bilan yozish
   - recommend_anime_ids()       -> foydalanuvchi tarixiga qarab anime tavsiyasi
+  - generate_image()            -> matn tavsifidan rasm yaratish (Gemini + Pollinations)
 
 Ishlatish uchun Render (yoki boshqa) muhitida GEMINI_API_KEY environment
 variable'ni qo'shish kerak. Kalitni https://aistudio.google.com/apikey
@@ -18,9 +19,11 @@ buzilmaydi.
 """
 import os
 import json
+import base64
 import logging
 import asyncio
 import aiohttp
+from urllib.parse import quote
 
 logger = logging.getLogger("ai_service")
 
@@ -1307,3 +1310,100 @@ async def pick_highlight_frame(images_base64, mime_type="image/jpeg"):
     except Exception:
         logger.error(f"[pick_highlight_frame] javobni ajratib bo'lmadi: {result[:200]}")
         return None
+
+
+# ===================== RASM YARATISH (IMAGE GENERATION) =====================
+# Gemini'ning "Nano Banana" rasm modeli (API nomi: gemini-2.5-flash-image)
+# xuddi yuqoridagi matn so'rovlari kabi generateContent endpoint orqali
+# chaqiriladi va bepul tarifda ishlaydi — lekin buni GEMINI_MODEL'dan
+# (yuqorida, matn suhbati uchun — hozir gemini-3.6-flash) ALOHIDA konstanta
+# qilib belgilash SHART: yangiroq rasm modellari (Nano Banana Pro/2, ya'ni
+# gemini-3.1-flash-image va gemini-3-pro-image-preview) 2026-yil holatiga
+# ko'ra FAQAT PULLIK — shu sabab aynan shu eski (lekin bepul) model nomi
+# qattiq yozib qo'yilgan. Agar kelajakda bu ham pullik bo'lib qolsa,
+# GEMINI_IMAGE_MODEL environment variable orqali osongina almashtirish
+# mumkin.
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+
+# Gemini rasm so'rovi muvaffaqiyatsiz bo'lsa (kvota tugagan, kalit yo'q yoki
+# xizmat vaqtincha ishlamayapti) — Pollinations.ai zaxira sifatida
+# ishlatiladi. Bu xizmat hech qanday ro'yxatdan o'tish yoki API kalit talab
+# qilmaydi (butunlay ochiq GET so'rov), shu sabab GEMINI_API_KEY umuman
+# sozlanmagan bo'lsa ham rasm yaratish funksiyasi baribir ishlayveradi —
+# xuddi Groq matn uchun zaxira bo'lgani kabi.
+POLLINATIONS_IMAGE_URL = "https://gen.pollinations.ai/image/{prompt}"
+POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux")
+
+
+async def _call_gemini_image(prompt, timeout=40):
+    """Gemini (Nano Banana) orqali rasm yaratishga urinadi. Muvaffaqiyatli
+    bo'lsa rasm baytlarini (bytes) qaytaradi, aks holda None — bu holda
+    chaqiruvchi tomon (generate_image) Pollinations zaxirasiga o'tadi."""
+    if not GEMINI_API_KEY:
+        return None
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
+    session = await _get_session()
+    try:
+        async with session.post(
+            _model_url(GEMINI_IMAGE_MODEL), json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            data = await resp.json()
+            if resp.status != 200:
+                logger.warning(
+                    "Gemini rasm (%s) xato javob: %s - %s",
+                    GEMINI_IMAGE_MODEL, resp.status, data,
+                )
+                return None
+            candidates = data.get("candidates") or []
+            if not candidates:
+                return None
+            parts = candidates[0].get("content", {}).get("parts", []) or []
+            for p in parts:
+                inline = p.get("inlineData") or p.get("inline_data")
+                if inline and inline.get("data"):
+                    return base64.b64decode(inline["data"])
+            return None
+    except Exception:
+        logger.exception("Gemini rasm so'rovida xatolik yuz berdi")
+        return None
+
+
+async def _call_pollinations_image(prompt, timeout=40):
+    """Kalitsiz, butunlay bepul zaxira xizmati (Pollinations.ai) orqali rasm
+    yaratadi. Gemini ishlamay qolganda yoki GEMINI_API_KEY umuman
+    sozlanmagan bo'lsa ham ishlayveradi."""
+    session = await _get_session()
+    url = POLLINATIONS_IMAGE_URL.format(prompt=quote(prompt))
+    params = {"model": POLLINATIONS_MODEL, "width": "1024", "height": "1024", "nologo": "true"}
+    try:
+        async with session.get(
+            url, params=params, timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            if resp.status != 200:
+                logger.warning("Pollinations rasm so'rovida xato javob: %s", resp.status)
+                return None
+            return await resp.read()
+    except Exception:
+        logger.exception("Pollinations rasm so'rovida xatolik yuz berdi")
+        return None
+
+
+async def generate_image(prompt):
+    """Matn tavsifiga ko'ra rasm yaratadi. Avval Gemini (Nano Banana, bepul
+    tarif) sinaladi; u ishlamasa (kvota, xato yoki kalit yo'qligi sababli)
+    Pollinations.ai (kalitsiz, bepul) zaxira sifatida ishlatiladi. Ikkalasi
+    ham muvaffaqiyatsiz bo'lsa None qaytaradi — chaqiruvchi tomon buni
+    "hozircha yaratib bo'lmadi" deb foydalanuvchiga ko'rsatishi kerak."""
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return None
+    image_bytes = await _call_gemini_image(prompt)
+    if image_bytes:
+        return image_bytes
+    logger.info("Gemini rasm yarata olmadi — Pollinations.ai zaxira sifatida sinalyapti")
+    return await _call_pollinations_image(prompt)
