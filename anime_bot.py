@@ -216,6 +216,21 @@ def ai_text_to_html(text: str) -> str:
     return escaped
 
 
+def _is_message_not_modified(exc) -> bool:
+    """Telegram xabarni AYNAN o'sha matn/keyboard bilan qayta edit qilishga
+    urinilganda "message is not modified" xatosi bilan rad etadi — bu
+    HAQIQIY xatolik EMAS, balki "hech narsa o'zgarmadi" degani (masalan
+    foydalanuvchi bir tugmani ketma-ket bir necha marta bossa sodir bo'ladi:
+    birinchi bosishda edit muvaffaqiyatli o'tadi, ikkinchi-uchinchi va h.k.
+    bosishlarda esa xabar ALLAQACHON shu holatda bo'lgani uchun Telegram xato
+    qaytaradi). Buni boshqa (haqiqiy — masalan xabar o'chirilgan yoki juda
+    eski) xatolardan ajratish SHART: aks holda har bir qayta bosishda bu
+    "xato" try/except'dagi zaxira yo'l orqali YANGI (dublikat) xabar
+    yuborilishiga olib keladi — foydalanuvchi bitta tugmani bir necha marta
+    bossa, xuddi shuncha son xabar paydo bo'lib qoladi."""
+    return "message is not modified" in str(exc).lower()
+
+
 async def send_ai_text(target, text, **kwargs):
     """AI javobini yuboradi — foydalanuvchi hech qachon formatlash xatosi
     tufayli javobsiz qolmasligi uchun uch bosqichli zanjir orqali:
@@ -542,7 +557,6 @@ class ClipVideo(StatesGroup):
     logo = State()
 
 class EditAnime(StatesGroup):
-    choose_method = State()
     search_query = State()
     choose_field = State()
     new_value = State()
@@ -562,10 +576,6 @@ class EditEpisode(StatesGroup):
     choose_episode = State()
     new_video = State()
 
-class DeleteEpisode(StatesGroup):
-    search_query = State()
-    choose_episode = State()
-
 class BroadcastState(StatesGroup):
     choose_type = State()
     message = State()
@@ -577,7 +587,6 @@ class AddChannelState(StatesGroup):
     channel = State()
 
 class LinksState(StatesGroup):
-    choose_link = State()
     new_value = State()
 
 class WordFilterState(StatesGroup):
@@ -635,10 +644,6 @@ class AdminPremiumGiftState(StatesGroup):
 
 class AdminPaymentAdjustState(StatesGroup):
     amount = State()
-
-class VersionState(StatesGroup):
-    version = State()
-    changes = State()
 
 async def _subscriptions_enabled():
     """Admin '🔔 Obuna bo'lish' funksiyasini sozlamalardan yoqib/o'chira oladi.
@@ -974,8 +979,9 @@ async def premium_menu(call: CallbackQuery):
     text, kb = await build_premium_menu(call.from_user.id)
     try:
         await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    except Exception:
-        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("premium_buy_"))
 async def premium_buy(call: CallbackQuery, state: FSMContext):
@@ -2707,6 +2713,15 @@ async def reg_phone(message: Message, state: FSMContext):
         reply_markup=main_keyboard()
     )
 
+@dp.message(RegState.phone)
+async def reg_phone_fallback(message: Message):
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer("👇 Iltimos, pastdagi tugmani bosib, raqamingizni yuboring:", reply_markup=kb)
+
 @dp.callback_query(F.data == "check_sub")
 async def check_sub_handler(call: CallbackQuery, state: FSMContext):
     # Foydalanuvchi endigina kanalga obuna bo'lgan bo'lishi mumkin — eski
@@ -2752,12 +2767,13 @@ async def main_menu_callback(call: CallbackQuery, state: FSMContext):
     # Foto xabar bo'lsa edit_text ishlamaydi — delete qilib yangi yuborish
     try:
         await call.message.edit_text(text, reply_markup=main_keyboard())
-    except Exception:
-        try:
-            await call.message.delete()
-        except Exception:
-            pass
-        await bot.send_message(call.message.chat.id, text, reply_markup=main_keyboard())
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            await bot.send_message(call.message.chat.id, text, reply_markup=main_keyboard())
 
 @dp.callback_query(F.data == "noop")
 async def noop_handler(call: CallbackQuery):
@@ -2839,8 +2855,9 @@ async def ai_chat_stop(call: CallbackQuery, state: FSMContext):
             f"👇 Nimani qidiryapsiz?",
             reply_markup=main_keyboard()
         )
-    except Exception:
-        await bot.send_message(call.message.chat.id, "🏠 Bosh menu", reply_markup=main_keyboard())
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            await bot.send_message(call.message.chat.id, "🏠 Bosh menu", reply_markup=main_keyboard())
 
 @dp.message(AIChatState.chatting, Command("stop"))
 async def ai_chat_stop_cmd(message: Message, state: FSMContext):
@@ -2998,8 +3015,9 @@ async def ai_image_start(call: CallbackQuery, state: FSMContext):
         text = "🎨 <b>AI rasm chizish</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
         try:
             await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        except Exception:
-            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        except Exception as e:
+            if not _is_message_not_modified(e):
+                await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
         return
     await call.answer()
     await state.set_state(AIChatState.image)
@@ -3023,8 +3041,9 @@ async def ai_image_stop(call: CallbackQuery, state: FSMContext):
             f"👇 Nimani qidiryapsiz?",
             reply_markup=main_keyboard()
         )
-    except Exception:
-        await bot.send_message(call.message.chat.id, "🏠 Bosh menu", reply_markup=main_keyboard())
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            await bot.send_message(call.message.chat.id, "🏠 Bosh menu", reply_markup=main_keyboard())
 
 @dp.message(AIChatState.image, Command("stop"))
 async def ai_image_stop_cmd(message: Message, state: FSMContext):
@@ -3048,8 +3067,9 @@ async def ai_image_edit_start(call: CallbackQuery, state: FSMContext):
         text = "✏️ <b>AI rasm tahrirlash</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
         try:
             await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        except Exception:
-            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        except Exception as e:
+            if not _is_message_not_modified(e):
+                await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
         return
     data = await state.get_data()
     if not data.get("last_ai_image_b64"):
@@ -4407,6 +4427,10 @@ async def add_language(message: Message, state: FSMContext):
         ])
     )
 
+@dp.message(AddAnime.media_type)
+async def add_media_type_fallback(message: Message):
+    await message.answer("🎬 Iltimos, yuqoridagi \"🎬 Film\" yoki \"📺 Serial\" tugmalaridan birini bosing.")
+
 def _status_choice_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🟢 Davom etmoqda", callback_data="addstatus_ongoing")],
@@ -4914,6 +4938,10 @@ async def editsel(call: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
         ])
     )
+
+@dp.message(EditAnime.choose_field)
+async def edit_choose_field_fallback(message: Message):
+    await message.answer("✏️ Iltimos, yuqoridagi tugmalardan birini tanlang.")
 
 @dp.callback_query(F.data.startswith("efield_"))
 async def edit_field(call: CallbackQuery, state: FSMContext):
@@ -9097,18 +9125,25 @@ def _verified_post_user(data):
 # anifilm.uz saytiga Telegramsiz ham roʻyxatdan oʻtish/kirish imkonini beradi.
 SITE_AUTH_SECRET = os.environ.get("SITE_AUTH_SECRET")
 if not SITE_AUTH_SECRET:
-    # BOT_TOKEN'ga tushib qolish ishlayveradi, lekin BOT_TOKEN boshqa ko'plab
-    # joyda (Telegram API so'rovlarida, loglarda va h.k.) aylanadi — agar u
-    # qandaydir tarzda sizib chiqsa, sayt login tokenlari ham soxtalashtirilishi
-    # mumkin bo'lib qoladi. Shuning uchun productionda alohida, faqat shu
-    # maqsad uchun tasodifiy uzun qiymat (masalan `openssl rand -hex 32`)
-    # SITE_AUTH_SECRET sifatida o'rnatilishi qat'iy tavsiya etiladi.
+    # ESLATMA: ilgari bu yerda BOT_TOKEN zaxira sifatida ishlatilar edi, lekin
+    # BOT_TOKEN boshqa ko'plab joyda (Telegram API so'rovlarida, loglarda va
+    # h.k.) aylanadi — agar u qandaydir tarzda sizib chiqsa, sayt login
+    # tokenlari ham soxtalashtirilishi mumkin bo'lib qolar edi. Shu sababdan
+    # endi alohida, tasodifiy qiymat generatsiya qilinadi. DIQQAT: bu qiymat
+    # faqat xotirada saqlanadi va bot har qayta ishga tushganda o'zgaradi —
+    # ya'ni barcha sayt sessiyalari (login) har restartda bekor bo'ladi.
+    # Buning oldini olish uchun productionda SITE_AUTH_SECRET'ni Render →
+    # Environment sozlamalarida doimiy qiymat bilan qo'lda o'rnating
+    # (masalan: `openssl rand -hex 32` natijasi).
+    SITE_AUTH_SECRET = secrets.token_hex(32)
     logger.warning(
         "OGOHLANTIRISH: SITE_AUTH_SECRET muhit o'zgaruvchisi o'rnatilmagan — "
-        "BOT_TOKEN vaqtinchalik o'rniga ishlatilyapti. Productionda buni alohida "
-        "tasodifiy qiymat bilan sozlang (masalan: openssl rand -hex 32)."
+        "vaqtinchalik tasodifiy qiymat generatsiya qilindi (BOT_TOKEN endi "
+        "zaxira sifatida ishlatilmaydi). Bot har qayta ishga tushganda "
+        "barcha sayt sessiyalari bekor bo'ladi. Buni tuzatish uchun Render → "
+        "Environment'da SITE_AUTH_SECRET'ni doimiy qiymat bilan sozlang "
+        "(masalan: openssl rand -hex 32)."
     )
-    SITE_AUTH_SECRET = BOT_TOKEN
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_RE = re.compile(r"^\+?\d{9,15}$")
 
