@@ -7,6 +7,8 @@ o'z ichiga oladi:
   - generate_anime_description()-> admin uchun anime tavsifini AI bilan yozish
   - recommend_anime_ids()       -> foydalanuvchi tarixiga qarab anime tavsiyasi
   - generate_image()            -> matn tavsifidan rasm yaratish (Gemini + Pollinations)
+  - edit_image()                -> MAVJUD rasmni matn ko'rsatmasiga ko'ra tahrirlash
+                                    (Pollinations "kontext" + Gemini, pastga qarang)
 
 Ishlatish uchun Render (yoki boshqa) muhitida GEMINI_API_KEY environment
 variable'ni qo'shish kerak. Kalitni https://aistudio.google.com/apikey
@@ -1313,24 +1315,31 @@ async def pick_highlight_frame(images_base64, mime_type="image/jpeg"):
 
 
 # ===================== RASM YARATISH (IMAGE GENERATION) =====================
-# Gemini'ning "Nano Banana" rasm modeli (API nomi: gemini-2.5-flash-image)
-# xuddi yuqoridagi matn so'rovlari kabi generateContent endpoint orqali
-# chaqiriladi va bepul tarifda ishlaydi — lekin buni GEMINI_MODEL'dan
-# (yuqorida, matn suhbati uchun — hozir gemini-3.6-flash) ALOHIDA konstanta
-# qilib belgilash SHART: yangiroq rasm modellari (Nano Banana Pro/2, ya'ni
-# gemini-3.1-flash-image va gemini-3-pro-image-preview) 2026-yil holatiga
-# ko'ra FAQAT PULLIK — shu sabab aynan shu eski (lekin bepul) model nomi
-# qattiq yozib qo'yilgan. Agar kelajakda bu ham pullik bo'lib qolsa,
-# GEMINI_IMAGE_MODEL environment variable orqali osongina almashtirish
-# mumkin.
-GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+# YANGILANDI (2026-avgust, ai.google.dev'da tekshirildi): eski
+# "gemini-2.5-flash-image" (yuqorida ishlatilib kelingan bepul model) Google
+# tomonidan 2026-yil 2-oktabrda BUTUNLAY O'CHIRILADI — shu sabab bu yerda
+# albatta yangilanishi kerak edi. O'rniga qo'yilgan "gemini-3.1-flash-image"
+# ("Nano Banana 2") tezroq va — MUHIMI — tahrirlashda (mavjud rasmga
+# o'zgartirish kiritishda) ancha kuchli va ishonchli, chunki aynan shuning
+# uchun optimallashtirilgan.
+#
+# DIQQAT — PULLIK: eski modeldan farqli o'laroq, yangi rasm modellarining
+# (2.5'dan tashqari barchasi) BEPUL tarifi YO'Q — har bir rasm uchun
+# taxminan $0.03-0.07 haq olinadi. Bu — pastdagi Pollinations.ai orqali
+# (generate_image uchun "flux", edit_image uchun "kontext") TO'LIQ BEPUL
+# ishlaydigan yo'ldan farqli. Shu sabab bu modul Pollinations'ni HAR IKKALA
+# funksiyada ham birinchi (bepul) variant sifatida sinaydi, Gemini esa
+# faqat zaxira (yoki Pollinations ishlamasa) sifatida chaqiriladi — agar
+# GEMINI_API_KEY'da billing yoqilmagan bo'lsa, Gemini so'rovi shunchaki
+# xato qaytaradi va hech narsa buzilmaydi, botning bu qismi baribir 100%
+# bepul ishlayveradi.
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
 
-# Gemini rasm so'rovi muvaffaqiyatsiz bo'lsa (kvota tugagan, kalit yo'q yoki
-# xizmat vaqtincha ishlamayapti) — Pollinations.ai zaxira sifatida
-# ishlatiladi. Bu xizmat hech qanday ro'yxatdan o'tish yoki API kalit talab
-# qilmaydi (butunlay ochiq GET so'rov), shu sabab GEMINI_API_KEY umuman
-# sozlanmagan bo'lsa ham rasm yaratish funksiyasi baribir ishlayveradi —
-# xuddi Groq matn uchun zaxira bo'lgani kabi.
+# Pollinations.ai — generate_image() VA edit_image()ning BIRINCHI (standart,
+# bepul) yo'li (yuqoridagi izohga qarang). Gemini kaliti umuman
+# sozlanmagan yoki billing yo'q bo'lsa ham, rasm bilan bog'liq funksiyalar
+# baribir to'liq ishlayveradi — xuddi Groq matn suhbatlari uchun asosiy
+# yo'l bo'lgani kabi (_call_gemini'dagi is_admin=False holatiga qarang).
 POLLINATIONS_IMAGE_URL = "https://gen.pollinations.ai/image/{prompt}"
 POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux")
 # MUHIM (2026-avgust holatiga ko'ra): Pollinations o'zining yangi
@@ -1346,14 +1355,30 @@ POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux")
 POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY")
 
 
-async def _call_gemini_image(prompt, timeout=40):
-    """Gemini (Nano Banana) orqali rasm yaratishga urinadi. Muvaffaqiyatli
-    bo'lsa rasm baytlarini (bytes) qaytaradi, aks holda None — bu holda
-    chaqiruvchi tomon (generate_image) Pollinations zaxirasiga o'tadi."""
+async def _call_gemini_image(prompt, image_bytes=None, mime_type="image/jpeg", timeout=40):
+    """Gemini (Nano Banana) orqali rasm yaratishga (image_bytes=None) yoki
+    MAVJUD rasmni tahrirlashga (image_bytes berilsa — 'prompt' shu rasmga
+    nisbatan qo'llanadigan o'zgartirish ko'rsatmasi bo'ladi) urinadi.
+    Muvaffaqiyatli bo'lsa rasm baytlarini (bytes) qaytaradi, aks holda
+    None — bu holda chaqiruvchi tomon (generate_image/edit_image)
+    Pollinations zaxirasiga o'tadi.
+
+    Rasm-kirish qismi boshqa vision funksiyalar (moderate_image va h.k.)
+    bilan bir xil "inline_data" formatida, matndan OLDIN qo'shiladi —
+    Gemini'ning ko'p burilishli (multi-turn) tahrirlash uslubiga mos."""
     if not GEMINI_API_KEY:
         return None
+    parts = []
+    if image_bytes:
+        parts.append({
+            "inline_data": {
+                "mime_type": mime_type,
+                "data": base64.b64encode(image_bytes).decode("ascii"),
+            },
+        })
+    parts.append({"text": prompt})
     payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"responseModalities": ["IMAGE"]},
     }
     headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
@@ -1385,9 +1410,10 @@ async def _call_gemini_image(prompt, timeout=40):
 
 
 async def _call_pollinations_image(prompt, timeout=40):
-    """Kalitsiz, butunlay bepul zaxira xizmati (Pollinations.ai) orqali rasm
-    yaratadi. Gemini ishlamay qolganda yoki GEMINI_API_KEY umuman
-    sozlanmagan bo'lsa ham ishlayveradi."""
+    """Pollinations.ai ("flux" modeli) orqali rasm yaratadi — generate_image()
+    endi buni BIRINCHI (bepul) variant sifatida sinaydi, Gemini esa faqat
+    shu muvaffaqiyatsiz bo'lgandagina (yoki umuman sozlanmagan taqdirda ham
+    xavfsiz) zaxira sifatida ishlatiladi."""
     session = await _get_session()
     url = POLLINATIONS_IMAGE_URL.format(prompt=quote(prompt))
     params = {"model": POLLINATIONS_MODEL, "width": "1024", "height": "1024", "nologo": "true"}
@@ -1411,16 +1437,90 @@ async def _call_pollinations_image(prompt, timeout=40):
 
 
 async def generate_image(prompt):
-    """Matn tavsifiga ko'ra rasm yaratadi. Avval Gemini (Nano Banana, bepul
-    tarif) sinaladi; u ishlamasa (kvota, xato yoki kalit yo'qligi sababli)
-    Pollinations.ai (kalitsiz, bepul) zaxira sifatida ishlatiladi. Ikkalasi
-    ham muvaffaqiyatsiz bo'lsa None qaytaradi — chaqiruvchi tomon buni
-    "hozircha yaratib bo'lmadi" deb foydalanuvchiga ko'rsatishi kerak."""
+    """Matn tavsifiga ko'ra rasm yaratadi. Avval Pollinations.ai (bepul)
+    sinaladi; u ishlamasa (masalan POLLINATIONS_API_KEY sozlanmagan yoki
+    xizmat vaqtincha ishlamayapti) Gemini (agar billing yoqilgan bo'lsa —
+    pullik) zaxira sifatida ishlatiladi. Ikkalasi ham muvaffaqiyatsiz
+    bo'lsa None qaytaradi — chaqiruvchi tomon buni "hozircha yaratib
+    bo'lmadi" deb foydalanuvchiga ko'rsatishi kerak."""
     prompt = (prompt or "").strip()
     if not prompt:
         return None
-    image_bytes = await _call_gemini_image(prompt)
+    image_bytes = await _call_pollinations_image(prompt)
     if image_bytes:
         return image_bytes
-    logger.info("Gemini rasm yarata olmadi — Pollinations.ai zaxira sifatida sinalyapti")
-    return await _call_pollinations_image(prompt)
+    logger.info("Pollinations rasm yarata olmadi — Gemini zaxira sifatida sinalyapti")
+    return await _call_gemini_image(prompt)
+
+
+async def _call_pollinations_image_edit(prompt, image_bytes, mime_type="image/jpeg", timeout=60):
+    """Pollinations.ai'ning "kontext" modeli orqali MAVJUD rasmni matn
+    ko'rsatmasiga ko'ra tahrirlaydi (elementlar qo'shish/olib tashlash,
+    uslub o'zgartirish va h.k.). Oddiy "flux" (matndan-rasm) modelidan
+    farqli o'laroq, kontext ro'yxatdan o'tgan (kamida "Spore" darajasidagi)
+    kalitni talab qiladi — shu sabab POLLINATIONS_API_KEY sozlanmagan bo'lsa
+    bu funksiya darhol None qaytaradi (chaqiruvchi tomon Gemini tahrirlash
+    zaxirasiga o'tadi, u pullik). Bepul kalitni https://enter.pollinations.ai
+    sahifasidan olish mumkin."""
+    if not POLLINATIONS_API_KEY:
+        return None
+    session = await _get_session()
+    form = aiohttp.FormData()
+    form.add_field("image", image_bytes, filename="rasm.jpg", content_type=mime_type)
+    form.add_field("prompt", prompt)
+    form.add_field("model", "kontext")
+    headers = {"Authorization": f"Bearer {POLLINATIONS_API_KEY}"}
+    try:
+        async with session.post(
+            "https://gen.pollinations.ai/v1/images/edits", data=form, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                logger.warning(
+                    "Pollinations tahrirlashda xato javob: %s - %s", resp.status, body[:300]
+                )
+                return None
+            content_type = resp.headers.get("Content-Type", "")
+            if content_type.startswith("image/"):
+                # Ba'zi javoblar to'g'ridan-to'g'ri rasm baytlarini qaytarishi mumkin.
+                return await resp.read()
+            data = await resp.json()
+            # "CreateImageResponse" — OpenAI'ning rasm API'siga o'xshash shakl
+            # kutilyapti ({"data": [{"b64_json": ...}]} yoki {"data": [{"url": ...}]}).
+            # Pollinations bu yangi endpoint'ning aniq sxemasi rasmiy hujjatlarda
+            # to'liq tasdiqlanmagan, shu sabab ikkala variant ham qo'llab-quvvatlanadi.
+            items = data.get("data") or []
+            if not items:
+                return None
+            item = items[0]
+            b64 = item.get("b64_json")
+            if b64:
+                return base64.b64decode(b64)
+            url = item.get("url")
+            if url:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as img_resp:
+                    if img_resp.status == 200:
+                        return await img_resp.read()
+            return None
+    except Exception:
+        logger.exception("Pollinations tahrirlashda xatolik yuz berdi")
+        return None
+
+
+async def edit_image(prompt, image_bytes, mime_type="image/jpeg"):
+    """MAVJUD rasmni ('image_bytes') matn ko'rsatmasiga ('prompt') ko'ra
+    tahrirlaydi — masalan fonini o'zgartirish, biror narsa qo'shish/olib
+    tashlash yoki uslubini almashtirish. Avval Pollinations.ai "kontext"
+    (bepul, lekin POLLINATIONS_API_KEY talab qiladi) sinaladi; u ishlamasa
+    Gemini (agar billing yoqilgan bo'lsa — pullik, lekin sifat/ishonchlilik
+    jihatidan kuchliroq) zaxira sifatida ishlatiladi. Ikkalasi ham
+    muvaffaqiyatsiz bo'lsa None qaytaradi."""
+    prompt = (prompt or "").strip()
+    if not prompt or not image_bytes:
+        return None
+    result = await _call_pollinations_image_edit(prompt, image_bytes, mime_type)
+    if result:
+        return result
+    logger.info("Pollinations rasmni tahrirlay olmadi — Gemini zaxira sifatida sinalyapti")
+    return await _call_gemini_image(prompt, image_bytes=image_bytes, mime_type=mime_type)

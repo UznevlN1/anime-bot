@@ -2783,6 +2783,17 @@ def ai_image_keyboard():
         [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop")]
     ])
 
+def ai_image_result_keyboard():
+    """generate_image/edit_image muvaffaqiyatli bo'lgandan keyin ko'rsatiladi —
+    ai_image_keyboard()dan farqli o'laroq, natijani yana tahrirlash imkonini
+    ham beradi (✏️ Tahrirlash — keyingi matn shu rasmga nisbatan
+    ko'rsatma sifatida qabul qilinadi, lekin generate_image bilan ADASHTIRIB
+    yubormaslik uchun alohida callback orqali ANIQ yoqiladi)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Tahrirlash", callback_data="ai_image_edit_start")],
+        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop")],
+    ])
+
 @dp.callback_query(F.data == "ai_menu")
 async def ai_menu_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -2995,6 +3006,8 @@ async def ai_image_start(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         "🎨 Qanday rasm chizib berishimni istaysiz? Tavsifini yozing "
         "(masalan: \"tog' yonbag'rida turgan samuray, quyosh botishi, anime uslubida\").\n\n"
+        "Mavjud rasmni TAHRIRLASHNI istasangiz, shu yerga to'g'ridan-to'g'ri "
+        "rasm yuboring — keyin uni qanday o'zgartirishni yozasiz.\n\n"
         "Chiqish uchun pastdagi tugmani bosing.",
         reply_markup=ai_image_keyboard()
     )
@@ -3018,7 +3031,65 @@ async def ai_image_stop_cmd(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🚪 Yakunlandi.", reply_markup=main_keyboard())
 
-@dp.message(AIChatState.image)
+@dp.callback_query(AIChatState.image, F.data == "ai_image_edit_start")
+async def ai_image_edit_start(call: CallbackQuery, state: FSMContext):
+    """✏️ Tahrirlash tugmasi — oxirgi yaratilgan/yuborilgan rasmni keyingi
+    matn xabari orqali tahrirlash rejimini yoqadi (bir martalik: tahrirlash
+    muvaffaqiyatli bo'lgach avtomatik o'chadi, lekin kerak bo'lsa qayta
+    bosish mumkin — shu tarzda bir xil rasm ustida bir necha bor,
+    Gemini'ning ko'p burilishli uslubidagi kabi, ishlash mumkin)."""
+    if not ai_service.AI_ENABLED:
+        await call.answer("AI hozircha sozlanmagan", show_alert=True)
+        return
+    status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
+    if not status["is_premium"]:
+        await call.answer()
+        text, kb = await build_premium_menu(call.from_user.id)
+        text = "✏️ <b>AI rasm tahrirlash</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
+        try:
+            await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        return
+    data = await state.get_data()
+    if not data.get("last_ai_image_b64"):
+        await call.answer("Avval biror rasm yarating yoki shu yerga rasm yuboring.", show_alert=True)
+        return
+    await call.answer()
+    await state.update_data(awaiting_edit=True)
+    await call.message.answer(
+        "✏️ Rasmni qanday o'zgartirishni istaysiz? Masalan: \"fonini pushti "
+        "qil\", \"ko'zoynak qo'sh\", \"kechqurun qilib chiz\".\n\n"
+        "Chiqish uchun pastdagi tugmani bosing.",
+        reply_markup=ai_image_keyboard()
+    )
+
+@dp.message(AIChatState.image, F.photo)
+async def ai_image_photo(message: Message, state: FSMContext):
+    """Foydalanuvchi AI rasm rejimida to'g'ridan-to'g'ri rasm yuborsa —
+    buni YANGI rasm yaratish so'rovi sifatida emas, balki shu rasmni
+    TAHRIRLASH so'rovi sifatida talqin qilamiz (keyingi matn xabari
+    tahrirlash ko'rsatmasi bo'ladi)."""
+    if not await guard_access(message, is_callback=False):
+        return
+    status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
+    if not status["is_premium"]:
+        await state.clear()
+        text, kb = await build_premium_menu(message.from_user.id)
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
+        return
+    file_id = message.photo[-1].file_id
+    file = await bot.get_file(file_id)
+    file_bytes = await bot.download_file(file.file_path)
+    img_b64 = base64.b64encode(file_bytes.read()).decode("ascii")
+    await state.update_data(last_ai_image_b64=img_b64, last_ai_image_mime="image/jpeg", awaiting_edit=True)
+    await message.answer(
+        "✏️ Bu rasmni qanday o'zgartirishni istaysiz? Tavsifini yozing.\n\n"
+        "Chiqish uchun pastdagi tugmani bosing.",
+        reply_markup=ai_image_keyboard()
+    )
+
+@dp.message(AIChatState.image, F.text)
 async def ai_image_message(message: Message, state: FSMContext):
     if not await guard_access(message, is_callback=False):
         return
@@ -3038,29 +3109,56 @@ async def ai_image_message(message: Message, state: FSMContext):
     # Bitta foydalanuvchi tez-tez so'rab, bepul rasm kvotasini yakka o'zi
     # tugatib qo'yishining oldini olish (xuddi ai_chat'dagi kabi, lekin
     # rasm ancha "qimmat" bo'lgani uchun oynasi kengroq/limiti qattiqroq).
+    # Tahrirlash ham xuddi shu kvotadan foydalanadi — aks holda foydalanuvchi
+    # tahrirlashni takrorlab, limitni chetlab o'tishi mumkin edi.
     if _rate_limited(f"ai_image:{message.from_user.id}", max_hits=10, window_seconds=600):
         await message.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.")
         return
+
+    data = await state.get_data()
+    is_edit = bool(data.get("awaiting_edit")) and bool(data.get("last_ai_image_b64"))
+
     try:
         await bot.send_chat_action(message.chat.id, "upload_photo")
     except Exception:
         pass
-    status_msg = await message.answer("🎨 Chizyapman, kuting...")
-    image_bytes, gen_status, reason = await _generate_moderated_image(prompt)
+
+    if is_edit:
+        source_bytes = base64.b64decode(data["last_ai_image_b64"])
+        source_mime = data.get("last_ai_image_mime") or "image/jpeg"
+        status_msg = await message.answer("✏️ Tahrirlayapman, kuting...")
+        image_bytes, gen_status, reason = await _edit_moderated_image(prompt, source_bytes, source_mime)
+        fail_text = "😕 Hozircha tahrirlab bo'lmadi. Boshqa ko'rsatma bilan qayta urinib ko'ring."
+        caption_prefix = "✏️"
+    else:
+        status_msg = await message.answer("🎨 Chizyapman, kuting...")
+        image_bytes, gen_status, reason = await _generate_moderated_image(prompt)
+        fail_text = "😕 Hozircha rasm yaratib bo'lmadi, birozdan keyin qayta urinib ko'ring."
+        caption_prefix = "🎨"
+
     if gen_status == "generate_failed":
-        await status_msg.edit_text("😕 Hozircha rasm yaratib bo'lmadi, birozdan keyin qayta urinib ko'ring.")
+        await status_msg.edit_text(fail_text)
         return
     if gen_status == "unsafe":
         await status_msg.edit_text(
-            "🚫 Yaratilgan rasm nomaqbul deb topildi"
+            "🚫 Natija nomaqbul deb topildi"
             + (f" ({reason})" if reason else "") + ". Boshqa tavsif bilan urinib ko'ring."
         )
         return
+
     await status_msg.delete()
+    # Natijani keyingi tahrirlash uchun holatda saqlab qo'yamiz — shu
+    # tufayli ✏️ Tahrirlash tugmasi endi shu YANGI rasmga ishora qiladi
+    # (bir rasm ustida ketma-ket bir necha bor ishlash mumkin bo'ladi).
+    await state.update_data(
+        last_ai_image_b64=base64.b64encode(image_bytes).decode("ascii"),
+        last_ai_image_mime=_sniff_image_mime(image_bytes),
+        awaiting_edit=False,
+    )
     await message.answer_photo(
         BufferedInputFile(image_bytes, filename="ai_rasm.jpg"),
-        caption=f"🎨 {prompt[:200]}",
-        reply_markup=ai_image_keyboard(),
+        caption=f"{caption_prefix} {prompt[:200]}",
+        reply_markup=ai_image_result_keyboard(),
     )
     await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
 
@@ -3645,6 +3743,44 @@ async def _generate_moderated_image(prompt):
     if not safe:
         return None, "unsafe", reason
     return image_bytes, "ok", ""
+
+def _sniff_image_mime(image_bytes):
+    """Baytlarning boshidagi "magic bytes"ga qarab rasm formatini aniqlaydi.
+    Kerak, chunki AI natijasi manbaga qarab farq qiladi (Gemini odatda PNG,
+    Pollinations odatda JPEG qaytaradi) — keyinroq shu rasmni tahrirlash
+    uchun Gemini/Pollinations'ga qayta yuborganda TO'G'RI mime_type
+    ko'rsatilishi kerak, aks holda ba'zi so'rovlar rad etilishi mumkin."""
+    if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if image_bytes[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if image_bytes[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"  # standart taxmin — Telegram baribir avtomatik aniqlaydi
+
+async def _edit_moderated_image(prompt, image_bytes, mime_type="image/jpeg"):
+    """_generate_moderated_image bilan bir xil mantiq, lekin YANGI rasm
+    yaratish o'rniga MAVJUD rasmni (ai_service.edit_image orqali)
+    tahrirlaydi. Natija xuddi shunday ommaga/foydalanuvchiga
+    yuborilishidan OLDIN AI moderatsiyasidan o'tkaziladi — tahrirlangan
+    chiqish, xuddi yaratilgan rasm kabi, nazoratsiz qoldirilmaydi.
+
+    Qaytaradi: (image_bytes, status, reason) — status qiymatlari
+    _generate_moderated_image bilan bir xil ("ok"/"generate_failed"/"unsafe")."""
+    edited_bytes = await ai_service.edit_image(prompt, image_bytes, mime_type)
+    if not edited_bytes:
+        return None, "generate_failed", ""
+    try:
+        img_b64 = base64.b64encode(edited_bytes).decode("ascii")
+        safe, reason = await ai_service.moderate_image(img_b64)
+    except Exception:
+        logger.exception("[_edit_moderated_image] moderatsiyada xato — rasm o'zgarishsiz qabul qilindi.")
+        safe, reason = True, ""
+    if not safe:
+        return None, "unsafe", reason
+    return edited_bytes, "ok", ""
 
 # ---- ANIME QO'SHISH ----
 @dp.callback_query(F.data == "admin_add")
