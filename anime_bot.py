@@ -966,8 +966,7 @@ async def build_premium_menu(user_id):
         "✅ Majburiy kanal obunasi shart emas\n"
         "✅ Reklama bannersiz\n"
         f"✅ Yangi qismlarga {prices['early_hours']} soat oldinroq kirish\n"
-        "✅ Izohlaringiz yuqorida va 👑 belgi bilan chiqadi\n"
-        "✅ AI bilan rasm chizdirish (🎨 AI Yordamchi bo'limida)\n\n"
+        "✅ Izohlaringiz yuqorida va 👑 belgi bilan chiqadi\n\n"
         f"{_promo_banner_line(prices)}"
         "Tarifni tanlang:"
     )
@@ -2121,6 +2120,7 @@ def admin_keyboard(role=None):
         row3.append(InlineKeyboardButton(text="💎 Premium", callback_data="admin_premium", style="success"))
     if row3:
         rows.append(row3)
+    rows.append([InlineKeyboardButton(text="🎨 AI rasm chizish", callback_data="ai_image_start", style="primary")])
     rows.append([InlineKeyboardButton(text="📖 Qo'llanma", callback_data="admin_help", style="primary")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -2785,7 +2785,6 @@ def ai_menu_keyboard():
         [InlineKeyboardButton(text="💬 AI bilan suhbat", callback_data="ai_chat_start")],
         [InlineKeyboardButton(text="🎯 Menga anime tavsiya qil", callback_data="ai_recommend")],
         [InlineKeyboardButton(text="🎭 Kayfiyatimga mos tanla", callback_data="ai_mood_start")],
-        [InlineKeyboardButton(text="🎨 AI rasm chizish 💎", callback_data="ai_image_start")],
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu")],
     ])
 
@@ -3005,20 +3004,21 @@ async def ai_image_start(call: CallbackQuery, state: FSMContext):
     if not ai_service.AI_ENABLED:
         await call.answer("AI hozircha sozlanmagan", show_alert=True)
         return
-    # Premium-only imkoniyat — bepul AI chat'dan farqli o'laroq, rasm
-    # yaratish kvota jihatidan ancha "qimmat" bo'lgani uchun Premium
-    # foydalanuvchilarga imtiyoz sifatida ajratilgan.
-    status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
-    if not status["is_premium"]:
-        await call.answer()
-        text, kb = await build_premium_menu(call.from_user.id)
-        text = "🎨 <b>AI rasm chizish</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
-        try:
-            await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        except Exception as e:
-            if not _is_message_not_modified(e):
-                await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        return
+    # Endi bu funksiya AI Yordamchi menyusida emas, faqat Admin panelda
+    # ochiladi — shuning uchun admin bo'lsa Premium tekshiruvi butunlay
+    # o'tkazib yuboriladi (adminlar pul to'lab Premium olmaydi).
+    if not await is_admin_user(call.from_user.id):
+        status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
+        if not status["is_premium"]:
+            await call.answer()
+            text, kb = await build_premium_menu(call.from_user.id)
+            text = "🎨 <b>AI rasm chizish</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
+            try:
+                await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            except Exception as e:
+                if not _is_message_not_modified(e):
+                    await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+            return
     await call.answer()
     await state.set_state(AIChatState.image)
     await call.message.edit_text(
@@ -3034,6 +3034,14 @@ async def ai_image_start(call: CallbackQuery, state: FSMContext):
 async def ai_image_stop(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.answer("Yakunlandi")
+    if await is_admin_user(call.from_user.id):
+        kb = admin_keyboard(admin_role_cached(call.from_user.id))
+        try:
+            await call.message.edit_text("👑 <b>Admin Panel</b>", reply_markup=kb, parse_mode="HTML")
+        except Exception as e:
+            if not _is_message_not_modified(e):
+                await bot.send_message(call.message.chat.id, "👑 Admin Panel", reply_markup=kb, parse_mode="HTML")
+        return
     try:
         await call.message.edit_text(
             f"👋 Salom, {call.from_user.full_name}!\n"
@@ -3048,6 +3056,13 @@ async def ai_image_stop(call: CallbackQuery, state: FSMContext):
 @dp.message(AIChatState.image, Command("stop"))
 async def ai_image_stop_cmd(message: Message, state: FSMContext):
     await state.clear()
+    if await is_admin_user(message.from_user.id):
+        await message.answer(
+            "👑 <b>Admin Panel</b>",
+            reply_markup=admin_keyboard(admin_role_cached(message.from_user.id)),
+            parse_mode="HTML"
+        )
+        return
     await message.answer("🚪 Yakunlandi.", reply_markup=main_keyboard())
 
 @dp.callback_query(AIChatState.image, F.data == "ai_image_edit_start")
@@ -3060,17 +3075,18 @@ async def ai_image_edit_start(call: CallbackQuery, state: FSMContext):
     if not ai_service.AI_ENABLED:
         await call.answer("AI hozircha sozlanmagan", show_alert=True)
         return
-    status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
-    if not status["is_premium"]:
-        await call.answer()
-        text, kb = await build_premium_menu(call.from_user.id)
-        text = "✏️ <b>AI rasm tahrirlash</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
-        try:
-            await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        except Exception as e:
-            if not _is_message_not_modified(e):
-                await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        return
+    if not await is_admin_user(call.from_user.id):
+        status = await asyncio.to_thread(db.get_premium_status, call.from_user.id)
+        if not status["is_premium"]:
+            await call.answer()
+            text, kb = await build_premium_menu(call.from_user.id)
+            text = "✏️ <b>AI rasm tahrirlash</b> — Premium foydalanuvchilar uchun maxsus imkoniyat!\n\n" + text
+            try:
+                await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            except Exception as e:
+                if not _is_message_not_modified(e):
+                    await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+            return
     data = await state.get_data()
     if not data.get("last_ai_image_b64"):
         await call.answer("Avval biror rasm yarating yoki shu yerga rasm yuboring.", show_alert=True)
@@ -3092,12 +3108,13 @@ async def ai_image_photo(message: Message, state: FSMContext):
     tahrirlash ko'rsatmasi bo'ladi)."""
     if not await guard_access(message, is_callback=False):
         return
-    status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
-    if not status["is_premium"]:
-        await state.clear()
-        text, kb = await build_premium_menu(message.from_user.id)
-        await message.answer(text, reply_markup=kb, parse_mode="HTML")
-        return
+    if not await is_admin_user(message.from_user.id):
+        status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
+        if not status["is_premium"]:
+            await state.clear()
+            text, kb = await build_premium_menu(message.from_user.id)
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
+            return
     file_id = message.photo[-1].file_id
     file = await bot.get_file(file_id)
     file_bytes = await bot.download_file(file.file_path)
@@ -3113,15 +3130,16 @@ async def ai_image_photo(message: Message, state: FSMContext):
 async def ai_image_message(message: Message, state: FSMContext):
     if not await guard_access(message, is_callback=False):
         return
-    # Premium tekshiruvi shu yerda ham QAYTA qilinadi — chunki suhbat
-    # ochilgan payt bilan xabar yozilgan payt orasida Premium muddati
-    # tugab qolishi mumkin.
-    status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
-    if not status["is_premium"]:
-        await state.clear()
-        text, kb = await build_premium_menu(message.from_user.id)
-        await message.answer(text, reply_markup=kb, parse_mode="HTML")
-        return
+    # Premium tekshiruvi shu yerda ham QAYTA qilinadi (admin bo'lmagan hollar
+    # uchun) — chunki suhbat ochilgan payt bilan xabar yozilgan payt orasida
+    # Premium muddati tugab qolishi mumkin.
+    if not await is_admin_user(message.from_user.id):
+        status = await asyncio.to_thread(db.get_premium_status, message.from_user.id)
+        if not status["is_premium"]:
+            await state.clear()
+            text, kb = await build_premium_menu(message.from_user.id)
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
+            return
     prompt = (message.text or "").strip()
     if not prompt:
         await message.answer("Iltimos, rasm tavsifini matn ko'rinishida yozing.")
@@ -8680,6 +8698,11 @@ async def admin_help(call: CallbackQuery):
         "koʻrib, tasdiqlash yoki rad etish\n"
         "🎁 Istalgan foydalanuvchiga toʻgʻridan-toʻgʻri (toʻlovsiz) Premium "
         "sovgʻa qilish\n\n"
+
+        "🎨 <b>AI rasm chizish</b>\n"
+        "Matn tavsifi asosida AI bilan yangi rasm yaratish yoki yuborilgan "
+        "rasmni tahrirlash — anime posteri/banner uchun material tayyorlashda "
+        "foydali. Faqat adminlar uchun, Premium talab qilinmaydi\n\n"
 
         "ℹ️ Foydalanuvchilar uchun /help buyrugʻi ham mavjud — botdan qanday "
         "foydalanish boʻyicha qisqa qoʻllanma.",

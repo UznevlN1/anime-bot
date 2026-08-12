@@ -14,6 +14,7 @@ Asosiy funksiya:
 """
 import logging
 import re
+import time
 import aiohttp
 import asyncio
 
@@ -135,7 +136,7 @@ async def search_anilist(title: str) -> dict | None:
 
     cover = media.get("coverImage") or {}
 
-    return {
+    result = {
         "id": media.get("id"),
         "title": best_title,
         "title_romaji": titles.get("romaji"),
@@ -149,3 +150,5 @@ async def search_anilist(title: str) -> dict | None:
         "cover_url": cover.get("extraLarge") or cover.get("large"),
         "site_url": media.get("siteUrl"),
     }
+    _cache[cache_key] = (time.monotonic() + _CACHE_TTL, result)
+    return result
