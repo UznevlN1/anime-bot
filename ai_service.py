@@ -1349,6 +1349,46 @@ POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux")
 POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY")
 
 
+async def _translate_prompt_for_image(text):
+    """Foydalanuvchi rasm tavsifini (odatda o'zbek tilida yozadi) ingliz
+    tiliga o'giradi — ASOSIY SABAB: Pollinations "flux" (generate_image/
+    edit_image'ning BIRINCHI, standart yo'li) sof diffuziya modeli va
+    deyarli faqat INGLIZCHA ta'riflar bilan o'qitilgan. O'zbekcha (yoki
+    boshqa kam resursli til) prompt yuborilsa, model uni to'g'ri
+    tushunmaydi va so'ralgan narsaga aloqasi kam bo'lgan, ko'proq umumiy/
+    tasodifiy rasm qaytaradi — BUNI so'rov 200 OK bilan qaytadi, shu sabab
+    generate_image/edit_image bu holatni "xato" deb hisoblamaydi va
+    Gemini zaxirasiga umuman o'tmaydi (faqat so'rov batamom muvaffaqiyatsiz
+    bo'lganda o'tadi). Aynan shu — "chizishni so'ragan narsam o'rniga
+    boshqa narsa chiqyapti" shikoyatining sababi.
+
+    AI o'chirilgan yoki tarjima muvaffaqiyatsiz/bo'sh bo'lsa, ASL matn
+    o'zgarishsiz qaytariladi — rasm yaratish funksiyasi tarjimasiz ham
+    (ehtimol yomonroq natija bilan) davom etaversin, butunlay
+    to'xtamasin."""
+    text = (text or "").strip()
+    if not text:
+        return text
+    result = await _call_gemini(
+        [{"role": "user", "parts": [{"text": (
+            "Quyidagi rasm tavsifini rasm generatsiya modeli (Flux) uchun "
+            "aniq, tabiiy ingliz tiliga o'gir. Qoidalar:\n"
+            "1. Hech narsa qo'shma, o'zingdan tafsilot o'ylab topma — "
+            "faqat berilgan tavsifni tarjima qil.\n"
+            "2. Xos ismlar yoki anime/personaj nomlarini tarjima qilma, "
+            "asl holida qoldir.\n"
+            "3. Agar matn allaqachon ingliz tilida bo'lsa, deyarli "
+            "o'zgarishsiz (faqat kerak bo'lsa ozgina tozalab) qaytar.\n"
+            "4. Faqat tarjima qilingan prompt matnini yoz — hech qanday "
+            "izoh, tirnoq belgisi yoki kirish so'z qo'shma.\n\n"
+            f"Tavsif: {text[:800]}"
+        )}]}],
+        temperature=0.2, max_output_tokens=300, thinking_level="minimal",
+    )
+    result = (result or "").strip()
+    return result or text
+
+
 async def _call_gemini_image(prompt, image_bytes=None, mime_type="image/jpeg", timeout=40):
     """Gemini (Nano Banana) orqali rasm yaratishga (image_bytes=None) yoki
     MAVJUD rasmni tahrirlashga (image_bytes berilsa — 'prompt' shu rasmga
@@ -1436,15 +1476,20 @@ async def generate_image(prompt):
     xizmat vaqtincha ishlamayapti) Gemini (agar billing yoqilgan bo'lsa —
     pullik) zaxira sifatida ishlatiladi. Ikkalasi ham muvaffaqiyatsiz
     bo'lsa None qaytaradi — chaqiruvchi tomon buni "hozircha yaratib
-    bo'lmadi" deb foydalanuvchiga ko'rsatishi kerak."""
+    bo'lmadi" deb foydalanuvchiga ko'rsatishi kerak.
+
+    Yuborishdan OLDIN prompt ingliz tiliga o'giriladi (_translate_prompt_
+    for_image) — Pollinations "flux" o'zbekcha tavsifni deyarli tushunmay,
+    so'ralganidan boshqa rasm chiqarib yuborishining oldini olish uchun."""
     prompt = (prompt or "").strip()
     if not prompt:
         return None
-    image_bytes = await _call_pollinations_image(prompt)
+    image_prompt = await _translate_prompt_for_image(prompt)
+    image_bytes = await _call_pollinations_image(image_prompt)
     if image_bytes:
         return image_bytes
     logger.info("Pollinations rasm yarata olmadi — Gemini zaxira sifatida sinalyapti")
-    return await _call_gemini_image(prompt)
+    return await _call_gemini_image(image_prompt)
 
 
 async def _call_pollinations_image_edit(prompt, image_bytes, mime_type="image/jpeg", timeout=60):
@@ -1509,12 +1554,17 @@ async def edit_image(prompt, image_bytes, mime_type="image/jpeg"):
     (bepul, lekin POLLINATIONS_API_KEY talab qiladi) sinaladi; u ishlamasa
     Gemini (agar billing yoqilgan bo'lsa — pullik, lekin sifat/ishonchlilik
     jihatidan kuchliroq) zaxira sifatida ishlatiladi. Ikkalasi ham
-    muvaffaqiyatsiz bo'lsa None qaytaradi."""
+    muvaffaqiyatsiz bo'lsa None qaytaradi.
+
+    generate_image'dagi kabi, ko'rsatma yuborishdan OLDIN ingliz tiliga
+    o'giriladi (bir xil sabab — "kontext" ham asosan inglizcha ko'rsatma
+    bilan ishlaydi)."""
     prompt = (prompt or "").strip()
     if not prompt or not image_bytes:
         return None
-    result = await _call_pollinations_image_edit(prompt, image_bytes, mime_type)
+    edit_prompt = await _translate_prompt_for_image(prompt)
+    result = await _call_pollinations_image_edit(edit_prompt, image_bytes, mime_type)
     if result:
         return result
     logger.info("Pollinations rasmni tahrirlay olmadi — Gemini zaxira sifatida sinalyapti")
-    return await _call_gemini_image(prompt, image_bytes=image_bytes, mime_type=mime_type)
+    return await _call_gemini_image(edit_prompt, image_bytes=image_bytes, mime_type=mime_type)
