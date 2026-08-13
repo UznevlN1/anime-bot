@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import html
 import logging
 import math
 import re
@@ -2665,29 +2666,18 @@ async def reg_phone(message: Message, state: FSMContext):
         u = await asyncio.to_thread(db.get_user, user.id)
         new_user_text = (
             f"👤 <b>Yangi foydalanuvchi!</b>\n\n"
-            f"📌 Ism: {user.full_name}\n"
+            f"📌 Ism: {html.escape(user.full_name or '')}\n"
             f"🔢 Raqam: {u['join_number']}-chi\n"
             f"🆔 ID: <code>{user.id}</code>\n"
-            f"👤 Username: @{user.username or 'yoq'}\n"
-            f"📱 Telefon: {phone}\n"
+            f"👤 Username: @{html.escape(user.username) if user.username else 'yoq'}\n"
+            f"📱 Telefon: {html.escape(phone or '')}\n"
             f"📅 Sana: {u['joined_at'][:10]}\n\n"
             f"📊 Jami: {u['join_number']} ta foydalanuvchi"
         )
         new_user_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👤 Profilni ko'rish", url=f"tg://user?id={user.id}")]
         ])
-        for attempt in range(2):
-            try:
-                await bot.send_message(
-                    ADMIN_ID, new_user_text, reply_markup=new_user_kb, parse_mode="HTML"
-                )
-                break
-            except TelegramRetryAfter as e:
-                await asyncio.sleep(e.retry_after)
-                continue
-            except Exception as e:
-                logger.warning(f"[reg_phone] yangi foydalanuvchi xabari yuborilmadi (user {user.id}): {e}")
-                break
+        await _send_admin_alert(new_user_text, reply_markup=new_user_kb)
 
     # Klaviaturani yopish
     await message.answer("✅ Ro'yxatdan o'tdingiz!", reply_markup=ReplyKeyboardRemove())
@@ -8130,26 +8120,41 @@ async def set_autoblock(call: CallbackQuery):
     await call.answer("✅ Saqlandi!", show_alert=True)
     await admin_autoblock(call)
 
-async def _notify_admin_user_left(user_id, full_name, username, join_number, auto_block):
-    status_line = "🔒 Avtomatik bloklandi." if auto_block else "⚪️ Nofaol deb belgilandi (avtomatik bloklash o'chirilgan)."
-    text = (
-        f"🚫 <b>Foydalanuvchi chiqib ketdi!</b>\n\n"
-        f"📌 Ism: {full_name}\n"
-        f"🆔 ID: <code>{user_id}</code>\n"
-        f"👤 Username: @{username or 'yoq'}\n"
-        f"🔢 Raqam: {join_number if join_number else '?'}-chi\n\n"
-        f"{status_line}"
-    )
+async def _send_admin_alert(text, reply_markup=None):
+    """ADMIN_ID'ga muhim bildirishnoma (yangi foydalanuvchi, foydalanuvchi chiqib
+    ketdi va h.k.) yuboradi. Avval HTML formatda yuborishga urinadi; agar Telegram
+    matnni HTML sifatida parslay olmasa — masalan foydalanuvchi ismi yoki
+    username'ida '<', '>', '&' kabi belgilar bo'lsa (bunday holda Telegram butun
+    xabarni RAD ETADI va ilgari bu shunchaki log'ga yozilib, ADMIN HECH QACHON
+    xabar OLMAS edi) — formatlashsiz oddiy matn bilan zaxira urinish qiladi,
+    shunda admin baribir xabardor bo'ladi."""
     for attempt in range(2):
         try:
-            await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
+            await bot.send_message(ADMIN_ID, text, reply_markup=reply_markup, parse_mode="HTML")
             return
         except TelegramRetryAfter as e:
             await asyncio.sleep(e.retry_after)
             continue
         except Exception as e:
-            logger.warning(f"[mark_user_left] adminga xabar yuborilmadi (user {user_id}): {e}")
-            return
+            logger.warning(f"[admin_alert] HTML xabar yuborilmadi, oddiy matnda urinib ko'rilyapti: {e}")
+            break
+    try:
+        plain_text = html.unescape(re.sub(r"<[^>]+>", "", text))
+        await bot.send_message(ADMIN_ID, plain_text, reply_markup=reply_markup)
+    except Exception as e:
+        logger.warning(f"[admin_alert] zaxira (plain-text) xabar ham yuborilmadi: {e}")
+
+async def _notify_admin_user_left(user_id, full_name, username, join_number, auto_block):
+    status_line = "🔒 Avtomatik bloklandi." if auto_block else "⚪️ Nofaol deb belgilandi (avtomatik bloklash o'chirilgan)."
+    text = (
+        f"🚫 <b>Foydalanuvchi chiqib ketdi!</b>\n\n"
+        f"📌 Ism: {html.escape(full_name or '')}\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"👤 Username: @{html.escape(username) if username else 'yoq'}\n"
+        f"🔢 Raqam: {join_number if join_number else '?'}-chi\n\n"
+        f"{status_line}"
+    )
+    await _send_admin_alert(text)
 
 async def mark_user_left(user_id, tg_user=None):
     """Foydalanuvchi botni bloklab/chiqib ketganda chaqiriladi — bir nechta joydan
