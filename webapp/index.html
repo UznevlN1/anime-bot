@@ -1183,21 +1183,6 @@ function markEpWatched(epId){let w=watchedEpIds();if(!w.includes(epId)){w.push(e
 function todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function watchDays(){try{return JSON.parse(localStorage.getItem('anifilm_watch_days')||'[]');}catch(e){return [];}}
 function recordWatchDay(){const days=watchDays();const t=todayStr();if(!days.includes(t)){days.push(t);localStorage.setItem('anifilm_watch_days',JSON.stringify(days.slice(-90)));}}
-function calcStreak(){
-  const days=new Set(watchDays());
-  let streak=0;let cur=new Date();
-  // agar bugun ko'rilmagan bo'lsa ham, kechagi kundan hisoblashga ruxsat beramiz
-  if(!days.has(todayStr()))cur.setDate(cur.getDate()-1);
-  while(true){
-    const s=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0');
-    if(days.has(s)){streak++;cur.setDate(cur.getDate()-1);}else break;
-  }
-  return streak;
-}
-function calcWatchHours(){
-  const mins=watchedEpIds().length*24; // taxminan 24 daq/qism
-  return (mins/60).toFixed(mins>=60?0:1);
-}
 function cacheSizeKB(){
   let bytes=0;
   for(const k in localStorage){if(k.startsWith('anifilm_'))bytes+=(localStorage.getItem(k)||'').length;}
