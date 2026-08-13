@@ -471,13 +471,6 @@ def add_user(user_id, username, full_name, phone=None, referred_by=None):
     put_conn(conn)
     return inserted
 
-def update_phone(user_id, phone):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE users SET phone=%s WHERE user_id=%s", (phone, user_id))
-    conn.commit()
-    put_conn(conn)
-
 def get_user(user_id):
     conn = get_conn()
     c = psycopg2.extras.RealDictCursor(conn)
@@ -794,13 +787,6 @@ def get_all_active_users():
     put_conn(conn)
     return [r[0] for r in rows]
 
-def update_user_version(user_id, version):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE users SET version=%s WHERE user_id=%s", (version, user_id))
-    conn.commit()
-    put_conn(conn)
-
 def get_stats():
     # Ilgari bu yerda 9 ta ALOHIDA so'rov ketma-ket yuborilardi (har biri
     # oʻzining DB round-trip'iga ega, masofaviy Neon'da bu sekinlik sabab
@@ -1067,15 +1053,6 @@ def set_anime_premium_only(anime_id, is_premium_only: bool):
     conn.commit()
     put_conn(conn)
     _invalidate_animes_cache()
-
-def get_premium_only_animes():
-    """Faqat doimiy Premium-only qilib belgilangan animelar ro'yxati (admin panel uchun)."""
-    conn = get_conn()
-    c = psycopg2.extras.RealDictCursor(conn)
-    c.execute("SELECT * FROM animes WHERE is_premium_only=1 ORDER BY title")
-    rows = [dict(r) for r in c.fetchall()]
-    put_conn(conn)
-    return rows
 
 def get_random_anime():
     conn = get_conn()
@@ -1792,13 +1769,6 @@ def get_site_user_by_id(site_user_id):
     put_conn(conn)
     return dict(row) if row else None
 
-def update_site_user_name(site_user_id, display_name):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE site_users SET display_name=%s WHERE id=%s", (display_name, site_user_id))
-    conn.commit()
-    put_conn(conn)
-
 def get_site_user_by_email(email):
     """Faqat email bo'yicha qidiradi (parol tiklash faqat email orqali ishlaydi —
     SMS xizmati ulanmagan). Telefon bilan ro'yxatdan o'tgan, emaili bo'lmagan
@@ -1939,26 +1909,6 @@ def get_admins():
     put_conn(conn)
     return rows
 
-def is_extra_admin(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM admins WHERE user_id=%s", (user_id,))
-    row = c.fetchone()
-    put_conn(conn)
-    return bool(row)
-
-def get_admin_role(user_id):
-    """Qo'shimcha admin jadvalidagi rolini qaytaradi ('moderator'/'moliya'/'super'),
-    yoki bu user admins jadvalida umuman yo'q bo'lsa None. Asosiy ADMIN_ID (.env)
-    bu jadvalda qatnashmaydi — u har doim 'super' deb hisoblanadi, buni
-    chaqiruvchi (anime_bot.py) alohida tekshiradi."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT role FROM admins WHERE user_id=%s", (user_id,))
-    row = c.fetchone()
-    put_conn(conn)
-    return row[0] if row else None
-
 def set_admin_role(user_id, role):
     if role not in ADMIN_ROLES:
         raise ValueError(f"Notogri admin rol: {role}")
@@ -2079,14 +2029,6 @@ def toggle_anime_subscription(user_id, anime_id):
     put_conn(conn)
     return active
 
-def is_subscribed_to_anime(user_id, anime_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM anime_subscriptions WHERE user_id=%s AND anime_id=%s", (user_id, anime_id))
-    row = c.fetchone()
-    put_conn(conn)
-    return bool(row)
-
 def get_anime_subscribers(anime_id):
     conn = get_conn()
     c = conn.cursor()
@@ -2094,14 +2036,6 @@ def get_anime_subscribers(anime_id):
     ids = [r[0] for r in c.fetchall()]
     put_conn(conn)
     return ids
-
-def get_anime_subscriber_count(anime_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM anime_subscriptions WHERE anime_id=%s", (anime_id,))
-    count = c.fetchone()[0]
-    put_conn(conn)
-    return count
 
 # ===== BILDIRISHNOMALAR (webapp 🔔 paneli) =====
 def create_notification(ntype, title, body=None, anime_id=None):
@@ -2254,22 +2188,4 @@ def add_ai_chat_message(user_id, role, text):
     conn.commit()
     put_conn(conn)
 
-def get_ai_chat_history(user_id, limit=12):
-    """Oxirgi xabarlarni eskisidan yangisiga qarab [(role, text), ...]
-    tartibida qaytaradi."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "SELECT role, text FROM ai_chat_history WHERE user_id=%s ORDER BY id DESC LIMIT %s",
-        (user_id, limit)
-    )
-    rows = c.fetchall()
-    put_conn(conn)
-    return list(reversed(rows))
 
-def clear_ai_chat_history(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM ai_chat_history WHERE user_id=%s", (user_id,))
-    conn.commit()
-    put_conn(conn)

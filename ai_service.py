@@ -46,12 +46,6 @@ async def _get_session():
     return _session
 
 
-async def close_ai_session():
-    """Bot to'xtaganda chaqirish uchun (ixtiyoriy) — ochiq connection'larni tozalaydi."""
-    global _session
-    if _session is not None and not _session.closed:
-        await _session.close()
-
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # "gemini-3.6-flash" — Google'ning 2026-yil iyul oyida chiqargan eng yangi
 # va bepul tarifda mavjud boʻlgan ENG KUCHLI Flash modeli (fikrlash/reasoning

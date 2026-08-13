@@ -42,12 +42,6 @@ async def _get_session():
     return _session
 
 
-async def close_anime_api_session():
-    global _session
-    if _session is not None and not _session.closed:
-        await _session.close()
-
-
 # AniList "countryOfOrigin" ISO kod qaytaradi (JP, KR, CN, TW, US va h.k.).
 # Botda mamlakat nomi o'zbekcha ko'rsatilishi uchun eng ko'p uchraydigan
 # kodlarni o'zbekcha nomlarga moslaymiz. Ro'yxatda yo'q kod kelsa, xom

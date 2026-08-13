@@ -2086,11 +2086,6 @@ async def padm_premium_episode_toggle(call: CallbackQuery):
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     await call.message.edit_reply_markup(reply_markup=_premium_episodes_kb(anime_id, episodes, page))
 
-def main_reply_keyboard():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🎌 Animelarni ko'rish", web_app=WebAppInfo(url=WEBAPP_URL))],
-    ], resize_keyboard=True)
-
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")]
@@ -5966,28 +5961,14 @@ async def epfmt_skip_cb(call: CallbackQuery):
     except Exception:
         pass
 
-async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpass_hz=None):
-    """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
-    balandligi (RMS, dB) darajasini o'lchaydi. Natija: [(vaqt_soniya, rms_db), ...]
-    `highpass_hz` berilsa (masalan 2000), past chastotalar (musiqa/bass) kesib
-    tashlanadi va faqat YUQORI chastotali tovushlar (qilich-zarba, portlash,
-    shovqin-siyosat kabi keskin effektlar) o'lchanadi — bu jang sahnalarini
-    fon musiqasidan ko'proq ajratib topishga yordam beradi.
-    `total_duration` va `progress_cb(pct)` berilsa, ffmpeg'ning o'z `-progress`
-    chiqishidan foydalanib, tahlil davomida foizni (0-100) real vaqtda xabar qiladi
-    — aks holda jarayon tugagunicha ekranda hech narsa yangilanmaydi."""
-    n_samples = _CLIP_SAMPLE_RATE * _CLIP_WINDOW_SEC
-    af_chain = f"highpass=f={highpass_hz}," if highpass_hz else ""
-    af_chain += (
-        f"aresample={_CLIP_SAMPLE_RATE},asetnsamples=n={n_samples},"
-        f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-"
-    )
-    cmd = [
-        "ffmpeg", "-i", path,
-        "-af", af_chain,
-        "-progress", "pipe:2", "-nostats", "-loglevel", "error",
-        "-f", "null", "-"
-    ]
+async def _run_ffmpeg_capture_stdout(cmd, total_duration=None, progress_cb=None):
+    """`_analyze_loudness` va `_analyze_motion` ikkalasi ham foydalanadigan umumiy
+    qism: ffmpeg'ni ishga tushiradi va IKKI oqimni PARALLEL o'qiydi — stdout
+    (metadata chiqishi, oxirida to'liq matn sifatida qaytariladi) va stderr
+    (ffmpeg'ning `-progress` xulosasi, undan foiz hisoblanib `progress_cb(pct)`
+    chaqiriladi). Ikkalasini parallel o'qish SHART: ffmpeg ikkala pipe ham
+    o'z vaqtida bo'shatilmasa (masalan avval stdout to'liq o'qib, keyin stderr'ga
+    o'tilsa), bufer to'lib process osilib qolishi mumkin."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -6022,10 +6003,34 @@ async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpas
                     await progress_cb(pct)
 
     await asyncio.gather(_read_stdout(), _read_stderr(), proc.wait())
+    return b"".join(stdout_chunks).decode(errors="ignore")
+
+async def _analyze_loudness(path, total_duration=None, progress_cb=None, highpass_hz=None):
+    """Videoni _CLIP_WINDOW_SEC bo'laklarga bo'lib, har bir bo'lak uchun ovoz
+    balandligi (RMS, dB) darajasini o'lchaydi. Natija: [(vaqt_soniya, rms_db), ...]
+    `highpass_hz` berilsa (masalan 2000), past chastotalar (musiqa/bass) kesib
+    tashlanadi va faqat YUQORI chastotali tovushlar (qilich-zarba, portlash,
+    shovqin-siyosat kabi keskin effektlar) o'lchanadi — bu jang sahnalarini
+    fon musiqasidan ko'proq ajratib topishga yordam beradi.
+    `total_duration` va `progress_cb(pct)` berilsa, ffmpeg'ning o'z `-progress`
+    chiqishidan foydalanib, tahlil davomida foizni (0-100) real vaqtda xabar qiladi
+    — aks holda jarayon tugagunicha ekranda hech narsa yangilanmaydi."""
+    n_samples = _CLIP_SAMPLE_RATE * _CLIP_WINDOW_SEC
+    af_chain = f"highpass=f={highpass_hz}," if highpass_hz else ""
+    af_chain += (
+        f"aresample={_CLIP_SAMPLE_RATE},asetnsamples=n={n_samples},"
+        f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-"
+    )
+    cmd = [
+        "ffmpeg", "-i", path,
+        "-af", af_chain,
+        "-progress", "pipe:2", "-nostats", "-loglevel", "error",
+        "-f", "null", "-"
+    ]
+    output = await _run_ffmpeg_capture_stdout(cmd, total_duration, progress_cb)
 
     frames = []
     pts_time = None
-    output = b"".join(stdout_chunks).decode(errors="ignore")
     for line in output.splitlines():
         m_pts = re.search(r"pts_time:([\d.]+)", line)
         if m_pts:
@@ -6052,44 +6057,10 @@ async def _analyze_motion(path, total_duration=None, progress_cb=None):
         "-an", "-f", "null",
         "-progress", "pipe:2", "-nostats", "-loglevel", "error", "-"
     ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_chunks = []
-
-    async def _read_stdout():
-        while True:
-            chunk = await proc.stdout.read(65536)
-            if not chunk:
-                break
-            stdout_chunks.append(chunk)
-
-    async def _read_stderr():
-        last_pct = -1
-        while True:
-            line = await proc.stderr.readline()
-            if not line:
-                break
-            if not (progress_cb and total_duration):
-                continue
-            text = line.decode(errors="ignore").strip()
-            if text.startswith("out_time_us=") or text.startswith("out_time_ms="):
-                try:
-                    us = int(text.split("=", 1)[1])
-                    pct = max(0, min(100, int(us / 1_000_000 / total_duration * 100)))
-                except Exception:
-                    continue
-                if pct != last_pct:
-                    last_pct = pct
-                    await progress_cb(pct)
-
-    await asyncio.gather(_read_stdout(), _read_stderr(), proc.wait())
+    output = await _run_ffmpeg_capture_stdout(cmd, total_duration, progress_cb)
 
     frames = []
     pts_time = None
-    output = b"".join(stdout_chunks).decode(errors="ignore")
     for line in output.splitlines():
         m_pts = re.search(r"pts_time:([\d.]+)", line)
         if m_pts:
@@ -6188,29 +6159,33 @@ async def _analyze_scene_cuts(path, total_duration=None, progress_cb=None):
     await proc.wait()
     return cuts
 
-def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05,
-                       cuts=None, high_freq_frames=None, motion_frames=None, silence_intervals=None):
-    """`target_duration` soniyalik eng "qiziqarli" uzluksiz oraliqni topadi.
-    Beshta BEPUL signal birlashtiriladi (qaysi biri berilgan bo'lsa, o'shanisi
-    hisobga olinadi, vaznlar shunga qarab qayta taqsimlanadi):
+def _normalize(vals):
+    m = max(vals) if vals else 0.0
+    return [v / m for v in vals] if m > 0 else [0.0] * len(vals)
+
+
+def _score_windows(frames, target_duration, total_duration, edge_margin_ratio=0.05,
+                    cuts=None, high_freq_frames=None, motion_frames=None, silence_intervals=None):
+    """`_pick_best_window` va `_top_candidate_windows` ikkalasi ham foydalanadigan
+    umumiy qism: Beshta BEPUL signalni (qaysi biri berilgan bo'lsa, o'shanisi
+    hisobga olinadi, vaznlar shunga qarab qayta taqsimlanadi) birlashtirib, har
+    bir `_CLIP_WINDOW_SEC` oynasi uchun 0..1 oralig'idagi umumiy ball hisoblaydi:
       1. `frames`            — umumiy ovoz balandligi (RMS)
       2. `cuts`               — sahna almashinuv tezligi (jang/tez montaj belgisi)
       3. `high_freq_frames`   — yuqori chastotali "zarba" tovushlari (qilich, portlash)
       4. `motion_frames`      — kadr ichidagi harakat kuchi (YDIF)
       5. `silence_intervals`  — nutq zichligi (suhbatga boy sahnalarni topish uchun)
-    Intro/outro/kredit qismlarini chetlab o'tish uchun boshi va oxiridan
-    ozgina joy (~5%) hisobga olinmaydi."""
+    Intro/outro/kredit qismlarini chetlab o'tish uchun boshi va oxiridan ozgina
+    joy (~5%) hisobga olinmaydi. Qaytaradi: `(usable, n_windows, combined)` —
+    `usable` bo'sh bo'lsa, signal yetarli emasligini bildiradi (chaqiruvchi
+    o'z fallback qiymatini qaytarishi kerak)."""
     n_windows = max(1, round(target_duration / _CLIP_WINDOW_SEC))
     edge_margin = max(0, total_duration * edge_margin_ratio)
     usable = [(t, r) for (t, r) in frames if edge_margin <= t <= max(edge_margin, total_duration - edge_margin)]
     if len(usable) < n_windows:
         usable = frames
     if not usable:
-        return max(0, (total_duration - target_duration) / 2)
-
-    def _normalize(vals):
-        m = max(vals) if vals else 0.0
-        return [v / m for v in vals] if m > 0 else [0.0] * len(vals)
+        return usable, n_windows, []
 
     # 1) Ovoz balandligi (RMS, dB -> chiziqli energiya)
     energy_scores = _normalize([10 ** (r / 10.0) for (_, r) in usable])
@@ -6271,6 +6246,20 @@ def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio
         for i, s in enumerate(scores):
             combined[i] += norm_w * s
 
+    return usable, n_windows, combined
+
+
+def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio=0.05,
+                       cuts=None, high_freq_frames=None, motion_frames=None, silence_intervals=None):
+    """`target_duration` soniyalik eng "qiziqarli" uzluksiz oraliqni topadi
+    (signallar tavsifi: `_score_windows` docstring'iga qarang)."""
+    usable, n_windows, combined = _score_windows(
+        frames, target_duration, total_duration, edge_margin_ratio,
+        cuts, high_freq_frames, motion_frames, silence_intervals,
+    )
+    if not usable:
+        return max(0, (total_duration - target_duration) / 2)
+
     best_idx, best_sum = 0, -1.0
     for i in range(0, len(usable) - n_windows + 1):
         s = sum(combined[i:i + n_windows])
@@ -6283,80 +6272,22 @@ def _pick_best_window(frames, target_duration, total_duration, edge_margin_ratio
 
 def _top_candidate_windows(frames, target_duration, total_duration, k=8, edge_margin_ratio=0.05,
                             cuts=None, high_freq_frames=None, motion_frames=None, silence_intervals=None):
-    """`_pick_best_window` bilan bir xil signallardan (ovoz, sahna-almashinuv,
-    zarba tovushi, harakat, nutq zichligi — qaysi biri berilgan bo'lsa) foydalanib,
-    ENG YAXSHI bitta oyna o'rniga eng yuqori balli TOP-K nuqtani qaytaradi (bir-biridan
-    kamida `target_duration` uzoqlikda, bir xil avjni bir necha marta tanlab
-    qo'ymaslik uchun). Bular keyin AI (vision)'ga ko'rsatiladi — shunda AI butun
-    video bo'ylab tasodifiy/bir tekis (ko'pincha "bo'sh") nuqtalarni emas, balki
-    ovoz/harakat/sahna-almashinuvi bo'yicha ALLAQACHON eng jonli ko'ringan
-    lahzalarni tekshiradi — jang/eng qiziqarli sahnani topish ehtimoli ancha oshadi.
-    Signal yetarli bo'lmasa (masalan `frames` bo'sh) bo'sh ro'yxat qaytaradi —
-    bu holda chaqiruvchi eski bir-tekis usulga qaytishi kerak."""
-    n_windows = max(1, round(target_duration / _CLIP_WINDOW_SEC))
-    edge_margin = max(0, total_duration * edge_margin_ratio)
-    usable = [(t, r) for (t, r) in frames if edge_margin <= t <= max(edge_margin, total_duration - edge_margin)]
-    if len(usable) < n_windows:
-        usable = frames
+    """`_pick_best_window` bilan bir xil signallardan (`_score_windows`ga qarang)
+    foydalanib, ENG YAXSHI bitta oyna o'rniga eng yuqori balli TOP-K nuqtani
+    qaytaradi (bir-biridan kamida `target_duration` uzoqlikda, bir xil avjni
+    bir necha marta tanlab qo'ymaslik uchun). Bular keyin AI (vision)'ga
+    ko'rsatiladi — shunda AI butun video bo'ylab tasodifiy/bir tekis (ko'pincha
+    "bo'sh") nuqtalarni emas, balki ovoz/harakat/sahna-almashinuvi bo'yicha
+    ALLAQACHON eng jonli ko'ringan lahzalarni tekshiradi — jang/eng qiziqarli
+    sahnani topish ehtimoli ancha oshadi. Signal yetarli bo'lmasa (masalan
+    `frames` bo'sh) bo'sh ro'yxat qaytaradi — bu holda chaqiruvchi eski
+    bir-tekis usulga qaytishi kerak."""
+    usable, n_windows, combined = _score_windows(
+        frames, target_duration, total_duration, edge_margin_ratio,
+        cuts, high_freq_frames, motion_frames, silence_intervals,
+    )
     if not usable:
         return []
-
-    def _normalize(vals):
-        m = max(vals) if vals else 0.0
-        return [v / m for v in vals] if m > 0 else [0.0] * len(vals)
-
-    energy_scores = _normalize([10 ** (r / 10.0) for (_, r) in usable])
-
-    cut_scores = None
-    if cuts:
-        cut_scores = _normalize([
-            sum(1 for c in cuts if t <= c < t + _CLIP_WINDOW_SEC) for (t, _) in usable
-        ])
-
-    hf_scores = None
-    if high_freq_frames:
-        hf_lookup = {round(t): r for (t, r) in high_freq_frames}
-        hf_scores = _normalize([
-            10 ** (hf_lookup.get(round(t), -120.0) / 10.0) for (t, _) in usable
-        ])
-
-    motion_scores = None
-    if motion_frames:
-        motion_scores = _normalize([
-            (lambda pts: sum(pts) / len(pts) if pts else 0.0)(
-                [v for (mt, v) in motion_frames if t <= mt < t + _CLIP_WINDOW_SEC]
-            )
-            for (t, _) in usable
-        ])
-
-    speech_scores = None
-    if silence_intervals is not None:
-        def _speech_ratio(t):
-            win_end = t + _CLIP_WINDOW_SEC
-            silent = 0.0
-            for s, e in silence_intervals:
-                overlap = min(win_end, e) - max(t, s)
-                if overlap > 0:
-                    silent += overlap
-            return max(0.0, 1.0 - silent / _CLIP_WINDOW_SEC)
-        speech_scores = [_speech_ratio(t) for (t, _) in usable]
-
-    weighted = [("energy", energy_scores, 0.30)]
-    if cut_scores is not None:
-        weighted.append(("cuts", cut_scores, 0.25))
-    if hf_scores is not None:
-        weighted.append(("hf", hf_scores, 0.20))
-    if motion_scores is not None:
-        weighted.append(("motion", motion_scores, 0.15))
-    if speech_scores is not None:
-        weighted.append(("speech", speech_scores, 0.10))
-    total_w = sum(w for _, _, w in weighted)
-
-    combined = [0.0] * len(usable)
-    for _, scores, w in weighted:
-        norm_w = w / total_w
-        for i, s in enumerate(scores):
-            combined[i] += norm_w * s
 
     window_scores = [
         (usable[i][0], sum(combined[i:i + n_windows]))
@@ -6705,15 +6636,6 @@ async def _get_watermark_logo_path():
     except Exception as e:
         logger.warning(f"[watermark-logo] yuklab bo'lmadi: {e}")
         return None
-
-def _drawtext_filter(text, font_path, fontsize, y_expr):
-    escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-    font_part = f"fontfile={font_path}:" if font_path else ""
-    return (
-        f"drawtext={font_part}text='{escaped}':fontcolor=white:fontsize={fontsize}:"
-        f"box=1:boxcolor=black@0.5:boxborderw={max(4, fontsize // 4)}:"
-        f"x=(w-text_w)/2:y={y_expr}"
-    )
 
 async def _run_ffmpeg_progress(cmd, total_seconds, on_progress=None, stall_timeout=90):
     """`cmd` (ffmpeg buyrug'i, ro'yxat) ni -progress pipe:1 bilan ishga tushiradi.
