@@ -544,7 +544,7 @@ class AddAnime(StatesGroup):
     total_episodes = State()
     status = State()
     videos = State()
-    confirm_meta = State()   # AniList/AI'dan topilgan bitta maydonni tasdiqlash
+    confirm_meta = State()   # AniList'dan topilgan bitta maydonni tasdiqlash
     manual_meta = State()    # shu maydonni qo'lda qayta yozish
 
 class AddEpisode(StatesGroup):
@@ -1723,7 +1723,7 @@ async def padm_gift_target(message: Message, state: FSMContext):
     if not u:
         await message.answer("❌ Bunday foydalanuvchi topilmadi. Foydalanuvchi avval botdan foydalangan bo'lishi kerak.")
         return
-    await state.update_data(admgift_to=u["user_id"])
+    await state.update_data(admgift_to=u["user_id"], admgift_to_name=u["full_name"])
     await state.set_state(AdminPremiumGiftState.choosing_plan)
     await message.answer(
         f"🎁 <b>{u['full_name']}</b> (<code>{u['user_id']}</code>) uchun muddatni tanlang:",
@@ -1767,8 +1767,9 @@ async def padm_gift_custom_start(call: CallbackQuery, state: FSMContext):
         await state.clear()
         return
     await state.set_state(AdminPremiumGiftState.custom_days)
+    name = data.get("admgift_to_name", "—")
     await call.message.edit_text(
-        "✏️ Necha kunlik Premium berilsin? Faqat raqam yuboring (masalan: 7):",
+        f"🎁 {name}\n\n✏️ Necha kunlik Premium berilsin? Faqat raqam yuboring (masalan: 7):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_premium")],
         ])
@@ -1809,10 +1810,12 @@ async def padm_gift_direct(call: CallbackQuery, state: FSMContext):
     except Exception:
         await call.answer("❌ Xatolik", show_alert=True)
         return
-    await state.update_data(admgift_to=target_id)
+    u = await asyncio.to_thread(db.get_user, target_id)
+    name = u["full_name"] if u else str(target_id)
+    await state.update_data(admgift_to=target_id, admgift_to_name=name)
     await state.set_state(AdminPremiumGiftState.choosing_plan)
     await call.message.answer(
-        f"🎁 <code>{target_id}</code> uchun muddatni tanlang:",
+        f"🎁 <b>{name}</b> (<code>{target_id}</code>) uchun muddatni tanlang:",
         reply_markup=_admgift_plan_kb(),
         parse_mode="HTML"
     )
@@ -3812,135 +3815,22 @@ async def admin_add(call: CallbackQuery, state: FSMContext):
         await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.set_state(AddAnime.photo)
-    ai_hint = (
-        "\n\nYoki AI'ga chizdirish uchun tavsif yozing (masalan: \"fentezi "
-        "uslubidagi anime posteri, sehrgar qiz, ko'k-binafsha ranglar\"). "
-        "Eslatma: bu asl anime posteri emas, sun'iy yaratilgan rasm — "
-        "faqat asl poster topilmasa ishlating."
-        if ai_service.AI_ENABLED else ""
-    )
-    await call.message.edit_text(f"🖼 Anime rasmini yuboring:{ai_hint}", reply_markup=admin_back())
+    await call.message.edit_text("🖼 Anime rasmini yuboring:", reply_markup=admin_back())
 
 @dp.message(AddAnime.photo, F.photo)
 async def add_photo(message: Message, state: FSMContext):
     file_id = message.photo[-1].file_id
-    safe, reason = await _moderate_uploaded_photo(file_id)
-    if not safe:
-        await message.answer(
-            f"🚫 Bu rasm AI tomonidan nomaqbul deb topildi"
-            + (f" ({reason})" if reason else "")
-            + ".\nIltimos, boshqa rasm yuboring."
-        )
-        return
     await state.update_data(photo_id=file_id)
-
-    # --- Rasm orqali anime nomini avtomatik aniqlash/taxmin qilish ---
-    guess = None
-    guess_source = None
-    try:
-        file = await bot.get_file(file_id)
-        img_bytes = (await bot.download_file(file.file_path)).read()
-
-        # 1) Avval trace.moe — bazaga asoslangan, ishonchli
-        guess = await ai_service.identify_anime_from_image_tracemoe(img_bytes)
-        if guess:
-            guess_source = "tracemoe"
-        elif ai_service.AI_ENABLED:
-            # 2) trace.moe topolmasa — Gemini vision taxmini (zaxira)
-            img_b64 = base64.b64encode(img_bytes).decode()
-            ai_guess = await ai_service.guess_anime_title_from_image(img_b64)
-            if ai_guess["title"]:
-                guess = {"title": ai_guess["title"], "similarity": None}
-                guess_source = "ai_guess"
-    except Exception:
-        logger.exception("[add_photo] rasm orqali nom aniqlashda xato")
-
-    if guess and guess_source == "tracemoe":
-        await state.update_data(_guessed_title=guess["title"])
-        await message.answer(
-            f"🔎 Rasm bo'yicha topildi: <b>{guess['title']}</b> "
-            f"({guess['similarity']}% mos)\n\nTo'g'ri bo'lsa shu nomni "
-            f"yuboring yoki to'g'risini yozing:",
-            parse_mode="HTML",
-        )
-    elif guess and guess_source == "ai_guess":
-        await state.update_data(_guessed_title=guess["title"])
-        await message.answer(
-            f"🔎 AI taxmini (⚠️ tekshiring, xato bo'lishi mumkin): "
-            f"<b>{guess['title']}</b>\n\nTo'g'ri bo'lsa shu nomni yuboring "
-            f"yoki to'g'risini yozing:",
-            parse_mode="HTML",
-        )
-    else:
-        await message.answer("🖼 Rasm qabul qilindi. Endi anime nomini yozing:")
-
+    await message.answer("🖼 Rasm qabul qilindi. Endi anime nomini yozing:")
     await state.set_state(AddAnime.title)
 
 @dp.message(AddAnime.photo, F.text)
-async def add_photo_ai_prompt(message: Message, state: FSMContext):
-    if not ai_service.AI_ENABLED:
-        await message.answer("🖼 Iltimos, anime rasmini rasm (fayl) sifatida yuboring.")
-        return
-    prompt = message.text.strip()
-    if not prompt or prompt.startswith("/"):
-        return
-    if _rate_limited(f"ai_image:{message.from_user.id}", max_hits=10, window_seconds=600):
-        await message.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.")
-        return
-    status_msg = await message.answer("🎨 AI rasm chizyapti, kuting...")
-    await _send_ai_image_preview(
-        message, prompt, state, "anime_ai_use", "anime_ai_retry", "anime_ai_cancel",
-        filename="ai_anime.jpg",
-    )
-    await status_msg.delete()
-
-@dp.callback_query(F.data == "anime_ai_retry")
-async def anime_ai_retry(call: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    prompt = data.get("_pending_ai_prompt")
-    if not prompt:
-        await call.answer("Muddati o'tgan, tavsifni qaytadan yozing.", show_alert=True)
-        return
-    if _rate_limited(f"ai_image:{call.from_user.id}", max_hits=10, window_seconds=600):
-        await call.answer("⏳ Juda tez-tez so'ralyapti, birozdan keyin qayta urinib ko'ring.", show_alert=True)
-        return
-    await call.answer("🎨 Qayta yaratilyapti...")
-    await _send_ai_image_preview(
-        call.message, prompt, state, "anime_ai_use", "anime_ai_retry", "anime_ai_cancel",
-        filename="ai_anime.jpg",
-    )
-
-@dp.callback_query(F.data == "anime_ai_use")
-async def anime_ai_use(call: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    photo_id = data.get("_pending_ai_photo_id")
-    if not photo_id:
-        await call.answer("Muddati o'tgan, qaytadan urinib ko'ring.", show_alert=True)
-        return
-    await call.answer()
-    await state.update_data(photo_id=photo_id)
-    try:
-        await call.message.edit_caption(caption="✅ Tanlandi.")
-    except Exception:
-        pass
-    # AI yaratgan rasm — bu haqiqiy anime kadri emas, shu sabab
-    # trace.moe/vision orqali nom taxmin qilishning ma'nosi yo'q;
-    # to'g'ridan-to'g'ri nomni so'raymiz.
-    await state.set_state(AddAnime.title)
-    await call.message.answer("Endi anime nomini yozing:")
-
-@dp.callback_query(F.data == "anime_ai_cancel")
-async def anime_ai_cancel(call: CallbackQuery, state: FSMContext):
-    await call.answer("Bekor qilindi")
-    try:
-        await call.message.delete()
-    except Exception:
-        pass
-    await call.message.answer("🖼 Anime rasmini yuboring, yoki AI uchun tavsif yozing:")
+async def add_photo_fallback(message: Message, state: FSMContext):
+    await message.answer("🖼 Iltimos, anime rasmini rasm (fayl) sifatida yuboring.")
 
 # ---- Qo'lda kiritilgan maydonlarni tasdiqlash ----
-# Admin nom/yil/davlat/janr/tavsifni yozgach (yoki AI orqali tavsif
-# yaratilgach), bot buni DARHOL saqlab keyingi savolga o'tib ketmaydi —
+# Admin nom/yil/davlat/janr/tavsifni yozgach, bot buni DARHOL saqlab
+# keyingi savolga o'tib ketmaydi —
 # avval "Siz kiritdingiz: X — to'g'rimi?" deb ko'rsatadi va faqat ✅
 # tasdiqlangandan keyingina haqiqiy maydonga saqlanadi. Qiymat shu
 # tasdiqlash bosqichida state'da vaqtincha `_pending_<field>` sifatida
@@ -3982,19 +3872,13 @@ async def _commit_manual_field(target, state: FSMContext, field, value):
     navbatdagi bosqichga o'tkazadi (avvalgi add_title/add_year/... mantig'i)."""
     if field == "title":
         await state.update_data(title=value)
-        # Dublikatlarni oldini olish: bazadagi nomi o'xshash animelarni topib,
-        # aynan bir xil bo'lishi mumkinligini tekshiramiz (aniq mos kelish
-        # darhol, boshqacha yozilishlar esa AI orqali).
+        # Dublikatlarni oldini olish: bazadagi nomi bir xil animeni tekshiramiz.
         candidates = await asyncio.to_thread(db.search_anime, value)
         candidates = [c for c in candidates if c.get("title")][:5]
         duplicate_title = None
         if candidates:
             cand_titles = [c["title"] for c in candidates]
-            exact = next((t for t in cand_titles if t.strip().lower() == value.lower()), None)
-            if exact:
-                duplicate_title = exact
-            elif ai_service.AI_ENABLED:
-                duplicate_title = await ai_service.find_duplicate_anime(value, cand_titles)
+            duplicate_title = next((t for t in cand_titles if t.strip().lower() == value.lower()), None)
 
         if duplicate_title:
             await state.set_state(AddAnime.dup_check)
@@ -4023,12 +3907,7 @@ async def _commit_manual_field(target, state: FSMContext, field, value):
     elif field == "genre":
         await state.update_data(genre=value)
         await state.set_state(AddAnime.description)
-        kb = None
-        if ai_service.AI_ENABLED:
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🤖 AI yordamida yaratish", callback_data="ai_gen_desc")]
-            ])
-        await target.answer("📝 Qisqa malumot yozing:", reply_markup=kb)
+        await target.answer("📝 Qisqa malumot yozing:")
 
     elif field == "description":
         await state.update_data(description=value)
@@ -4056,12 +3935,7 @@ async def addconfirm_cb(call: CallbackQuery, state: FSMContext):
     if action == "retry":
         await call.answer()
         if field == "description":
-            kb = None
-            if ai_service.AI_ENABLED:
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🤖 AI yordamida yaratish", callback_data="ai_gen_desc")]
-                ])
-            await call.message.edit_text("📝 Qisqa malumot yozing:", reply_markup=kb)
+            await call.message.edit_text("📝 Qisqa malumot yozing:")
         else:
             await call.message.edit_text(_MANUAL_RETRY_PROMPTS.get(field, "Qayta yozing:"))
         return
@@ -4078,7 +3952,7 @@ async def add_title(message: Message, state: FSMContext):
 async def _add_anime_ask_year(target, state: FSMContext):
     await state.set_state(AddAnime.year)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔎 AniList'dan avtomatik to'ldirish", callback_data="ai_autofill_meta")]
+        [InlineKeyboardButton(text="🔎 AniList'dan avtomatik to'ldirish", callback_data="anilist_autofill_meta")]
     ])
     await target.answer("📅 Yilini yozing:", reply_markup=kb)
 
@@ -4089,11 +3963,11 @@ async def add_title_dup_continue(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await _add_anime_ask_year(call.message, state)
 
-# AniList (yoki AI taxmini) orqali topiladigan maydonlar va ular admin'ga
-# TEKSHIRISH UCHUN qanday tartibda birma-bir ko'rsatilishi. Hech qaysi
-# maydon admin ✅/✏️ bilan javob bermasdan turib bazaga/state'ga
-# saqlanmaydi — shu bilan avvalgi "hammasi bir zumda avtomatik saqlanib,
-# keyingi bosqichga o'tib ketaverish" muammosining oldi olinadi.
+# AniList orqali topiladigan maydonlar va ular admin'ga TEKSHIRISH UCHUN
+# qanday tartibda birma-bir ko'rsatilishi. Hech qaysi maydon admin ✅/✏️
+# bilan javob bermasdan turib bazaga/state'ga saqlanmaydi — shu bilan
+# avvalgi "hammasi bir zumda avtomatik saqlanib, keyingi bosqichga o'tib
+# ketaverish" muammosining oldi olinadi.
 FIELD_ORDER = ["year", "country", "genre", "episodes", "description"]
 FIELD_META = {
     "year": {"label": "📅 Yil", "key": "year", "prompt": "📅 Yilini yozing:"},
@@ -4118,7 +3992,7 @@ def _fmt_field_val(field, value):
 
 async def _ask_confirm_field(target, state: FSMContext, field: str):
     """FIELD_ORDER'dagi bitta maydonni admin'ga ko'rsatib, tasdiqlashini
-    yoki qo'lda o'zgartirishini so'raydi. AniList/AI bu maydon bo'yicha
+    yoki qo'lda o'zgartirishini so'raydi. AniList bu maydon bo'yicha
     hech narsa topmagan bo'lsa, tasdiqlash bosqichisiz to'g'ridan-to'g'ri
     qo'lda kiritishni so'raydi."""
     data = await state.get_data()
@@ -4221,163 +4095,58 @@ async def confirm_meta_manual(message: Message, state: FSMContext):
     await _advance_confirm_field(message, state, field)
 
 
-async def _check_photo_matches_title(photo_id, title):
-    """Admin yuborgan poster rasm bilan yozgan nom (title) haqiqatan bir xil
-    animega tegishlimi — AniList qidirishdan OLDIN AI vision orqali
-    tekshiradi. Bu, masalan, nom xato/adashtirib yozilganda AniList'dan
-    butunlay boshqa anime ma'lumoti tortib olinishining oldini oladi.
-    Tekshirish imkoni bo'lmasa yoki AI aniq xulosaga kela olmasa,
-    xavfsiz tomonga — "mos" deb hisoblab, oqim davom etadi."""
-    if not (photo_id and ai_service.AI_ENABLED):
-        return {"matches": True, "detected_title": ""}
-    try:
-        file = await bot.get_file(photo_id)
-        file_bytes = await bot.download_file(file.file_path)
-        img_b64 = base64.b64encode(file_bytes.read()).decode("ascii")
-        return await ai_service.verify_anime_photo_title(img_b64, title)
-    except Exception:
-        logger.exception("[_check_photo_matches_title] rasm-nom tekshiruvida xato — tekshiruv o'tkazib yuborildi.")
-        return {"matches": True, "detected_title": ""}
-
-
-@dp.callback_query(AddAnime.year, F.data == "ai_autofill_meta")
-async def ai_autofill_meta(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
-        return
-    await call.answer("🔎 Tekshirilmoqda...")
-    data = await state.get_data()
-    title = data.get("title", "")
-
-    check = await _check_photo_matches_title(data.get("photo_id"), title)
-    if not check.get("matches") and check.get("detected_title"):
-        await call.message.answer(
-            f"⚠️ Yuborgan rasmingiz \"{title}\" nomiga to'g'ri kelmasligi "
-            f"mumkin — AI fikricha bu rasm \"{check['detected_title']}\" "
-            "animega o'xshaydi.\n\n"
-            "Baribir shu nom bilan davom etaymi?",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Ha, nom to'g'ri, davom etish", callback_data="ai_autofill_meta_go")],
-                [InlineKeyboardButton(text="✏️ Nomni qayta yozaman", callback_data="ai_autofill_fix_title")],
-            ])
-        )
-        return
-
-    await _run_anilist_autofill(call.message, state, title)
-
-
-@dp.callback_query(F.data == "ai_autofill_meta_go")
-async def ai_autofill_meta_go(call: CallbackQuery, state: FSMContext):
-    """Rasm-nom mos kelmasligi haqida ogohlantirilgandan keyin ham admin
-    baribir shu nom bilan davom etishni tanlasa, shu yerdan qidiruv boshlanadi."""
+@dp.callback_query(AddAnime.year, F.data == "anilist_autofill_meta")
+async def anilist_autofill_meta(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id):
         return
     await call.answer("🔎 AniList'dan qidirilmoqda...")
     data = await state.get_data()
-    await _run_anilist_autofill(call.message, state, data.get("title", ""))
-
-
-@dp.callback_query(F.data == "ai_autofill_fix_title")
-async def ai_autofill_fix_title(call: CallbackQuery, state: FSMContext):
-    """Admin AI ogohlantirishidan keyin nomni to'g'irlashni tanlaganda —
-    title bosqichiga qaytariladi, keyin oqim (dublikat tekshiruvi va h.k.)
-    odatdagidek davom etadi."""
-    if not await is_admin_user(call.from_user.id):
-        return
-    await call.answer()
-    await state.set_state(AddAnime.title)
-    await call.message.edit_text("📌 Anime nomini qayta yozing:")
+    title = data.get("title", "")
+    await _run_anilist_autofill(call.message, state, title)
 
 
 async def _run_anilist_autofill(target, state: FSMContext, title):
-    """AniList'dan (yoki topilmasa AI taxminidan) ma'lumot qidirib, har bir
-    maydonni admin tasdig'i uchun navbat bilan ko'rsatish jarayonini
-    boshlaydi. `target` — javob yozish uchun .answer() metodi bo'lgan
-    obyekt (Message)."""
+    """AniList'dan ma'lumot qidirib, har bir maydonni admin tasdig'i uchun
+    navbat bilan ko'rsatish jarayonini boshlaydi. `target` — javob yozish
+    uchun .answer() metodi bo'lgan obyekt (Message)."""
     result = await anime_api.search_anilist(title)
 
-    if result:
-        # AniList'dan HAQIQIY ma'lumot topildi — tavsifni faqat aniq
-        # tarjima qilamiz (o'zimizdan hech narsa qo'shmaymiz/o'ylab
-        # topmaymiz), qolgan maydonlar (yil/janr/mamlakat/qismlar soni)
-        # to'g'ridan to'g'ri AniList'dan olinadi.
-        description_uz = ""
-        if result.get("description_en") and ai_service.AI_ENABLED:
-            description_uz = await ai_service.translate_description_to_uz(
-                result["description_en"], anime_title=result.get("title", title)
-            )
-            if not description_uz:
-                # Tarjima muvaffaqiyatsiz bo'ldi (AI vaqtincha ishlamadi
-                # yoki bo'sh javob qaytardi) — bu holatni ADMIN'ga ANIQ
-                # ko'rsatamiz, aks holda ingliz tilidagi matn sukut
-                # bo'yicha (admin bilmagan holda) saqlanib qolar edi.
-                await target.answer(
-                    "⚠️ Tavsifni o'zbek tiliga tarjima qilib bo'lmadi (AI "
-                    "vaqtincha javob bermadi) — hozircha ingliz tilida "
-                    "ko'rsatiladi, keyinroq \"📝 Tavsif\" bosqichida "
-                    "\"✏️ O'zim yozaman\" orqali qo'lda tuzatishingiz mumkin."
-                )
-        if not description_uz:
-            description_uz = result.get("description_en", "")
-
-        genre_text = ", ".join(result.get("genres") or [])
-        # DIQQAT: aniq maydon nomi anime_api.py'dagi AniList javobiga bog'liq —
-        # eng ehtimolli variantlar tartibda tekshiriladi. Agar hech biri mos
-        # kelmasa, bu maydon "topilmadi" deb hisoblanadi va admin'dan qo'lda
-        # so'raladi (hech narsa buzilmaydi, faqat avtomatik to'ldirilmaydi).
-        episodes_val = result.get("episodes") or result.get("total_episodes") or result.get("episode_count")
-
-        # MUHIM: hech qaysi maydon shu yerda to'g'ridan-to'g'ri saqlanmaydi —
-        # faqat "_anilist_*" kaliti bilan VAQTINCHA saqlanadi, so'ng
-        # _ask_confirm_field() orqali har biri admin'ga ALOHIDA ko'rsatilib,
-        # ✅ tasdiqlangandan yoki ✏️ qo'lda tuzatilgandan keyingina asosiy
-        # maydonga (masalan "year", "genre") ko'chiriladi.
-        await state.update_data(
-            _anilist_year=str(result.get("year") or "") or None,
-            _anilist_country=result.get("country") or None,
-            _anilist_genre=genre_text or None,
-            _anilist_episodes=episodes_val,
-            _anilist_description=description_uz or None,
-        )
-        await target.answer(
-            "✅ <b>AniList'dan topildi</b> — endi har bir maydonni birma-bir "
-            "tasdiqlaymiz (hech narsa avtomatik saqlanmaydi):\n\n"
-            f"📌 Nom: {result.get('title')}\n"
-            f"⭐️ Reyting: {result.get('score') or '—'}",
-            parse_mode="HTML"
-        )
-        await _ask_confirm_field(target, state, FIELD_ORDER[0])
-        return
-
-    # AniList'da topilmadi — agar AI yoqilgan bo'lsa, eski usul (AI'ning
-    # o'z bilimidan taxmin qilishi) bilan zaxira variantga o'tamiz. Bu
-    # holat ham xuddi shu tarzda — maydon-maydon tasdiqlash orqali —
-    # admin'ga ko'rsatiladi, chunki bu ma'lumot tasdiqlanmagan va
-    # ehtiyotkorlik bilan tekshirilishi kerak.
-    if not ai_service.AI_ENABLED:
+    if not result:
         await target.answer(
             "😕 AniList'da bu nom bo'yicha hech narsa topilmadi. "
             "Iltimos, ma'lumotlarni qo'lda kiriting."
         )
         return
 
-    meta = await ai_service.suggest_anime_metadata(title)
-    if not meta or not any(meta.values()):
-        await target.answer(
-            "😕 AniList'da ham, AI orqali ham bu anime haqida ma'lumot "
-            "topilmadi, iltimos qo'lda kiriting."
-        )
-        return
+    # AniList'dan HAQIQIY ma'lumot topildi. Tavsif odatda ingliz tilida
+    # keladi — kerak bo'lsa admin uni "📝 Tavsif" bosqichida
+    # "✏️ O'zim yozaman" orqali qo'lda o'zbekchaga tarjima qiladi.
+    description = result.get("description_en", "")
+
+    genre_text = ", ".join(result.get("genres") or [])
+    # DIQQAT: aniq maydon nomi anime_api.py'dagi AniList javobiga bog'liq —
+    # eng ehtimolli variantlar tartibda tekshiriladi. Agar hech biri mos
+    # kelmasa, bu maydon "topilmadi" deb hisoblanadi va admin'dan qo'lda
+    # so'raladi (hech narsa buzilmaydi, faqat avtomatik to'ldirilmaydi).
+    episodes_val = result.get("episodes") or result.get("total_episodes") or result.get("episode_count")
+
+    # MUHIM: hech qaysi maydon shu yerda to'g'ridan-to'g'ri saqlanmaydi —
+    # faqat "_anilist_*" kaliti bilan VAQTINCHA saqlanadi, so'ng
+    # _ask_confirm_field() orqali har biri admin'ga ALOHIDA ko'rsatilib,
+    # ✅ tasdiqlangandan yoki ✏️ qo'lda tuzatilgandan keyingina asosiy
+    # maydonga (masalan "year", "genre") ko'chiriladi.
     await state.update_data(
-        _anilist_year=meta.get("year") or None,
-        _anilist_country=meta.get("country") or None,
-        _anilist_genre=meta.get("genre") or None,
-        _anilist_episodes=meta.get("episodes") or meta.get("total_episodes") or None,
-        _anilist_description=meta.get("description") or None,
+        _anilist_year=str(result.get("year") or "") or None,
+        _anilist_country=result.get("country") or None,
+        _anilist_genre=genre_text or None,
+        _anilist_episodes=episodes_val,
+        _anilist_description=description or None,
     )
     await target.answer(
-        "⚠️ AniList'da topilmadi — quyidagilar <b>AI taxminiga</b> ko'ra "
-        "topildi, shuning uchun har birini ayniqsa ehtiyotkorlik bilan "
-        "tekshirib tasdiqlang (hech narsa avtomatik saqlanmaydi):",
+        "✅ <b>AniList'dan topildi</b> — endi har bir maydonni birma-bir "
+        "tasdiqlaymiz (hech narsa avtomatik saqlanmaydi):\n\n"
+        f"📌 Nom: {result.get('title')}\n"
+        f"⭐️ Reyting: {result.get('score') or '—'}",
         parse_mode="HTML"
     )
     await _ask_confirm_field(target, state, FIELD_ORDER[0])
@@ -4397,24 +4166,6 @@ async def add_genre(message: Message, state: FSMContext):
 @dp.message(AddAnime.description)
 async def add_desc(message: Message, state: FSMContext):
     await _ask_manual_confirm(message, state, "description", message.text.strip())
-
-@dp.callback_query(AddAnime.description, F.data == "ai_gen_desc")
-async def ai_gen_desc(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
-        return
-    if not ai_service.AI_ENABLED:
-        await call.answer("AI sozlanmagan", show_alert=True)
-        return
-    await call.answer("✍️ Yozilmoqda...")
-    data = await state.get_data()
-    desc = await ai_service.generate_anime_description(
-        data.get("title", ""), data.get("genre", ""),
-        data.get("year", ""), data.get("country", "")
-    )
-    if not desc:
-        await call.message.answer("😕 AI javob bermadi, iltimos tavsifni qo'lda yozing.")
-        return
-    await _ask_manual_confirm(call.message, state, "description", desc)
 
 @dp.message(AddAnime.language)
 async def add_language(message: Message, state: FSMContext):
@@ -4703,10 +4454,11 @@ async def addepi_selected(call: CallbackQuery, state: FSMContext):
     next_ep = len(episodes) + 1
     await state.update_data(episode_anime_id=anime_id, episode_tasks=[], next_ep=next_ep)
     await state.set_state(AddEpisode.videos)
+    title = anime.get("title") if anime else "—"
     total = anime.get("total_episodes") if anime else None
     progress_line = f"\n📦 Hozircha: {len(episodes)}/{total} qism yuklangan." if total else f"\n📦 Hozircha: {len(episodes)} qism yuklangan."
     await call.message.edit_text(
-        f"🎬 Videolarni yuboring ({next_ep}-qismdan boshlanadi).{progress_line}\nTugagach /done yozing:"
+        f"📌 {title}\n🎬 Videolarni yuboring ({next_ep}-qismdan boshlanadi).{progress_line}\nTugagach /done yozing:"
     )
 
 @dp.message(AddEpisode.videos, F.video)
@@ -4925,10 +4677,12 @@ async def edit_search_result(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("editsel_"))
 async def editsel(call: CallbackQuery, state: FSMContext):
     anime_id = int(call.data.split("_")[1])
-    await state.update_data(edit_anime_id=anime_id)
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    title = anime.get("title") if anime else "—"
+    await state.update_data(edit_anime_id=anime_id, edit_anime_title=title)
     await state.set_state(EditAnime.choose_field)
     await call.message.edit_text(
-        "✏️ Qaysi maydonni tahrirlaysiz?",
+        f"📌 {title}\n\n✏️ Qaysi maydonni tahrirlaysiz?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📌 Nomi", callback_data="efield_title")],
             [InlineKeyboardButton(text="📅 Yili", callback_data="efield_year")],
@@ -4950,9 +4704,11 @@ async def edit_choose_field_fallback(message: Message):
 async def edit_field(call: CallbackQuery, state: FSMContext):
     field = call.data.replace("efield_", "")
     await state.update_data(edit_field=field)
+    data = await state.get_data()
+    title = data.get("edit_anime_title", "—")
     if field == "status":
         await call.message.edit_text(
-            "📊 Holatni tanlang:",
+            f"📌 {title}\n\n📊 Holatni tanlang:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🟢 Davom etmoqda", callback_data="setstatus_ongoing")],
                 [InlineKeyboardButton(text="✅ Tugagan", callback_data="setstatus_finished")],
@@ -4961,7 +4717,7 @@ async def edit_field(call: CallbackQuery, state: FSMContext):
         )
         return
     await state.set_state(EditAnime.new_value)
-    await call.message.edit_text("✏️ Yangi qiymatni yozing:")
+    await call.message.edit_text(f"📌 {title}\n\n✏️ Yangi qiymatni yozing:")
 
 @dp.callback_query(F.data.startswith("setstatus_"))
 async def set_anime_status(call: CallbackQuery, state: FSMContext):
@@ -5585,8 +5341,10 @@ async def epact_search_result(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("epact_sel_"))
 async def epact_sel(call: CallbackQuery, state: FSMContext):
     anime_id = int(call.data.split("_")[2])
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    title = anime.get("title") if anime else "—"
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
-    await state.update_data(epact_anime_id=anime_id)
+    await state.update_data(epact_anime_id=anime_id, epact_anime_title=title)
     await state.set_state(EditEpisode.choose_episode)
     buttons = []
     row = []
@@ -5602,7 +5360,7 @@ async def epact_sel(call: CallbackQuery, state: FSMContext):
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
     await call.message.edit_text(
-        "Qismni tanlang:",
+        f"📌 {title}\n\nQismni tanlang:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
@@ -5611,6 +5369,7 @@ async def epact_ep(call: CallbackQuery, state: FSMContext):
     ep_id = int(call.data.split("_")[2])
     data = await state.get_data()
     action = data.get("ep_action")
+    title = data.get("epact_anime_title", "—")
     if action == "del":
         await asyncio.to_thread(db.delete_episode, ep_id)
         await state.clear()
@@ -5618,7 +5377,7 @@ async def epact_ep(call: CallbackQuery, state: FSMContext):
     elif action == "edit":
         await state.update_data(edit_ep_id=ep_id)
         await state.set_state(EditEpisode.new_video)
-        await call.message.edit_text("🎬 Yangi videoni yuboring:")
+        await call.message.edit_text(f"📌 {title}\n\n🎬 Yangi videoni yuboring:")
 
 @dp.message(EditEpisode.new_video, F.video)
 async def epact_new_video(message: Message, state: FSMContext):
@@ -5891,9 +5650,12 @@ async def _send_format_fix_prompt(message, ep_id, ep_num):
     to'g'irlash" so'rovini yuboradi. Qism DB'ga saqlangandan (yoki
     yangilangandan) KEYIN chaqirilishi shart — chunki tugma callback_data'si
     episode.id'ga bog'liq."""
+    ep = await asyncio.to_thread(db.get_episode, ep_id)
+    anime = await asyncio.to_thread(db.get_anime, ep["anime_id"]) if ep else None
+    header = f"📌 {anime['title']}\n" if anime else ""
     try:
         await message.answer(
-            f"🎞 {ep_num}-qism formati ba'zi brauzerlarda (masalan Chrome/webapp) "
+            f"{header}🎞 {ep_num}-qism formati ba'zi brauzerlarda (masalan Chrome/webapp) "
             "ishlamasligi mumkin bo'lgan holda saqlandi. Hozir to'g'irlaysizmi "
             "(fayl hajmiga qarab bir necha daqiqa vaqt olishi mumkin), yoki "
             "shunday qoldirib, keyinroq to'g'irlaymizmi?",
@@ -5912,9 +5674,11 @@ async def epfmt_fix_cb(call: CallbackQuery):
     if not ep:
         await call.answer("Qism topilmadi (o'chirilgan bo'lishi mumkin)", show_alert=True)
         return
+    anime = await asyncio.to_thread(db.get_anime, ep["anime_id"])
+    header = f"📌 {anime['title']}\n" if anime else ""
     await call.answer()
     try:
-        await call.message.edit_text(f"🔄 {ep['episode_number']}-qism formati to'g'irlanmoqda, kuting...")
+        await call.message.edit_text(f"{header}🔄 {ep['episode_number']}-qism formati to'g'irlanmoqda, kuting...")
     except Exception:
         pass
     try:
@@ -5924,14 +5688,14 @@ async def epfmt_fix_cb(call: CallbackQuery):
         await asyncio.to_thread(db.update_episode, ep_id, new_msg_id)
         asyncio.create_task(_warmup_stream_clients(new_msg_id))
         try:
-            await call.message.edit_text(f"✅ {ep['episode_number']}-qism formati to'g'irlandi!")
+            await call.message.edit_text(f"{header}✅ {ep['episode_number']}-qism formati to'g'irlandi!")
         except Exception:
             pass
     except Exception:
         logger.exception(f"[epizod-format-fix] keyinroq to'g'irlashda xato (ep_id={ep_id})")
         try:
             await call.message.edit_text(
-                f"❌ {ep['episode_number']}-qism formatini to'g'irlashda xato yuz berdi. Qaytadan urinib ko'rishingiz mumkin.",
+                f"{header}❌ {ep['episode_number']}-qism formatini to'g'irlashda xato yuz berdi. Qaytadan urinib ko'rishingiz mumkin.",
                 reply_markup=_format_fix_keyboard(ep_id)
             )
         except Exception:
@@ -5945,9 +5709,11 @@ async def epfmt_skip_cb(call: CallbackQuery):
     ep_id = int(call.data.split("_")[2])
     ep = await asyncio.to_thread(db.get_episode, ep_id)
     ep_num = ep["episode_number"] if ep else "?"
+    anime = await asyncio.to_thread(db.get_anime, ep["anime_id"]) if ep else None
+    header = f"📌 {anime['title']}\n" if anime else ""
     await call.answer("Shunday qoldirildi")
     try:
-        await call.message.edit_text(f"➡️ {ep_num}-qism asl formatida qoldirildi.")
+        await call.message.edit_text(f"{header}➡️ {ep_num}-qism asl formatida qoldirildi.")
     except Exception:
         pass
 
@@ -7183,10 +6949,13 @@ async def clipa_sel_page(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data.regexp(r"^clipa_sel_(\d+)$"))
 async def clipa_sel(call: CallbackQuery, state: FSMContext):
     anime_id = int(call.data.split("_")[-1])
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    title = anime.get("title") if anime else "—"
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     if not episodes:
         await call.answer("❌ Bu anime uchun hali video yuklanmagan!", show_alert=True)
         return
+    await state.update_data(clipa_anime_title=title)
     buttons = []
     row = []
     for ep in episodes:
@@ -7197,7 +6966,7 @@ async def clipa_sel(call: CallbackQuery, state: FSMContext):
     if row:
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")])
-    await call.message.edit_text("Qismni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await call.message.edit_text(f"📌 {title}\n\nQismni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @dp.callback_query(F.data.regexp(r"^clipep_(\d+)$"))
 async def clipep_selected(call: CallbackQuery, state: FSMContext):
@@ -7206,8 +6975,13 @@ async def clipep_selected(call: CallbackQuery, state: FSMContext):
     if not ep:
         await call.answer("❌ Topilmadi!", show_alert=True)
         return
+    data = await state.get_data()
+    title = data.get("clipa_anime_title", "—")
     await state.update_data(clip_channel_msg_id=ep["channel_message_id"])
-    await call.message.edit_text("⏱ Klip davomiyligini tanlang:", reply_markup=_clip_duration_keyboard())
+    await call.message.edit_text(
+        f"📌 {title} — {ep['episode_number']}-qism\n\n⏱ Klip davomiyligini tanlang:",
+        reply_markup=_clip_duration_keyboard()
+    )
 
 @dp.callback_query(F.data == "clip_source_upload")
 async def clip_source_upload(call: CallbackQuery, state: FSMContext):
