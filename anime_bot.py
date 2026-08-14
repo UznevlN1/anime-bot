@@ -3828,48 +3828,15 @@ async def add_photo(message: Message, state: FSMContext):
 async def add_photo_fallback(message: Message, state: FSMContext):
     await message.answer("🖼 Iltimos, anime rasmini rasm (fayl) sifatida yuboring.")
 
-# ---- Qo'lda kiritilgan maydonlarni tasdiqlash ----
-# Admin nom/yil/davlat/janr/tavsifni yozgach, bot buni DARHOL saqlab
-# keyingi savolga o'tib ketmaydi —
-# avval "Siz kiritdingiz: X — to'g'rimi?" deb ko'rsatadi va faqat ✅
-# tasdiqlangandan keyingina haqiqiy maydonga saqlanadi. Qiymat shu
-# tasdiqlash bosqichida state'da vaqtincha `_pending_<field>` sifatida
-# saqlanadi (state HOLATI o'zgartirilmaydi — shu bilan admin ✅ bosish
-# o'rniga to'g'ridan-to'g'ri qayta yozib yuborsa ham, xuddi shu maydon
-# handler'i ushlab, yangi tasdiqlash so'raydi).
-_MANUAL_CONFIRM_LABELS = {
-    "title": "📌 Nomi",
-    "year": "📅 Yili",
-    "country": "🌍 Davlati",
-    "genre": "🎭 Janri",
-    "description": "📝 Tavsifi",
-}
-_MANUAL_RETRY_PROMPTS = {
-    "title": "📌 Anime nomini qayta yozing:",
-    "year": "📅 Yilini qayta yozing:",
-    "country": "🌍 Davlatini qayta yozing:",
-    "genre": "🎭 Janrini qayta yozing:",
-}
-
-
-def _manual_confirm_kb(field):
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"addconfirm:{field}:yes"),
-        InlineKeyboardButton(text="✏️ Qayta yozish", callback_data=f"addconfirm:{field}:retry"),
-    ]])
-
-
-async def _ask_manual_confirm(target, state: FSMContext, field, value):
-    """Kiritilgan qiymatni saqlashdan oldin ko'rsatib, tasdiqlashni so'raydi."""
-    await state.update_data(**{f"_pending_{field}": value})
-    label = _MANUAL_CONFIRM_LABELS.get(field, field)
-    shown = value if len(str(value)) <= 500 else str(value)[:500] + "…"
-    await target.answer(f"{label}: {shown}\n\nTo'g'rimi?", reply_markup=_manual_confirm_kb(field))
-
-
+# ---- Qo'lda kiritilgan maydonlarni saqlash ----
+# Admin nom/yil/davlat/janr/tavsifni yozishi bilanoq — qo'shimcha
+# "To'g'rimi?" tasdiqlash bosqichisiz — DARHOL saqlanadi va keyingi
+# savolga o'tiladi. Pastdagi handler'lar (add_title/add_year/add_country/
+# add_genre/add_desc) shu sabab to'g'ridan-to'g'ri _commit_manual_field()
+# ni chaqiradi.
 async def _commit_manual_field(target, state: FSMContext, field, value):
-    """Admin ✅ tasdiqlagandan keyin qiymatni haqiqiy maydonga saqlaydi va
-    navbatdagi bosqichga o'tkazadi (avvalgi add_title/add_year/... mantig'i)."""
+    """Admin kiritgan qiymatni to'g'ridan-to'g'ri (tasdiqlashsiz) haqiqiy
+    maydonga saqlaydi va navbatdagi bosqichga o'tkazadi."""
     if field == "title":
         await state.update_data(title=value)
         # Dublikatlarni oldini olish: bazadagi nomi bir xil animeni tekshiramiz.
@@ -3915,39 +3882,9 @@ async def _commit_manual_field(target, state: FSMContext, field, value):
         await target.answer("🗣 Tilini yozing (masalan: O'zbek, Rus, Yapon):")
 
 
-@dp.callback_query(F.data.startswith("addconfirm:"))
-async def addconfirm_cb(call: CallbackQuery, state: FSMContext):
-    if not await is_admin_user(call.from_user.id):
-        return
-    try:
-        _, field, action = call.data.split(":", 2)
-    except ValueError:
-        await call.answer()
-        return
-
-    data = await state.get_data()
-    pending = data.get(f"_pending_{field}")
-    if pending is None:
-        # Eski/allaqachon ishlatilgan tugma bosilgan — endi amal qilmaydi.
-        await call.answer()
-        return
-
-    if action == "retry":
-        await call.answer()
-        if field == "description":
-            await call.message.edit_text("📝 Qisqa malumot yozing:")
-        else:
-            await call.message.edit_text(_MANUAL_RETRY_PROMPTS.get(field, "Qayta yozing:"))
-        return
-
-    await call.answer("✅ Qabul qilindi")
-    await state.update_data(**{f"_pending_{field}": None})
-    await _commit_manual_field(call.message, state, field, pending)
-
-
 @dp.message(AddAnime.title)
 async def add_title(message: Message, state: FSMContext):
-    await _ask_manual_confirm(message, state, "title", message.text.strip())
+    await _commit_manual_field(message, state, "title", message.text.strip())
 
 async def _add_anime_ask_year(target, state: FSMContext):
     await state.set_state(AddAnime.year)
@@ -4153,19 +4090,19 @@ async def _run_anilist_autofill(target, state: FSMContext, title):
 
 @dp.message(AddAnime.year)
 async def add_year(message: Message, state: FSMContext):
-    await _ask_manual_confirm(message, state, "year", message.text.strip())
+    await _commit_manual_field(message, state, "year", message.text.strip())
 
 @dp.message(AddAnime.country)
 async def add_country(message: Message, state: FSMContext):
-    await _ask_manual_confirm(message, state, "country", message.text.strip())
+    await _commit_manual_field(message, state, "country", message.text.strip())
 
 @dp.message(AddAnime.genre)
 async def add_genre(message: Message, state: FSMContext):
-    await _ask_manual_confirm(message, state, "genre", message.text.strip())
+    await _commit_manual_field(message, state, "genre", message.text.strip())
 
 @dp.message(AddAnime.description)
 async def add_desc(message: Message, state: FSMContext):
-    await _ask_manual_confirm(message, state, "description", message.text.strip())
+    await _commit_manual_field(message, state, "description", message.text.strip())
 
 @dp.message(AddAnime.language)
 async def add_language(message: Message, state: FSMContext):
