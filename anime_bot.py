@@ -4173,12 +4173,19 @@ async def add_status(call: CallbackQuery, state: FSMContext):
     status = call.data.replace("addstatus_", "")
     await state.update_data(status=status)
     await state.set_state(AddAnime.videos)
-    await call.message.edit_text("🎬 Videolarni yuboring. Tugagach /done yozing:")
+    await call.message.edit_text(
+        "🎬 Videolarni yuboring. Xato/takror yuborsangiz — /bekor (oxirgi qismni bekor qiladi).\nTugagach /done yozing:"
+    )
+
+@dp.message(AddAnime.videos, Command("bekor"))
+async def add_video_cancel_last(message: Message, state: FSMContext):
+    await _cancel_last_upload_task(message, state, "video_tasks", "video_task_holders", 1)
 
 @dp.message(AddAnime.videos, F.video)
 async def add_video(message: Message, state: FSMContext):
     data = await state.get_data()
     tasks = data.get("video_tasks", [])
+    holders = data.get("video_task_holders", [])
     ep_num = len(tasks) + 1
     # MUHIM: avval bu yerda to'g'ridan-to'g'ri bot.copy_message ishlatilib,
     # kodek moslik tekshiruvi (H.264/AAC'ga o'tkazish) butunlay o'tkazib
@@ -4191,12 +4198,14 @@ async def add_video(message: Message, state: FSMContext):
     # vaqtni kutishga majbur bo'lardi. Endi fonda (background task) ishga
     # tushiriladi va admin darhol keyingi videoni yubora oladi; barcha
     # qismlar /done bosilganda kutib olinadi (agar hali tugallanmagan bo'lsa).
+    holder = {}
     task = asyncio.create_task(_process_episode_upload(
-        message, episode_caption(ep_num), ep_label=f"{ep_num}-video"
+        message, episode_caption(ep_num), ep_label=f"{ep_num}-video", posted_holder=holder
     ))
     tasks.append(task)
-    await state.update_data(video_tasks=tasks)
-    await message.answer(f"📥 {ep_num}-video qabul qilindi, fonda qayta ishlanmoqda... /done yozing yoki davom eting.")
+    holders.append(holder)
+    await state.update_data(video_tasks=tasks, video_task_holders=holders)
+    await message.answer(f"📥 {ep_num}-video qabul qilindi, fonda qayta ishlanmoqda... /done yozing yoki davom eting. (xato bo'lsa /bekor)")
 
 _add_done_in_progress = set()
 
@@ -4395,22 +4404,69 @@ async def addepi_selected(call: CallbackQuery, state: FSMContext):
     total = anime.get("total_episodes") if anime else None
     progress_line = f"\n📦 Hozircha: {len(episodes)}/{total} qism yuklangan." if total else f"\n📦 Hozircha: {len(episodes)} qism yuklangan."
     await call.message.edit_text(
-        f"📌 {title}\n🎬 Videolarni yuboring ({next_ep}-qismdan boshlanadi).{progress_line}\nTugagach /done yozing:"
+        f"📌 {title}\n🎬 Videolarni yuboring ({next_ep}-qismdan boshlanadi).{progress_line}\n"
+        f"Xato/takror yuborsangiz — /bekor (oxirgi qismni bekor qiladi).\nTugagach /done yozing:"
     )
+
+async def _cancel_last_upload_task(message: Message, state: FSMContext, tasks_key: str, holders_key: str, base_ep_num: int):
+    """So'nggi yuborilgan videoni navbatdan bekor qiladi. Admin xato video
+    (masalan bir qismni ikki marta) yuborib qo'yganda /done bosishdan oldin
+    tuzatish uchun ishlatiladi.
+    MUHIM: video STORAGE_CHANNEL'ga deyarli DARHOL nusxalanadi — kodek
+    tekshiruvi (yuklab olish + ffprobe) esa ANCHA keyin, ba'zan o'nlab
+    soniya davom etadi. Ya'ni task hali "done" bo'lmasa ham, xabar
+    allaqachon kanalda turgan bo'lishi mumkin — shu sabab faqat
+    task.cancel() qilish YETARLI EMAS (xabar kanalda "yetim" qolib ketardi).
+    Shuning uchun message_id alohida "holder" orqali olinadi — u task
+    tugashini kutmasdan, copy_message bajarilishi bilanoq to'ldiriladi
+    (qarang: _upload_episode_to_storage). Bazaga (db) hali hech narsa
+    yozilmagani uchun (bu faqat /done bosilganda sodir bo'ladi) boshqa
+    qo'shimcha tozalash shart emas."""
+    data = await state.get_data()
+    tasks = data.get(tasks_key, [])
+    holders = data.get(holders_key, [])
+    if not tasks:
+        await message.answer("❌ Bekor qilinadigan video yo'q.")
+        return
+    last_task = tasks.pop()
+    last_holder = holders.pop() if holders else {}
+    ep_num = base_ep_num + len(tasks)
+    await state.update_data(**{tasks_key: tasks, holders_key: holders})
+
+    if not last_task.done():
+        last_task.cancel()
+
+    msg_id = last_holder.get("message_id")
+    if not msg_id:
+        await message.answer(f"🗑 {ep_num}-qism bekor qilindi (hali kanalga ulgurmagan edi). Davom etishingiz mumkin.")
+        return
+    try:
+        await bot.delete_message(STORAGE_CHANNEL, msg_id)
+    except Exception as e:
+        logger.warning(f"[bekor] STORAGE_CHANNEL'dan {msg_id}-xabarni o'chirib bo'lmadi: {e}")
+    await message.answer(f"🗑 {ep_num}-qism bekor qilindi va kanaldan o'chirildi. Davom etishingiz mumkin.")
+
+@dp.message(AddEpisode.videos, Command("bekor"))
+async def addepi_cancel_last(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await _cancel_last_upload_task(message, state, "episode_tasks", "episode_task_holders", data["next_ep"])
 
 @dp.message(AddEpisode.videos, F.video)
 async def addepi_video(message: Message, state: FSMContext):
     data = await state.get_data()
     tasks = data.get("episode_tasks", [])
+    holders = data.get("episode_task_holders", [])
     ep_num = data["next_ep"] + len(tasks)
+    holder = {}
     # TEZLIK: fonda ishga tushiriladi (qarang: add_video izohi) — admin
     # keyingi qismni darhol yubora oladi, transkod/yuklash orqada davom etadi.
     task = asyncio.create_task(_process_episode_upload(
-        message, episode_caption(ep_num), ep_label=f"{ep_num}-qism"
+        message, episode_caption(ep_num), ep_label=f"{ep_num}-qism", posted_holder=holder
     ))
     tasks.append(task)
-    await state.update_data(episode_tasks=tasks)
-    await message.answer(f"📥 {ep_num}-qism qabul qilindi, fonda qayta ishlanmoqda...")
+    holders.append(holder)
+    await state.update_data(episode_tasks=tasks, episode_task_holders=holders)
+    await message.answer(f"📥 {ep_num}-qism qabul qilindi, fonda qayta ishlanmoqda... (xato bo'lsa /bekor yozing)")
 
 @dp.message(AddEpisode.videos, Command("done"))
 async def addepi_done(message: Message, state: FSMContext):
@@ -5433,17 +5489,22 @@ _BROWSER_SAFE_AUDIO_CODECS = {"aac", "mp3"}
 # ketma-ket, kutmasdan yubora oladi (faqat OG'IR qism cheklanadi).
 _episode_upload_semaphore = asyncio.Semaphore(2)
 
-async def _process_episode_upload(message, caption, ep_label):
+async def _process_episode_upload(message, caption, ep_label, posted_holder=None):
     """`_upload_episode_to_storage`ni fonda (background task sifatida) ishga
     tushiradi va tugagach adminga xabar beradi. Ilgari bu jarayon sinxron
     edi — admin navbatdagi videoni yuborishdan oldin har safar yuklab olish +
     (kerak bo'lsa) transkod + qayta yuklashni to'liq kutishga majbur bo'lardi.
     Endi admin videolarni ketma-ket, kutmasdan yubora oladi; barcha qismlar
     /done bosilganda kerak bo'lsa kutib olinadi (add_done/addepi_done'da).
+    posted_holder — /bekor uchun: STORAGE_CHANNEL'ga nusxa ko'chirilgan
+    zahoti (hali kodek tekshiruvi tugamasdan turib ham) message_id shu
+    dict'ga yoziladi, shunda vazifa keyinroq bekor qilinsa ham (cancel)
+    kanaldagi "yetim" xabarni topib o'chirish mumkin bo'ladi.
     (message_id, needs_fix) juftligini qaytaradi — qarang: _upload_episode_to_storage."""
     try:
         new_msg_id, needs_fix = await _upload_episode_to_storage(
-            message.chat.id, message.message_id, caption, status_message=message
+            message.chat.id, message.message_id, caption, status_message=message,
+            posted_holder=posted_holder
         )
     except Exception:
         logger.exception(f"[video-queue] {ep_label} fonda qayta ishlashda kutilmagan xato")
@@ -5455,7 +5516,7 @@ async def _process_episode_upload(message, caption, ep_label):
     asyncio.create_task(_warmup_stream_clients(new_msg_id))
     return new_msg_id, needs_fix
 
-async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None):
+async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None, posted_holder=None):
     """Admin yuborgan qism videosini STORAGE_CHANNEL'ga saqlaydi va formatini
     TEKShiRADI (video/audio kodeki brauzer bilan mos keladimi — masalan HEVC
     yoki AC3 mos kelmaydi).
@@ -5475,6 +5536,14 @@ async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, sta
         STORAGE_CHANNEL, orig_chat_id, orig_message_id,
         caption=caption, parse_mode=None
     )
+    # Diqqat: bu yerdan keyin (hali kodek tekshiruvi tugamasdan oldin) ham
+    # xabar allaqachon STORAGE_CHANNEL'da turibdi — shu sababli message_id
+    # darhol holder'ga yoziladi (await'siz, bitta sinxron blok — orasida
+    # cancel kirib ulgurmaydi), aks holda /bekor bu bosqichda vazifani
+    # to'xtatsa (cancel) ham xabarning message_id'sini bilmay, uni
+    # kanalda "yetim" holda qoldirib ketardi.
+    if posted_holder is not None:
+        posted_holder["message_id"] = sent.message_id
     logger.info(f"[epizod-format] boshlandi: STORAGE_CHANNEL xabari={sent.message_id}")
 
     async with _episode_upload_semaphore:
