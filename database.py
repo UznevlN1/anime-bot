@@ -1581,7 +1581,19 @@ def set_banner_active(banner_id, active):
 def get_categories():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT DISTINCT category FROM animes WHERE category IS NOT NULL AND category <> '' ORDER BY category ASC")
+    # LOWER(TRIM(...)) bo'yicha guruhlanadi — shunda faqat katta-kichik harf
+    # yoki bo'sh joy bilan farq qiladigan janrlar (masalan "Komediya" va
+    # "komediya ") ro'yxatda ikki marta chiqmaydi. Har bir guruhdan bitta
+    # (alifbo bo'yicha birinchi) yozuv tanlanadi.
+    c.execute("""
+        SELECT category FROM (
+            SELECT DISTINCT ON (LOWER(TRIM(category))) TRIM(category) AS category
+            FROM animes
+            WHERE category IS NOT NULL AND TRIM(category) <> ''
+            ORDER BY LOWER(TRIM(category)), category ASC
+        ) t
+        ORDER BY category ASC
+    """)
     rows = [r[0] for r in c.fetchall()]
     put_conn(conn)
     return rows

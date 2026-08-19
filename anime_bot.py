@@ -8768,6 +8768,11 @@ async def serve_favicon(request):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return web.FileResponse(os.path.join(base_dir, "favicon.ico"))
 
+async def serve_logo(request):
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return web.FileResponse(os.path.join(base_dir, "logo.png"))
+
 async def serve_sitemap(request):
     import os
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -10138,6 +10143,7 @@ async def start_web_server():
     app = web.Application(middlewares=[compress_middleware])
     app.router.add_get("/", health_check)
     app.router.add_get("/favicon.ico", serve_favicon)
+    app.router.add_get("/logo.png", serve_logo)
     app.router.add_get("/sitemap.xml", serve_sitemap)
     app.router.add_get("/robots.txt", serve_robots)
     app.router.add_get("/debug", debug_path)
