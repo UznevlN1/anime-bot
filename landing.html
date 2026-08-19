@@ -198,6 +198,19 @@
   .card-title{font-size:13px;font-weight:700;line-height:1.32;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
   .card-meta{margin-top:5px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-dim);}
 
+  /* ---------- barchasi (to'liq ro'yxat) overlay ---------- */
+  .all-overlay{position:fixed;inset:0;z-index:63;background:var(--bg);display:none;flex-direction:column;}
+  .all-overlay.open{display:flex;}
+  .all-top{flex:none;display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.88);backdrop-filter:blur(10px);}
+  .all-title{flex:1;font-size:17px;font-weight:800;}
+  .all-count{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);}
+  .all-body{flex:1;overflow-y:auto;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom));}
+  .all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .all-card{display:block;color:inherit;text-decoration:none;}
+  .all-card .card-art{width:100%;height:auto;aspect-ratio:130/178;}
+  .all-card .card-body{padding:8px 1px 0;}
+  .all-empty{grid-column:1/-1;text-align:center;color:var(--text-dim);font-size:13px;padding:60px 10px;}
+
   /* ---------- comic panels (kept for compatibility, currently unused) ---------- */
   .panels{display:flex;flex-direction:column;gap:16px;padding:0 16px;max-width:420px;margin:0 auto;}
   .panel{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease;}
@@ -257,6 +270,9 @@
     .sec-head{padding:0 22px;}
     .row-scroll{padding:0 22px 6px;}
     .tag-cloud{padding:0 22px;}
+    .all-top{padding:16px 22px;}
+    .all-body{padding:20px 22px;}
+    .all-grid{grid-template-columns:repeat(4,1fr);gap:16px;}
   }
 
   /* ---------- responsive: desktop ---------- */
@@ -294,6 +310,10 @@
 
     .search-top,.search-results{max-width:640px;margin-left:auto;margin-right:auto;width:100%;}
 
+    .all-top{padding:20px 30px;}
+    .all-body{padding:28px 30px;}
+    .all-grid{grid-template-columns:repeat(5,1fr);gap:18px;max-width:1400px;margin:0 auto;}
+
     .footer-cta{margin:64px 30px 0;padding:44px 36px 40px;}
     .footer-cta h2{font-size:clamp(24px,3vw,30px);}
     .footer-cta p{max-width:480px;margin:0 auto 24px;}
@@ -308,12 +328,13 @@
     .card,.card-art{width:172px;}
     .card-art{height:235px;}
     .card-glyph{font-size:70px;}
+    .all-grid{grid-template-columns:repeat(6,1fr);}
   }
 
   /* ---------- desktop hover affordances (mouse/trackpad only, not touch) ---------- */
   @media (hover:hover) and (pointer:fine){
     .card-art{transition:transform .25s ease,box-shadow .25s ease;}
-    .card:hover .card-art{box-shadow:0 14px 30px rgba(0,0,0,.5);}
+    .card:hover .card-art,.all-card:hover .card-art{box-shadow:0 14px 30px rgba(0,0,0,.5);}
     .tag-chip{transition:border-color .2s ease,transform .2s ease;}
     .tag-chip:hover{border-color:var(--red-2);}
     .btn-primary{transition:transform .2s ease,box-shadow .2s ease;}
@@ -334,7 +355,7 @@
     .row-scroll::-webkit-scrollbar-thumb:hover,.story-row::-webkit-scrollbar-thumb:hover{background:var(--red);}
   }
   @media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
-    .card:hover .card-art{transform:translateY(-5px);}
+    .card:hover .card-art,.all-card:hover .card-art{transform:translateY(-5px);}
     .tag-chip:hover{transform:translateY(-2px);}
     .btn-primary:hover{transform:translateY(-2px);}
     .soc:hover{transform:translateY(-2px);}
@@ -458,6 +479,17 @@
   </div>
 </div>
 
+<div class="all-overlay" id="allOverlay">
+  <div class="all-top">
+    <button class="sheet-close" onclick="closeAllAnime()" aria-label="Yopish">×</button>
+    <div class="all-title" id="allTitle">Barchasi</div>
+    <span class="all-count" id="allCount"></span>
+  </div>
+  <div class="all-body">
+    <div class="all-grid" id="allGrid"></div>
+  </div>
+</div>
+
 <div class="hero-wrap">
   <a class="hero" id="heroCard" href="https://t.me/ANIFILM_BOT" style="--art-a:#2c0c0f;--art-b:#0a0203;">
     <div class="hero-aura"><span class="a1"></span><span class="a2"></span></div>
@@ -495,7 +527,7 @@
 <section class="block" id="animeSection">
   <div class="sec-head">
     <div class="sec-title">Yangi qo'shilganlar</div>
-    <a class="sec-link mono" href="https://t.me/ANIFILM_BOT">BARCHASI →</a>
+    <a class="sec-link mono" href="javascript:void(0)" onclick="openAllAnime('new')">BARCHASI →</a>
   </div>
   <div class="row-scroll" id="rowNew"></div>
 </section>
@@ -503,7 +535,7 @@
 <section class="block">
   <div class="sec-head">
     <div class="sec-title">Mashhur animelar</div>
-    <a class="sec-link mono" href="https://t.me/ANIFILM_BOT">BARCHASI →</a>
+    <a class="sec-link mono" href="javascript:void(0)" onclick="openAllAnime('popular')">BARCHASI →</a>
   </div>
   <div class="row-scroll" id="rowPopular"></div>
 </section>
@@ -511,7 +543,7 @@
 <section class="block">
   <div class="sec-head">
     <div class="sec-title">O'zbek tilida dublyaj</div>
-    <a class="sec-link mono" href="https://t.me/ANIFILM_BOT">BARCHASI →</a>
+    <a class="sec-link mono" href="javascript:void(0)" onclick="openAllAnime('dub')">BARCHASI →</a>
   </div>
   <div class="row-scroll" id="rowDub"></div>
 </section>
@@ -867,6 +899,7 @@ function toCard(a,idx,extra){
     year:a.year,
     country:a.country,
     genre:a.genre,
+    category:a.category,
     language:a.language,
     description:a.description,
     episode_count:a.episode_count,
@@ -971,6 +1004,66 @@ function renderRow(elId,list){
       </div>`;
     el.appendChild(card);
   });
+}
+
+function renderAllGrid(list){
+  const grid=document.getElementById('allGrid');
+  const countEl=document.getElementById('allCount');
+  if(countEl)countEl.textContent=list.length?`${list.length} ta`:'';
+  if(!list.length){
+    grid.innerHTML='<div class="all-empty">Hozircha anime topilmadi</div>';
+    return;
+  }
+  grid.innerHTML='';
+  list.forEach(a=>{
+    const key=registerDetail(a);
+    const card=document.createElement('a');
+    card.className='all-card';
+    card.href=animeLink(a);
+    card.onclick=(e)=>{e.preventDefault();openDetail(key);};
+    const ratingHtml=a.rating?`<span class="card-rating">${a.rating}</span>`:'';
+    const epHtml=a.ep?`<span class="card-ep">${a.ep}</span>`:'';
+    const artStyle=a.photo_id
+      ?`background-image:url('/api/photo/${a.photo_id}');background-size:cover;background-position:center;`
+      :`--art-a:${a.a};--art-b:${a.b};`;
+    const glyphHtml=a.photo_id?'':`<span class="card-glyph">${a.glyph}</span>`;
+    const favHtml=a.id!=null?`<span class="fav-btn${FAVORITE_IDS.has(Number(a.id))?' active':''}" data-anime-id="${a.id}" role="button" tabindex="0" onclick="onFavBtnClick(event,${a.id})" onkeydown="if(event.key==='Enter'||event.key===' '){onFavBtnClick(event,${a.id})}" aria-label="Sevimlilarga qo'shish">
+        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
+      </span>`:'';
+    card.innerHTML=`
+      <div class="card-art" style="${artStyle}">
+        ${favHtml}${ratingHtml}
+        ${glyphHtml}
+        ${epHtml}
+      </div>
+      <div class="card-body">
+        <div class="card-title">${a.title}</div>
+        <div class="card-meta mono">${a.meta}</div>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+function openAllAnime(mode){
+  let list=ALL_ANIMES;
+  let title='Barchasi';
+  if(mode==='popular'){
+    list=[...ALL_ANIMES].sort((x,y)=>(y.views||0)-(x.views||0));
+    title='Mashhur animelar';
+  }else if(mode==='dub'){
+    list=ALL_ANIMES.filter(a=>/dublyaj|dub|uzb/i.test(`${a.category||''} ${a.genre||''}`));
+    title="O'zbek tilida dublyaj";
+  }else{
+    title="Yangi qo'shilganlar";
+  }
+  document.getElementById('allTitle').textContent=title;
+  renderAllGrid(list);
+  document.getElementById('allOverlay').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeAllAnime(){
+  document.getElementById('allOverlay').classList.remove('open');
+  document.body.style.overflow='';
 }
 
 function renderStories(list){
