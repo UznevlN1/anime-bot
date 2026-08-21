@@ -42,13 +42,6 @@
   .icon-btn{width:38px;height:38px;border-radius:12px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text);}
   .icon-btn svg{width:17px;height:17px;}
 
-  /* ---------- story circles ---------- */
-  .story-row{display:flex;gap:14px;overflow-x:auto;padding:14px 18px 6px;scrollbar-width:none;}
-  .story-row::-webkit-scrollbar{display:none;}
-  .story{flex:none;display:flex;flex-direction:column;align-items:center;gap:6px;width:64px;color:inherit;text-decoration:none;}
-  .story-ring{width:60px;height:60px;border-radius:50%;padding:2.5px;background:linear-gradient(135deg,var(--red-2),var(--red),var(--gold));}
-  .story-ring-inner{width:100%;height:100%;border-radius:50%;background-color:var(--surface);background-size:cover;background-position:center;border:2px solid var(--bg);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:var(--text-dim);}
-  .story-label{font-size:10.5px;color:var(--text-dim);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:64px;}
 
   /* ---------- search overlay ---------- */
   .search-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.97);backdrop-filter:blur(6px);display:none;flex-direction:column;padding:14px 16px;}
@@ -77,25 +70,34 @@
   .foot-legal{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:14px 0;}
   .foot-legal a{font-size:11.5px;color:var(--text-dim);border:1px solid var(--border);border-radius:9px;padding:6px 11px;text-decoration:none;}
 
-  /* ---------- anime detail sheet ---------- */
+  /* ---------- anime detail sheet (glassmorphism) ---------- */
   .detail-overlay{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.84);backdrop-filter:blur(4px);display:none;align-items:flex-end;justify-content:center;}
   .detail-overlay.open{display:flex;}
-  .detail-sheet{width:100%;max-width:520px;max-height:88vh;overflow-y:auto;background:var(--surface);border-radius:22px 22px 0 0;border:1px solid var(--border);border-bottom:none;animation:sheetUp .25s ease;}
+  .detail-sheet{width:100%;max-width:520px;max-height:92vh;overflow-y:auto;overflow-x:hidden;background:var(--surface);border-radius:22px 22px 0 0;border:1px solid var(--border);border-bottom:none;animation:sheetUp .25s ease;}
   @keyframes sheetUp{from{transform:translateY(24px);opacity:.4;}to{transform:translateY(0);opacity:1;}}
-  .detail-poster{position:relative;width:100%;height:230px;background-size:cover;background-position:center;background-image:linear-gradient(160deg,#3a0d10,#0a0203);border-radius:22px 22px 0 0;display:flex;align-items:flex-end;padding:14px 18px;font-size:44px;font-weight:800;color:rgba(255,255,255,.5);}
-  .detail-close{position:absolute;top:12px;right:12px;width:40px;height:40px;border-radius:10px;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.15);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;}
-  .detail-body{padding:16px 18px 22px;}
-  .detail-title{font-size:19px;font-weight:800;line-height:1.2;}
+
+  .detail-poster{position:relative;width:100%;min-height:320px;overflow:hidden;background-size:cover;background-position:center;background-image:linear-gradient(160deg,#3a0d10,#0a0203);border-radius:22px 22px 0 0;}
+  #detailGlyph{position:absolute;right:-8px;bottom:-14px;font-family:'Manrope',sans-serif;font-weight:800;font-size:150px;line-height:.8;color:rgba(255,255,255,.06);pointer-events:none;user-select:none;}
+
+  .detail-close,.detail-fav-btn{position:absolute;top:14px;z-index:3;width:40px;height:40px;border-radius:50%;background:rgba(22,22,28,.42);backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex:none;}
+  .detail-close{left:14px;color:#fff;}
+  .detail-close svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.3;}
+  .detail-fav-btn{right:14px;}
+  .detail-fav-btn svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2;}
+  .detail-fav-btn.active svg{fill:var(--gold);stroke:var(--gold);}
+
+  .detail-body{position:relative;z-index:2;margin-top:-64px;padding:22px 18px 22px;background:rgba(16,16,21,.55);backdrop-filter:blur(22px) saturate(170%);-webkit-backdrop-filter:blur(22px) saturate(170%);border-top:1px solid rgba(255,255,255,.14);border-radius:26px 26px 0 0;box-shadow:0 -16px 34px rgba(0,0,0,.4);}
+  .detail-title{font-size:20px;font-weight:800;line-height:1.2;}
   .detail-meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:9px;font-size:12.5px;color:var(--text-dim);font-weight:600;}
-  .detail-meta i{font-style:normal;color:var(--border);margin:0 1px;}
+  .detail-meta i{font-style:normal;color:rgba(255,255,255,.2);margin:0 1px;}
   .detail-meta-rating{color:var(--text);font-weight:800;}
-  .detail-meta-rating::before{content:'★';color:var(--red-2);margin-right:4px;}
-  .detail-genres{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px;}
-  .detail-genre-pill{font-size:11.5px;font-weight:700;color:var(--text-dim);border:1px solid var(--border);border-radius:8px;padding:5px 10px;}
-  .detail-rows{display:flex;flex-direction:column;gap:9px;margin:16px 0;}
-  .detail-row{display:flex;align-items:baseline;gap:8px;font-size:13px;}
-  .detail-row span{color:var(--text-dim);font-weight:600;min-width:92px;flex:none;}
-  .detail-row b{font-weight:700;color:var(--text);}
+  .detail-meta-rating::before{content:'★';color:var(--gold);margin-right:4px;}
+  .detail-genres{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px;}
+  .detail-genre-pill{font-size:11.5px;font-weight:700;color:var(--text);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:9px;padding:5px 11px;}
+  .detail-rows{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 14px;margin:16px 0;padding:14px 15px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:16px;backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);}
+  .detail-row{display:flex;flex-direction:column;gap:3px;font-size:13px;}
+  .detail-row span{color:var(--text-dim);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;}
+  .detail-row b{font-weight:800;color:var(--text);font-size:14px;}
   .detail-desc{color:var(--text-dim);font-size:13px;line-height:1.6;margin-bottom:18px;}
   .detail-cta{width:100%;justify-content:center;}
 
@@ -103,12 +105,6 @@
   .fav-btn{position:absolute;top:7px;right:7px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:2;}
   .fav-btn svg{width:15px;height:15px;stroke:#fff;fill:none;stroke-width:2;}
   .fav-btn.active svg{fill:var(--gold);stroke:var(--gold);}
-
-  .detail-fav-btn{width:44px;height:44px;border-radius:14px;background:var(--surface-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex:none;}
-  .detail-fav-btn svg{width:19px;height:19px;stroke:var(--text);fill:none;stroke-width:2;}
-  .detail-fav-btn.active svg{fill:var(--gold);stroke:var(--gold);}
-  .detail-cta-row{display:flex;gap:10px;}
-  .detail-cta-row .detail-cta{flex:1;}
 
   /* ---------- account / favorites bottom sheets ---------- */
   .sheet-overlay{position:fixed;inset:0;z-index:75;background:rgba(0,0,0,.84);backdrop-filter:blur(4px);display:none;align-items:flex-end;justify-content:center;}
@@ -147,15 +143,16 @@
 
   /* ---------- hero ---------- */
   .hero-wrap{padding:14px 16px 0;}
-  .hero{position:relative;border-radius:22px;overflow:hidden;min-height:420px;display:flex;flex-direction:column;justify-content:flex-end;padding:22px;background:linear-gradient(160deg,#2c0c0f 0%,#160607 55%,#000 100%);}
+  .hero{position:relative;border-radius:22px;overflow:hidden;min-height:420px;display:flex;flex-direction:column;justify-content:flex-end;padding:22px;background:linear-gradient(160deg,#2c0c0f 0%,#160607 55%,#000 100%);border:1.5px solid rgba(224,33,43,.55);box-shadow:0 0 0 1px rgba(224,33,43,.15),0 0 34px rgba(224,33,43,.35),inset 0 0 60px rgba(224,33,43,.08);}
   .hero-aura{position:absolute;inset:0;pointer-events:none;}
   .hero-aura span{position:absolute;border-radius:50%;filter:blur(42px);opacity:.55;}
   .hero-aura .a1{width:220px;height:220px;background:var(--red);right:-40px;top:-30px;}
   .hero-aura .a2{width:170px;height:170px;background:#7a1218;right:70px;bottom:10px;}
   .hero-glyph{position:absolute;right:-10px;bottom:-18px;font-family:'Manrope',sans-serif;font-weight:800;font-size:220px;line-height:.8;color:rgba(255,255,255,.05);pointer-events:none;user-select:none;}
   .hero-halftone{position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.05) 1px,transparent 1.4px);background-size:12px 12px;mask-image:radial-gradient(ellipse 70% 55% at 75% 25%,#000 30%,transparent 85%);pointer-events:none;}
-  .hero-badge{position:relative;align-self:flex-start;background:rgba(224,33,43,.14);border:1px solid rgba(224,33,43,.5);color:var(--red-2);font-size:10.5px;font-weight:800;letter-spacing:.08em;padding:6px 12px;border-radius:8px;margin-bottom:14px;text-transform:uppercase;}
-  .hero-title{position:relative;font-size:clamp(34px,11vw,54px);line-height:1.02;text-shadow:0 4px 18px rgba(0,0,0,.6);}
+  .hero-badge{position:relative;align-self:flex-start;background:transparent;border:1px solid rgba(224,33,43,.7);color:var(--red-2);font-size:10.5px;font-weight:800;letter-spacing:.08em;padding:6px 12px;border-radius:6px;margin-bottom:14px;text-transform:uppercase;}
+  .hero-title{position:relative;font-size:clamp(34px,11vw,54px);line-height:1.02;text-shadow:0 4px 18px rgba(0,0,0,.6);text-transform:uppercase;font-weight:900;}
+  .hero-title .accent{color:var(--red-2);}
   .hero-desc{position:relative;max-width:88%;color:var(--text-dim);font-size:13.5px;line-height:1.6;margin:12px 0 14px;}
   .hero-meta{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:0;margin-bottom:18px;font-size:12.5px;color:var(--text-dim);font-weight:600;}
   .hero-meta span{display:inline-flex;align-items:center;}
@@ -223,14 +220,24 @@
   .footer-cta p{color:var(--text-dim);font-size:13px;margin-bottom:20px;}
 
   footer{padding:36px 20px 24px;}
-  .foot-social{display:flex;justify-content:center;gap:12px;margin-bottom:24px;flex-wrap:wrap;}
-  .soc{width:42px;height:42px;border-radius:12px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text);}
-  .soc svg{width:18px;height:18px;}
-  .soc.tg{color:var(--red-2);}
-  .soc.ig{color:#e0729a;}
-  .soc.yt{color:#e05a5a;}
-  .soc.ad{color:var(--gold);}
-  .foot-links{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);margin-bottom:18px;}
+  .foot-social{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;}
+  .soc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--border);color:var(--text);}
+  .soc svg{width:22px;height:22px;}
+  .soc span{font-size:11px;font-weight:700;color:var(--text-dim);}
+  .soc.tg{color:#29b6f6;}
+  .soc.ig{color:#e1306c;}
+  .soc.yt{color:#ff3b30;}
+  .soc.tt{color:#ffffff;}
+  .foot-links{display:none;}
+  .legal-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+  .legal-card{display:flex;align-items:center;gap:10px;padding:13px 14px;border-radius:14px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;}
+  .legal-card svg{width:18px;height:18px;flex:none;}
+  .legal-card.reklama svg{color:#a855f7;}
+  .legal-card.rules svg{color:#3b82f6;}
+  .legal-card.dmca svg{color:#a855f7;}
+  .legal-card.contact svg{color:#3b82f6;}
+  .age-pill{display:block;width:fit-content;margin:0 auto 22px;padding:8px 18px;border-radius:20px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;color:var(--text-dim);}
+  .age-pill b{color:#ef4444;font-weight:800;}
   .brand-mini{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;}
   .brand-mini .mark{width:20px;height:20px;border-radius:6px;overflow:hidden;}
   .brand-mini .mark img{width:100%;height:100%;object-fit:contain;}
@@ -288,10 +295,6 @@
     .hero-glyph{font-size:320px;}
     .btn-primary,.btn-ghost{padding:15px 24px;font-size:14.5px;}
 
-    .story-ring{width:72px;height:72px;}
-    .story-ring-inner{font-size:18px;}
-    .story-label{max-width:76px;font-size:11px;}
-
     .tag-cloud{padding:0 30px;gap:11px;}
     .sec-head{padding:0 30px;margin-bottom:18px;}
     .sec-title{font-size:19px;}
@@ -302,7 +305,7 @@
     .card-glyph{font-size:64px;}
     .card-title{font-size:13.5px;}
 
-    .detail-poster{height:260px;font-size:50px;}
+    .detail-poster{min-height:360px;}
     .detail-overlay,.sheet-overlay{align-items:center;}
     .detail-sheet,.sheet-panel{border-radius:22px;border-bottom:1px solid var(--border);}
 
@@ -347,10 +350,10 @@
     .soc{transition:border-color .2s ease,transform .2s ease;}
     .soc:hover{border-color:var(--red-2);}
 
-    .row-scroll,.story-row{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
-    .row-scroll::-webkit-scrollbar,.story-row::-webkit-scrollbar{display:block;height:6px;}
-    .row-scroll::-webkit-scrollbar-thumb,.story-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
-    .row-scroll::-webkit-scrollbar-thumb:hover,.story-row::-webkit-scrollbar-thumb:hover{background:var(--red);}
+    .row-scroll{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+    .row-scroll::-webkit-scrollbar{display:block;height:6px;}
+    .row-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
+    .row-scroll::-webkit-scrollbar-thumb:hover{background:var(--red);}
   }
   @media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
     .card:hover .card-art,.all-card:hover .card-art{transform:translateY(-5px);}
@@ -391,12 +394,15 @@
   </div>
 </div>
 
-<div class="story-row" id="storyRow"></div>
-
 <div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
   <div class="detail-sheet">
     <div class="detail-poster" id="detailPoster">
-      <button class="detail-close" onclick="closeDetail()" aria-label="Yopish">×</button>
+      <button class="detail-close" onclick="closeDetail()" aria-label="Orqaga">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="detail-fav-btn" id="detailFavBtn" onclick="onDetailFavClick()" aria-label="Sevimlilarga qo'shish">
+        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
+      </button>
       <span id="detailGlyph"></span>
     </div>
     <div class="detail-body">
@@ -405,15 +411,10 @@
       <div class="detail-genres" id="detailGenres"></div>
       <div class="detail-rows" id="detailRows"></div>
       <p class="detail-desc" id="detailDesc"></p>
-      <div class="detail-cta-row">
-        <a class="btn-primary detail-cta" id="detailCta" href="https://t.me/ANIFILM_BOT">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-          Botda tomosha qilish
-        </a>
-        <button class="detail-fav-btn" id="detailFavBtn" onclick="onDetailFavClick()" aria-label="Sevimlilarga qo'shish">
-          <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
-        </button>
-      </div>
+      <a class="btn-primary detail-cta" id="detailCta" href="https://t.me/ANIFILM_BOT">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Botda tomosha qilish
+      </a>
     </div>
   </div>
 </div>
@@ -494,7 +495,7 @@
     <div class="hero-halftone"></div>
     <span class="hero-glyph">S</span>
     <span class="hero-badge">Yangi mavsum</span>
-    <h1 class="hero-title disp">Sulh<br>Ovchisi</h1>
+    <h1 class="hero-title disp">Sulh<br><span class="accent">Ovchisi</span></h1>
     <p class="hero-desc">Eng kuchsiz ovchi sirli kuchga ega bo'lib, dunyodagi eng kuchli ovchiga aylanadi. Yangi mavsum ANIFILM'da endi mavjud.</p>
     <div class="hero-meta">
       <span>2026</span>
@@ -557,25 +558,18 @@
 
 <footer>
   <div class="foot-social">
-    <a class="soc tg" href="https://t.me/anifilm_uz" aria-label="Telegram kanal" title="Telegram kanal"><svg viewBox="0 0 24 24" fill="none"><path d="M21 4L3 11.5L10 13.5M21 4L15 20L10 13.5M21 4L10 13.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></a>
-    <a class="soc ig" href="https://www.instagram.com/anifilm_bot" aria-label="Instagram" title="Instagram"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg></a>
-    <a class="soc yt" href="https://www.youtube.com/@ANIFILM_UZ" aria-label="YouTube" title="YouTube"><svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5.5" width="19" height="13" rx="4" stroke="currentColor" stroke-width="2"/><path d="M10.5 9.5L15 12L10.5 14.5V9.5Z" fill="currentColor"/></svg></a>
-    <a class="soc ad" href="https://t.me/uznevl_bot" aria-label="Reklama uchun bog'lanish" title="Reklama uchun bog'lanish"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l7 7M11 11l-7 7M20 4l-7 7M13 11l7 7"/></svg></a>
+    <a class="soc tg" href="https://t.me/anifilm_uz" aria-label="Telegram kanal" title="Telegram kanal"><svg viewBox="0 0 24 24" fill="none"><path d="M21 4L3 11.5L10 13.5M21 4L15 20L10 13.5M21 4L10 13.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Telegram</span></a>
+    <a class="soc ig" href="https://www.instagram.com/anifilm_bot" aria-label="Instagram" title="Instagram"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg><span>Instagram</span></a>
+    <a class="soc yt" href="https://www.youtube.com/@ANIFILM_UZ" aria-label="YouTube" title="YouTube"><svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5.5" width="19" height="13" rx="4" stroke="currentColor" stroke-width="2"/><path d="M10.5 9.5L15 12L10.5 14.5V9.5Z" fill="currentColor"/></svg><span>YouTube</span></a>
+    <a class="soc tt" href="https://www.tiktok.com/@anifilm_uz" aria-label="TikTok" title="TikTok"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 5.82c-.83-.9-1.29-2.07-1.29-3.28h-3.03v13.66c0 1.5-1.22 2.72-2.72 2.72a2.72 2.72 0 0 1 0-5.44c.28 0 .55.04.8.12V10.5a5.75 5.75 0 0 0-.8-.06 5.75 5.75 0 1 0 5.75 5.75V8.7a8.44 8.44 0 0 0 4.94 1.58V7.25a5.28 5.28 0 0 1-3.65-1.43Z"/></svg><span>TikTok</span></a>
   </div>
-  <div class="foot-links">
-    <a href="https://t.me/ANIFILM_BOT">Bot</a>
-    <a href="https://t.me/anifilm_uz">Kanal</a>
-    <a href="https://www.instagram.com/anifilm_bot">Instagram</a>
-    <a href="https://www.youtube.com/@ANIFILM_UZ">YouTube</a>
-    <a href="https://t.me/uznevl_bot">Reklama</a>
+  <div class="legal-grid">
+    <a class="legal-card reklama" href="https://t.me/uznevl_bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l3.5 4V6L6 10H4a1 1 0 0 0-1 1Z"/><path d="M14 8a4 4 0 0 1 0 8M17.5 5.5a8 8 0 0 1 0 13"/></svg>Reklama</a>
+    <a class="legal-card rules" href="https://t.me/ANIFILM_BOT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M15 3v4a1 1 0 0 0 1 1h4M9 12h6M9 16h6"/></svg>Sayt qoidalari</a>
+    <a class="legal-card dmca" href="https://t.me/ANIFILM_BOT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg>DMCA</a>
+    <a class="legal-card contact" href="https://t.me/uznevl_bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5l8.5 6 8.5-6"/></svg>Qayta aloqa</a>
   </div>
-  <div class="foot-legal">
-    <a href="https://t.me/uznevl_bot">Reklama</a>
-    <a href="https://t.me/ANIFILM_BOT">Sayt qoidalari</a>
-    <a href="https://t.me/ANIFILM_BOT">DMCA</a>
-    <a href="https://t.me/uznevl_bot">Qayta aloqa</a>
-    <a href="https://t.me/ANIFILM_BOT">Yosh toifasi 16+</a>
-  </div>
+  <a class="age-pill" href="https://t.me/ANIFILM_BOT">Yosh toifasi: <b>16+</b></a>
   <div class="brand-mini"><div class="mark"><img src="logo.png" alt="AniFilm logo"></div><span>Ani<span class="accent">Film</span></span></div>
   <p class="copy">© 2026 — anifilm.uz. Barcha huquqlar himoyalangan.</p>
 </footer>
@@ -1064,23 +1058,6 @@ function closeAllAnime(){
   document.body.style.overflow='';
 }
 
-function renderStories(list){
-  const row=document.getElementById('storyRow');
-  row.innerHTML='';
-  list.forEach(a=>{
-    const key=registerDetail(a);
-    const s=document.createElement('a');
-    s.className='story';
-    s.href=animeLink(a);
-    s.onclick=(e)=>{e.preventDefault();openDetail(key);};
-    const artStyle=a.photo_id?`background-image:url('/api/photo/${a.photo_id}');`:`background-image:linear-gradient(160deg,${a.a||'#8a1f2b'},${a.b||'#26080a'});`;
-    s.innerHTML=`
-      <div class="story-ring"><div class="story-ring-inner" style="${artStyle}">${a.photo_id?'':(a.glyph||(a.title||'?').charAt(0).toUpperCase())}</div></div>
-      <div class="story-label">${a.title}</div>`;
-    row.appendChild(s);
-  });
-}
-
 function renderTagCloud(tags){
   const el=document.getElementById('tagCloud');
   el.innerHTML='';
@@ -1153,7 +1130,18 @@ function showHeroSlide(idx){
     if(aura)aura.style.display='';
     if(halftone)halftone.style.display='';
   }
-  document.querySelector('.hero-title').textContent=a.title||'';
+  {
+    const titleEl=document.querySelector('.hero-title');
+    const raw=(a.title||'');
+    const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const words=raw.trim().split(/\s+/);
+    if(words.length>1){
+      const last=words.pop();
+      titleEl.innerHTML=esc(words.join(' '))+'<br><span class="accent">'+esc(last)+'</span>';
+    }else{
+      titleEl.textContent=raw;
+    }
+  }
   document.querySelector('.hero-desc').textContent=(a.description||a.genre||'').slice(0,140);
   const isFilm=a.media_type==='film';
   const metaEl=document.querySelector('.hero-meta');
@@ -1214,7 +1202,6 @@ async function loadRealData(){
     const newestRaw=animes.slice(0,8);
     const newest=newestRaw.map((a,i)=>toCard(a,i,{tag:'new'}));
     renderRow('rowNew',newest);
-    renderStories(newest.slice(0,10));
     ALL_ANIMES=animes.map((a,i)=>toCard(a,i,{}));
 
     const popular=[...animes].sort((x,y)=>(y.views||0)-(x.views||0)).slice(0,8).map((a,i)=>toCard(a,i,{rank:i+1}));
@@ -1229,7 +1216,6 @@ async function loadRealData(){
     renderTagCloud(FALLBACK_CATEGORIES);
     renderHero(FALLBACK_NEW);
     renderRow('rowNew',FALLBACK_NEW);
-    renderStories(FALLBACK_NEW);
     renderRow('rowPopular',FALLBACK_POPULAR);
     renderRow('rowDub',FALLBACK_DUB);
     ALL_ANIMES=[...FALLBACK_NEW,...FALLBACK_POPULAR,...FALLBACK_DUB];
