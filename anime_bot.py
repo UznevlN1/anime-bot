@@ -9647,6 +9647,38 @@ async def webapp_public_categories(request):
         return web.json_response({"error": "unavailable"}, status=503)
     return web.json_response(cats, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300"})
 
+# landing.html bosh sahifasidagi hero-karusel uchun: bannerlar (admin tomonidan
+# maxsus tayyorlangan keng reklama suratlari) + ular bog'langan animening ochiq
+# ma'lumotlari (yil, janr, tavsif, qism soni). Obuna talab qilmaydi — /api/banners
+# dan farqli, faqat marketing sahifasi (anifilm.uz) uchun.
+async def webapp_public_banners(request):
+    try:
+        banners = await asyncio.to_thread(db.get_banners, True)
+        anime_ids = [b.get("anime_id") for b in banners if b.get("anime_id")]
+        animes_by_id = {}
+        if anime_ids:
+            rows = await asyncio.to_thread(db.get_animes_by_ids, anime_ids)
+            animes_by_id = {a["id"]: a for a in rows}
+    except Exception:
+        return web.json_response({"error": "unavailable"}, status=503)
+    safe = []
+    for b in banners:
+        a = animes_by_id.get(b.get("anime_id")) or {}
+        safe.append({
+            "id": b.get("id"),
+            "anime_id": b.get("anime_id"),
+            "title": b.get("title") or a.get("title"),
+            "subtitle": b.get("subtitle"),
+            "photo_id": b.get("photo_id") or a.get("photo_id"),
+            "year": a.get("year"),
+            "genre": a.get("genre"),
+            "description": a.get("description"),
+            "media_type": a.get("media_type"),
+            "total_episodes": a.get("total_episodes"),
+            "episode_count": a.get("episode_count"),
+        })
+    return web.json_response(safe, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=120"})
+
 async def webapp_get_comments(request):
     viewer_id = _webapp_user_id(request)
     status = await webapp_access_status(viewer_id)
@@ -10170,6 +10202,7 @@ async def start_web_server():
     app.router.add_post("/api/notifications/dismiss", webapp_notifications_dismiss)
     app.router.add_get("/api/public/animes", webapp_public_animes)
     app.router.add_get("/api/public/categories", webapp_public_categories)
+    app.router.add_get("/api/public/banners", webapp_public_banners)
     app.router.add_post("/api/site/register", webapp_site_register)
     app.router.add_post("/api/site/login", webapp_site_login)
     app.router.add_post("/api/site/forgot-password", webapp_site_forgot_password)
