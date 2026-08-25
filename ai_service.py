@@ -428,6 +428,222 @@ async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=
                                thinking_level="low", is_admin=False)
 
 
+# ===================== JONLI OQIM (STREAMING) =====================
+# Telegram Bot API 9.5 (2026-mart)dan barcha botlar uchun ochilgan
+# sendMessageDraft imkoniyati bilan birga ishlash uchun — AI javobi to'liq
+# tayyor bo'lguncha kutish o'rniga, matn generatsiya qilinayotgan paytning
+# o'zida bo'lak-bo'lak (chunk) qaytariladi.
+#
+# ask_ai() bilan BIR XIL tizim promptini quradi (asosiy funksiyaga
+# tegmaslik uchun ataylab qisqacha takrorlangan — agar kelajakda ask_ai()
+# dagi promptni o'zgartirsangiz, shu yerdagisini ham moslashtiring).
+#
+# Ishonchlilik zanjiri (eng tezidan eng ishonchlisiga):
+#   1) Groq orqali HAQIQIY oqim (agar GROQ_API_KEY bor bo'lsa — OpenAI-
+#      uslubidagi SSE, keng tarqalgan va barqaror format)
+#   2) Gemini orqali HAQIQIY oqim (asosiy model, streamGenerateContent)
+#   3) Hech biri ishlamasa — allaqachon batafsil sinovdan o'tgan, to'liq
+#      zaxira zanjiriga ega oddiy ask_ai() chaqiriladi va uning natijasi
+#      "sun'iy" ravishda bo'lak-bo'lak qaytariladi (haqiqiy oqim emas,
+#      lekin foydalanuvchi baribir "yozilayotganini" ko'radi va — eng
+#      muhimi — javob HECH QACHON butunlay yo'qolib qolmaydi).
+def _build_chat_prompt(user_text, catalog_text=None, bot_info_text=None):
+    """ask_ai() dagi bilan bir xil (qarang: yuqorida) — faqat ikkalasi ham
+    (oqimli va oqimsiz) foydalanishi uchun alohida chiqarilgan."""
+    sys_prompt = (
+        "Sen umumiy chatbot emassan — sen aynan 'AniFilm Bot' telegram "
+        "botining oʻziga tegishli, shu botning ichida ishlaydigan shaxsiy "
+        "AI-yordamchisan. Har bir javobingda oʻzingni shu botning bir "
+        "qismi sifatida tut: kerak boʻlganda botning oʻzi (uning "
+        "katalogi, boʻlimlari, imkoniyatlari — 🔍 Qidiruv, 📚 Katalog, "
+        "tavsiyalar va h.k.) bilan bogʻlab gapir.\n\n"
+        "Anime, kino, serial yoki botning oʻzi haqidagi savollarga "
+        "oʻzbek tilida toʻliq, mazmunli va foydali javob ber — kerak "
+        "boʻlsa misollar, tafsilotlar va tushuntirishlar bilan boy javob "
+        "yoz, faqat bir-ikki gap bilan cheklanma. Sayoz yoki umumiy "
+        "javoblardan qoch — aniq faktlar, nomlar va tavsiyalar bilan "
+        "javob ber.\n\n"
+        "Agar savol anime/kino/serial va botning oʻzi bilan UMUMAN "
+        "bogʻliq boʻlmasa (masalan matematika, siyosat, boshqa aloqasiz "
+        "mavzu), unga qisqagina, xushmuomalalik bilan javob ber-da, "
+        "keyin suhbatni botning asosiy mavzusiga — anime/kino tavsiyalari "
+        "va katalogiga — qaytar. Bunday aloqasiz savollarga anime "
+        "savollari kabi chuqur va batafsil yozib oʻtirma."
+    )
+    if bot_info_text:
+        sys_prompt += (
+            "\n\nBot haqida HAQIQIY maʼlumot (bot qanday ishlashi, "
+            "boʻlimlari, Premium narxlari va h.k. haqida savol berilsa, "
+            "FAQAT shu maʼlumotga tayan — boshqa narsa oʻylab topma, "
+            "eskirgan yoki taxminiy narx aytma):\n" + bot_info_text
+        )
+    if catalog_text:
+        sys_prompt += (
+            "\n\nBotning HAQIQIY kataloridagi animelar roʻyxati (FAQAT "
+            "shular botda mavjud — bu roʻyxatdan tashqari hech qanday "
+            "animeni \"bizda bor\" deb aytma, oʻylab ham topma):\n"
+            + catalog_text +
+            "\n\nAgar foydalanuvchi \"qanaqa anime bor\", \"nima koʻrsam "
+            "boʻladi\", \"roʻyxat\" kabi savol bersa — shu roʻyxatdan mavzuga "
+            "yoki janrga mos bir nechta nomni aniq aytib ber (ixtiyoriy "
+            "ravishda yil/janrini ham qoʻsh), va 🔍 Qidiruv yoki 📚 Katalog "
+            "tugmasidan toʻliq roʻyxatni koʻrishni maslahat ber. Agar roʻyxat "
+            "boʻsh boʻlsa yoki mos nom topa olmasang, buni rostgoʻylik bilan "
+            "ayt — hech qachon mavjud boʻlmagan sarlavha oʻylab topma."
+        )
+    return sys_prompt
+
+
+async def _stream_groq(contents, system_instruction, temperature=0.85, max_output_tokens=1800, timeout=30):
+    """Groq'dan OpenAI-uslubidagi SSE oqim orqali matn bo'laklarini
+    yig'ib qaytaradi (async generator). Biror xatolik/bo'sh javob bo'lsa,
+    hech narsa yield qilmasdan sodda qaytadi — chaqiruvchi (ask_ai_stream)
+    buni "bu yo'l ishlamadi" deb tushunib, keyingi yo'lga o'tadi."""
+    if not GROQ_ENABLED:
+        return
+    has_image = _contents_has_image(contents)
+    model_name = GROQ_VISION_MODEL if has_image else GROQ_TEXT_MODEL
+    messages = _gemini_contents_to_groq_messages(contents, system_instruction)
+    payload = {
+        "model": model_name, "messages": messages, "temperature": temperature,
+        "max_completion_tokens": max_output_tokens, "stream": True,
+    }
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GROQ_API_KEY}"}
+    session = await _get_session()
+    try:
+        async with session.post(
+            GROQ_API_URL, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            if resp.status != 200:
+                logger.warning("Groq oqim: xato javob %s", resp.status)
+                return
+            async for raw_line in resp.content:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                payload_str = line[len("data:"):].strip()
+                if payload_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload_str)
+                    delta = chunk["choices"][0].get("delta", {}).get("content")
+                except Exception:
+                    continue
+                if delta:
+                    yield delta
+    except Exception:
+        logger.exception("Groq oqim so'rovida xatolik")
+        return
+
+
+async def _stream_gemini(contents, system_instruction, temperature=0.85,
+                          max_output_tokens=1800, thinking_level="low", timeout=30):
+    """Gemini'dan (faqat ASOSIY model, GEMINI_MODEL — zaxira modellar bilan
+    qayta urinish oqim uchun qo'llanilmaydi, chunki foydalanuvchi allaqachon
+    bo'lak-bo'lak matn ko'ra boshlagan bo'lishi mumkin, model almashtirish
+    chalkashlik keltirib chiqaradi) streamGenerateContent (SSE) orqali matn
+    bo'laklarini yig'ib qaytaradi."""
+    if not GEMINI_API_KEY:
+        return
+    generation_config = {"temperature": temperature, "maxOutputTokens": max_output_tokens}
+    _apply_thinking_config(generation_config, GEMINI_MODEL, thinking_level)
+    payload = {"contents": contents, "generationConfig": generation_config}
+    if system_instruction:
+        payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:streamGenerateContent?alt=sse"
+    )
+    session = await _get_session()
+    try:
+        async with session.post(
+            url, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as resp:
+            if resp.status != 200:
+                logger.warning("Gemini oqim: xato javob %s", resp.status)
+                return
+            async for raw_line in resp.content:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                payload_str = line[len("data:"):].strip()
+                if not payload_str:
+                    continue
+                try:
+                    chunk = json.loads(payload_str)
+                    parts = chunk["candidates"][0].get("content", {}).get("parts", []) or []
+                    text = "".join(p.get("text", "") for p in parts)
+                except Exception:
+                    continue
+                if text:
+                    yield text
+    except Exception:
+        logger.exception("Gemini oqim so'rovida xatolik")
+        return
+
+
+async def ask_ai_stream(user_text, history=None, catalog_text=None, bot_info_text=None):
+    """ask_ai() bilan bir xil savolga javob beradi, lekin natijani async
+    generator sifatida bo'lak-bo'lak (chunk) qaytaradi — chaqiruvchi tomon
+    har bir bo'lakni Telegram'ga sendMessageDraft orqali jonli ko'rsatishi
+    mumkin. Oxirgi bo'lak yig'ilgandan keyin ham to'liq matnni bitta
+    satrda olish uchun, chaqiruvchi barcha bo'laklarni "".join() bilan
+    birlashtirsa bo'ladi.
+
+    Kafolat: bu funksiya HECH QACHON butunlay bo'sh qaytmaydi (agar AI
+    umuman javob bera olmasa ham) — oxirgi chora sifatida oddiy ask_ai()
+    chaqiriladi va natija sun'iy bo'laklarga bo'lib beriladi, xuddi
+    oqim kabi ko'rinish uchun."""
+    contents = []
+    for role, text in (history or []):
+        contents.append({"role": role, "parts": [{"text": text}]})
+    contents.append({"role": "user", "parts": [{"text": user_text}]})
+    sys_prompt = _build_chat_prompt(user_text, catalog_text, bot_info_text)
+
+    got_any = False
+    if GROQ_ENABLED:
+        try:
+            async for delta in _stream_groq(contents, sys_prompt):
+                got_any = True
+                yield delta
+        except Exception:
+            logger.exception("ask_ai_stream: Groq oqim kutilmagan xato")
+        if got_any:
+            return
+
+    if GEMINI_API_KEY:
+        try:
+            async for delta in _stream_gemini(contents, sys_prompt):
+                got_any = True
+                yield delta
+        except Exception:
+            logger.exception("ask_ai_stream: Gemini oqim kutilmagan xato")
+        if got_any:
+            return
+
+    # Ikkala HAQIQIY oqim yo'li ham hech narsa bermadi — allaqachon to'liq
+    # sinab ko'rilgan, ko'p qatlamli zaxira zanjiriga ega oddiy ask_ai()ga
+    # tushamiz, natijani esa "yozilayotgandek" bo'lib-bo'lib beramiz.
+    full_text = await ask_ai(user_text, history=history, catalog_text=catalog_text,
+                              bot_info_text=bot_info_text)
+    if not full_text:
+        return
+    words = full_text.split(" ")
+    buf = ""
+    for i, w in enumerate(words):
+        buf += (" " if buf else "") + w
+        # ~har 4 so'zda bir marta yuboramiz — juda ko'p mayda bo'lak
+        # keraksiz kechikish/CPU sarflaydi, juda kam bo'lak esa oqim
+        # tuyg'usini yo'qotadi.
+        if (i + 1) % 4 == 0 or i == len(words) - 1:
+            yield buf
+            buf = ""
+            await asyncio.sleep(0.05)
+
+
 async def moderate_comment(text):
     """True -> izoh xavfsiz. False -> spam/haqorat/nomaqbul kontent deb topildi.
     AI ishlamasa yoki xatolik bersa, xavfsiz deb hisoblanadi (mavjud

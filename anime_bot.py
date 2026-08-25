@@ -232,7 +232,7 @@ def _is_message_not_modified(exc) -> bool:
     return "message is not modified" in str(exc).lower()
 
 
-async def send_ai_text(target, text, **kwargs):
+async def send_ai_text(target, text, *, poster_ids=None, **kwargs):
     """AI javobini yuboradi — foydalanuvchi hech qachon formatlash xatosi
     tufayli javobsiz qolmasligi uchun uch bosqichli zanjir orqali:
     1) Rich Message (Telegram Bot API 10.1+, aiogram >= 3.29) — Markdown matn
@@ -242,29 +242,55 @@ async def send_ai_text(target, text, **kwargs):
        ai_text_to_html() konvertorimiz bilan HTML sifatida.
     3) Agar u ham ishlamasa — formatlanmagan oddiy matn bilan.
     `target` — Message (target.answer_rich/.answer chaqiriladi) yoki chat_id
-    (bot.send_rich_message/.send_message chaqiriladi)."""
+    (bot.send_rich_message/.send_message chaqiriladi).
+
+    `poster_ids` — ixtiyoriy: [file_id, ...] ro'yxati (eng ko'pi bilan 3ta
+    olinadi). Berilsa, AI javobi qanday yuborilishidan qat'i nazar (Rich/
+    HTML/oddiy), matn muvaffaqiyatli yetib borgandan KEYIN shu rasm(lar)
+    xabarga bevosita ergashib yuboriladi — masalan AI javobida tilga
+    olingan anime(lar)ning posteri. Bu ALOHIDA xabar (Bot API'da matn
+    ICHIGA rasm "singdirish" hali juda yangi va sinovdan o'tmagan
+    imkoniyat) — lekin foydalanuvchiga bir xil natijani beradi: javob va
+    rasm birga, ketma-ket chiqadi. Rasm yuborishda xatolik chiqsa, jim
+    o'tkazib yuboriladi — bu hech qachon AI matnining o'zi yetib borishiga
+    to'sqinlik qilmasligi kerak."""
     is_message_obj = hasattr(target, "answer")
+    chat_id = target.chat.id if is_message_obj else target
+    result = None
 
     if _RICH_MESSAGE_SUPPORTED:
         rich_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
         try:
             rich_message = _InputRichMessage(markdown=text)
             if is_message_obj:
-                return await target.answer_rich(rich_message=rich_message, **rich_kwargs)
-            return await bot.send_rich_message(chat_id=target, rich_message=rich_message, **rich_kwargs)
+                result = await target.answer_rich(rich_message=rich_message, **rich_kwargs)
+            else:
+                result = await bot.send_rich_message(chat_id=target, rich_message=rich_message, **rich_kwargs)
         except Exception as e:
             logger.debug("Rich Message bilan yuborib bo'lmadi (%s), HTML'ga o'tilyapti", e)
 
-    html_text = ai_text_to_html(text)
-    try:
-        if is_message_obj:
-            return await target.answer(html_text, parse_mode="HTML", **kwargs)
-        return await bot.send_message(target, html_text, parse_mode="HTML", **kwargs)
-    except Exception:
-        logger.warning("AI matnini HTML bilan yuborib bo'lmadi, oddiy matn bilan qayta urinilyapti")
-        if is_message_obj:
-            return await target.answer(text, **kwargs)
-        return await bot.send_message(target, text, **kwargs)
+    if result is None:
+        html_text = ai_text_to_html(text)
+        try:
+            if is_message_obj:
+                result = await target.answer(html_text, parse_mode="HTML", **kwargs)
+            else:
+                result = await bot.send_message(target, html_text, parse_mode="HTML", **kwargs)
+        except Exception:
+            logger.warning("AI matnini HTML bilan yuborib bo'lmadi, oddiy matn bilan qayta urinilyapti")
+            if is_message_obj:
+                result = await target.answer(text, **kwargs)
+            else:
+                result = await bot.send_message(target, text, **kwargs)
+
+    if poster_ids:
+        for photo_id in poster_ids[:3]:
+            try:
+                await bot.send_photo(chat_id, photo=photo_id)
+            except Exception as e:
+                logger.debug("AI javobiga ergashuvchi poster yuborilmadi: %s", e)
+
+    return result
 
 
 async def send_ai_html(target, html_text, **kwargs):
@@ -303,6 +329,53 @@ async def edit_ai_html(message_obj, html_text, **kwargs):
         except Exception as e:
             logger.debug("Rich Message (HTML) bilan tahrirlab bo'lmadi (%s), oddiy HTML'ga o'tilyapti", e)
     return await message_obj.edit_text(html_text, parse_mode="HTML", **kwargs)
+
+
+async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6):
+    """ai_service.ask_ai_stream()dan kelayotgan bo'laklarni yig'ib,
+    Telegram'ning sendMessageDraft (Bot API 9.5+) imkoniyati orqali
+    foydalanuvchiga JONLI (Gemini "yozayotganda" ekranda so'z-so'z chiqadi)
+    ko'rsatadi. To'liq matn tayyor bo'lgach, ASOSIY (formatlangan) xabar
+    baribir send_ai_text() orqali alohida yuboriladi — shu sabab bu yerda
+    draft'lar ATAYLAB oddiy (formatlanmagan) matn bilan yuboriladi, chunki
+    bo'lak-bo'lak kelayotgan Markdown/HTML o'rtada kesilib, noto'g'ri
+    formatlanib qolishi mumkin (masalan yopilmagan <b> tegi).
+
+    _MESSAGE_DRAFT_SUPPORTED=False bo'lsa (eski aiogram), yoki draft
+    yuborishda istalgan xatolik chiqsa, bu funksiya JIM ravishda faqat
+    matn yig'ish rejimiga o'tadi — foydalanuvchi "jonli" effektni
+    ko'rmaydi, lekin OXIRIDA javobning o'zi baribir to'liq yetib boradi
+    (chaqiruvchi buni asosiy javob sifatida yuboradi)."""
+    full_text = ""
+    if not _MESSAGE_DRAFT_SUPPORTED:
+        async for delta in stream_gen:
+            full_text += delta
+        return full_text
+
+    last_sent_at = 0.0
+    draft_ok = True
+    try:
+        await bot.send_chat_action(chat_id, "typing")
+    except Exception:
+        pass
+    async for delta in stream_gen:
+        full_text += delta
+        if not draft_ok:
+            continue
+        now = time.monotonic()
+        if now - last_sent_at < throttle_seconds:
+            continue
+        last_sent_at = now
+        try:
+            await bot.send_message_draft(chat_id=chat_id, text=full_text[-4000:])
+        except Exception as e:
+            # sendMessageDraft kutilganidek ishlamadi (masalan hasattr True
+            # bo'lsa-da, aiogram versiyasi to'liq mos kelmadi) — qolgan
+            # bo'laklarni jim yig'ishda davom etamiz, foydalanuvchi baribir
+            # oxirida to'liq javobni oladi.
+            logger.debug("sendMessageDraft ishlamadi (%s), jim rejimga o'tildi", e)
+            draft_ok = False
+    return full_text
 
 
 _extra_admin_cache = {"roles": {}, "loaded_at": 0}
@@ -371,6 +444,21 @@ dp = Dispatcher(storage=storage)
 # so'rovga handler ishini tugatgach avtomatik javob beradi, agar handler
 # allaqachon o'zi call.answer() chaqirgan bo'lsa — takror yubormaydi.
 dp.callback_query.middleware(CallbackAnswerMiddleware())
+
+# Guest Mode (Bot API 10.0, 2026-may) — bot @BotFather'da yoqilgan bo'lsa,
+# a'zo bo'lmagan guruhlarda ham @username orqali chaqirilganda javob bera
+# oladi (pastda, GUEST QUERY bo'limida). aiogram versiyasi buni hali
+# qo'llab-quvvatlamasa (eski versiya), dp'da "guest_message" observeri
+# umuman bo'lmaydi — bu holda pastdagi handler ro'yxatdan o'TKAZILMAYDI va
+# botning qolgan qismi bunga bog'liq bo'lmagani uchun hech narsa buzilmaydi.
+_GUEST_MODE_SUPPORTED = hasattr(dp, "guest_message")
+
+# Xabarni jonli oqim (streaming) qilib ko'rsatish uchun — Bot API 9.5
+# (2026-mart)dan barcha botlarga ochiq sendMessageDraft. aiogram eski
+# versiyada bu metodni hali generatsiya qilmagan bo'lishi mumkin — bunday
+# holda AI JAVOBI FUNKSIYASI (pastda, ai_chat_message) avtomatik ravishda
+# eski "kutib tur, keyin bir martada yubor" usuliga o'tadi.
+_MESSAGE_DRAFT_SUPPORTED = hasattr(bot, "send_message_draft")
 
 # MUHIM (FLOOD_WAIT tuzatish): in_memory=True klient session_string bermasa, HAR
 # safar server qayta ishga tushganda (Render'da bu tez-tez bo'ladi) botni Telegram'ga
@@ -645,6 +733,12 @@ class AdminPremiumGiftState(StatesGroup):
 
 class AdminPaymentAdjustState(StatesGroup):
     amount = State()
+
+class PollState(StatesGroup):
+    question = State()
+    options = State()
+    photo = State()
+    correct_option = State()
 
 async def _subscriptions_enabled():
     """Admin '🔔 Obuna bo'lish' funksiyasini sozlamalardan yoqib/o'chira oladi.
@@ -2199,6 +2293,7 @@ def admin_cat_comm_keyboard(role=None):
         rows.append(row1)
     if role is None or role == "super":
         rows.append([InlineKeyboardButton(text="📢 Sponsor baner", callback_data="admin_sponsor", style="primary")])
+        rows.append([InlineKeyboardButton(text="📊 So'rovnoma/viktorina", callback_data="admin_poll", style="primary")])
         rows.append([InlineKeyboardButton(text="🤖 AI push-tavsiya", callback_data="admin_ai_push", style="primary")])
         rows.append([InlineKeyboardButton(text="🔁 Qaytmagan userlarga xabar", callback_data="admin_comeback", style="primary")])
         rows.append([InlineKeyboardButton(text="💎 Premium taklif (faol userlarga)", callback_data="admin_premium_pitch", style="primary")])
@@ -2935,6 +3030,29 @@ def _looks_like_catalog_question(text):
     return any(k in t for k in keywords)
 
 
+def _match_catalog_posters(reply_text, animes, max_posters=2):
+    """AI javobida NOMI ORQALI tilga olingan katalog animelarini topib,
+    ularning poster file_id'sini qaytaradi (eng ko'pi bilan max_posters
+    dona) — AI chat javobiga rasm sifatida ergashtirish uchun (send_ai_text
+    poster_ids). 2 belgidan qisqa nomlar (tasodifiy mos kelish xavfi
+    yuqori) e'tiborsiz qoldiriladi."""
+    poster_ids, seen = [], set()
+    reply_lower = reply_text.lower()
+    for a in animes:
+        title = (a.get("title") or "").strip()
+        aid = a.get("id")
+        if len(title) < 3 or aid in seen:
+            continue
+        if title.lower() in reply_lower:
+            photo_id = a.get("photo_id")
+            if photo_id:
+                poster_ids.append(photo_id)
+                seen.add(aid)
+            if len(poster_ids) >= max_posters:
+                break
+    return poster_ids
+
+
 @dp.message(AIChatState.chatting)
 async def ai_chat_message(message: Message, state: FSMContext):
     if not await guard_access(message, is_callback=False):
@@ -2952,17 +3070,14 @@ async def ai_chat_message(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     history = data.get("ai_history", [])
-    try:
-        await bot.send_chat_action(message.chat.id, "typing")
-    except Exception:
-        pass
-    # Katalogni FAQAT savol shunga aloqador bo'lganda yuboramiz (arzon
-    # kalit-so'z filtri, AI chaqirmasdan) — aks holda AI har bir umuman
-    # aloqasiz savolga ham "mana bunday animelar bor" deb bekorchi
-    # tavsiyalar qo'shib yubormasligi uchun, hamda tokenlarni tejash uchun.
+    # Anime ro'yxati ikki maqsadda kerak: (1) katalog savoliga aniq javob
+    # berish uchun promptga qo'shiladi (faqat shunga aloqador savolda), (2)
+    # AI javobida nomi tilga olingan animening posterini birga yuborish
+    # uchun (har doim tekshiriladi). Funksiya keshlangan — qayta so'rash
+    # arzon.
+    animes = await asyncio.to_thread(db.get_animes_for_webapp)
     catalog_text = None
     if _looks_like_catalog_question(text):
-        animes = await asyncio.to_thread(db.get_animes_for_webapp)
         catalog_text = "\n".join(
             f"{a['title']} ({a.get('year') or 'yil nomaʼlum'}, "
             f"{a.get('genre') or 'janr nomaʼlum'}, "
@@ -2970,9 +3085,15 @@ async def ai_chat_message(message: Message, state: FSMContext):
             for a in animes[:300]
         )
     bot_info_text = await _build_bot_info_text()
-    reply = await ai_service.ask_ai(
+
+    # Jonli oqim (Bot API 9.5+, sendMessageDraft): javob Gemini/Groq'dan
+    # kelayotgan paytning o'zida ekranda bo'lak-bo'lak chiqadi. Eski
+    # aiogram'da yoki draft ishlamay qolsa, stream_ai_reply() buni sezmasdan
+    # oddiy "kutib tur" rejimiga o'tadi — natija (reply) baribir bir xil.
+    stream_gen = ai_service.ask_ai_stream(
         text, history=history, catalog_text=catalog_text, bot_info_text=bot_info_text
     )
+    reply = await stream_ai_reply(message.chat.id, stream_gen)
     if not reply:
         await message.answer(
             "😕 Hozircha javob bera olmadim, birozdan keyin qayta urinib ko'ring.",
@@ -2982,7 +3103,8 @@ async def ai_chat_message(message: Message, state: FSMContext):
     history = history + [("user", text), ("model", reply)]
     history = history[-10:]  # tokenlarni tejash uchun faqat oxirgi almashinuvlar saqlanadi
     await state.update_data(ai_history=history)
-    await send_ai_text(message, reply, reply_markup=ai_chat_keyboard())
+    poster_ids = _match_catalog_posters(reply, animes)
+    await send_ai_text(message, reply, reply_markup=ai_chat_keyboard(), poster_ids=poster_ids)
     await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
@@ -3297,6 +3419,68 @@ async def ai_mood_message(message: Message, state: FSMContext):
         anime = await asyncio.to_thread(db.get_anime, anime_id)
         if anime:
             await send_anime_card(message.chat.id, anime)
+
+# ===================== GUEST MODE (Bot API 10.0, 2026-may) =====================
+# Bot A'ZO BO'LMAGAN guruhlarda ham "@AniFilmBot Naruto" kabi @mention orqali
+# chaqirilganda ishlaydi — botni guruhga admin sifatida qo'shmasdan ham
+# odamlar anime qidirishi mumkin, bu esa botning guruhlar orqali tabiiy
+# tarqalishiga (viral o'sish) yordam beradi.
+#
+# ESLATMA: kod tayyor bo'lsa ham, bu funksiya ishlashi uchun @BotFather'da
+# botning sozlamalaridan Guest Mode'ni QO'LDA yoqish kerak (Bot Settings >
+# Guest Mode) — bu Telegram tomonidan talab qilinadigan, kod orqali amalga
+# oshirib bo'lmaydigan bosqich.
+#
+# Guest javobida FAQAT sodda qidiruv beriladi — yuklab olish, Premium kabi
+# to'liq funksiyalar ataylab yo'q, ular uchun botning shaxsiy chatiga
+# havola beriladi (guruh ichida murakkab menyu/tugmalar bilan ishlash
+# noqulay va Guest Mode'ning maqsadiga ham mos emas).
+async def guest_query_handler(message: Message):
+    query = (message.text or message.caption or "").strip()
+    if BOT_USERNAME:
+        query = re.sub(rf"@{re.escape(BOT_USERNAME)}\b", "", query, flags=re.IGNORECASE).strip()
+    bot_link = f"https://t.me/{BOT_USERNAME}" if BOT_USERNAME else "botga shaxsiy yozing"
+
+    if not query:
+        reply_text = (
+            "👋 Salom! Men AniFilm Bot'man. Anime nomini yozing (masalan "
+            "\"Naruto\") — men uni topib beraman. To'liq imkoniyatlar "
+            f"(yuklab olish, Premium va h.k.) uchun: {bot_link}"
+        )
+    else:
+        results = await asyncio.to_thread(db.search_anime, query)
+        results = (results or [])[:3]
+        if results:
+            lines = [f"🎬 {a['title']} ({a.get('year','')})" for a in results]
+            first_link = f"{bot_link}?start=anime_{results[0]['id']}" if BOT_USERNAME else bot_link
+            reply_text = "Topilganlar:\n" + "\n".join(lines) + f"\n\n▶️ Tomosha qilish: {first_link}"
+        else:
+            reply_text = f"😕 \"{query}\" bo'yicha hech narsa topilmadi. To'liq katalog: {bot_link}"
+
+    # AnswerGuestQuery — Guest Mode uchun maxsus javob usuli (juda yangi,
+    # kutubxona versiyasiga qarab shakli farq qilishi mumkin). Ishlamasa,
+    # oddiy Message.answer() bilan qayta urinamiz — ko'p hollarda guest
+    # xabarlari ham aslida oddiy Message obyekti sifatida keladi.
+    answered = False
+    try:
+        await bot.answer_guest_query(guest_query_id=message.guest_query_id, result=reply_text)
+        answered = True
+    except Exception as e:
+        logger.debug("answer_guest_query ishlamadi (%s), oddiy reply sinalyapti", e)
+    if not answered:
+        try:
+            await message.answer(reply_text)
+        except Exception as e:
+            logger.warning(f"[guest_mode] javob berilmadi: {e}")
+
+if _GUEST_MODE_SUPPORTED:
+    dp.guest_message.register(guest_query_handler)
+    logger.info("Guest Mode handler ro'yxatdan o'tkazildi (dp.guest_message).")
+else:
+    logger.info(
+        "Guest Mode: joriy aiogram versiyasida qo'llab-quvvatlanmaydi "
+        "(Bot API 10.0+ va yangiroq aiogram kerak) — bu funksiya o'chiq holda qoladi."
+    )
 
 # ===================== QIDIRUV =====================
 @dp.callback_query(F.data == "search")
@@ -8209,6 +8393,180 @@ async def sp_delete(call: CallbackQuery):
     await call.answer("✅ Baner oʻchirildi", show_alert=True)
     await call.message.edit_text(await _sponsor_text(), reply_markup=_sponsor_kb(), parse_mode="HTML")
 
+# ---- SO'ROVNOMA / VIKTORINA (Bot API 10.0+, poll media/quiz yangiliklari) ----
+# E'lon kanaliga (ANNOUNCE_CHANNEL) so'rovnoma yoki to'g'ri javobli viktorina
+# post qiladi — masalan "Keyingi qaysi anime qo'shilsin?" ovoz berish yoki
+# anime bo'yicha bilim sinovi. Rasm ixtiyoriy: HAR DOIM ishlaydigan yo'l
+# bilan (alohida rasm xabari + undan keyin so'rovnoma) yuboriladi — Bot
+# API 10.0'ning poll ICHIGA media biriktirish imkoniyati juda yangi va hali
+# barcha mijozlarda/kutubxona versiyalarida bir xil ishlamasligi mumkin,
+# shu sabab bu yerda eng ishonchli yo'l tanlandi.
+def _poll_cancel_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_cat_comm")],
+    ])
+
+@dp.callback_query(F.data == "admin_poll")
+async def admin_poll_start(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    await state.clear()
+    if not ANNOUNCE_CHANNEL:
+        await call.answer(
+            "⚠️ E'lon kanali sozlanmagan. Render'da Environment > "
+            "ANNOUNCE_CHANNEL qo'shing (kanal ID yoki @username), keyin "
+            "qayta urinib ko'ring.",
+            show_alert=True
+        )
+        return
+    await call.answer()
+    await call.message.edit_text(
+        "📊 <b>So'rovnoma yaratish</b>\n\nTurini tanlang:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Oddiy so'rovnoma", callback_data="poll_type_regular", style="primary")],
+            [InlineKeyboardButton(text="🧠 Viktorina (to'g'ri javobli)", callback_data="poll_type_quiz", style="primary")],
+            [InlineKeyboardButton(text="🔙 Muloqot", callback_data="admin_cat_comm")],
+        ])
+    )
+
+@dp.callback_query(F.data.in_(["poll_type_regular", "poll_type_quiz"]))
+async def poll_choose_type(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        return
+    await state.update_data(poll_is_quiz=(call.data == "poll_type_quiz"))
+    await state.set_state(PollState.question)
+    await call.answer()
+    await call.message.edit_text(
+        "✏️ Savol matnini yuboring (masalan: \"Keyingi qaysi anime "
+        "qo'shilishini xohlaysiz?\"):",
+        reply_markup=_poll_cancel_kb()
+    )
+
+@dp.message(PollState.question)
+async def poll_question_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    if not text or len(text) > 255:
+        await message.answer("❌ Savol 1-255 belgidan iborat bo'lishi kerak. Qaytadan yuboring.")
+        return
+    await state.update_data(poll_question=text)
+    await state.set_state(PollState.options)
+    await message.answer(
+        "📝 Javob variantlarini yuboring — har birini ALOHIDA QATORDA "
+        "(2 tadan 10 tagacha), masalan:\n\nNaruto\nOne Piece\nAttack on Titan",
+        reply_markup=_poll_cancel_kb()
+    )
+
+@dp.message(PollState.options)
+async def poll_options_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    lines = [l.strip() for l in (message.text or "").split("\n") if l.strip()]
+    if not (2 <= len(lines) <= 10):
+        await message.answer("❌ 2 tadan 10 tagacha variant kerak, har biri alohida qatorda. Qaytadan yuboring.")
+        return
+    if any(len(l) > 100 for l in lines):
+        await message.answer("❌ Har bir variant 100 belgidan oshmasligi kerak. Qaytadan yuboring.")
+        return
+    await state.update_data(poll_options=lines)
+    data = await state.get_data()
+    if data.get("poll_is_quiz"):
+        rows = [
+            [InlineKeyboardButton(text=f"{i+1}. {opt[:30]}", callback_data=f"poll_correct_{i}")]
+            for i, opt in enumerate(lines)
+        ]
+        rows.append([InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_cat_comm")])
+        await state.set_state(PollState.correct_option)
+        await message.answer("✅ To'g'ri javobni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        return
+    await _poll_ask_photo(message.answer, state)
+
+@dp.callback_query(PollState.correct_option, F.data.regexp(r"^poll_correct_\d+$"))
+async def poll_correct_save(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
+    idx = int(call.data.split("_")[-1])
+    await state.update_data(poll_correct=idx)
+    await call.answer()
+    await _poll_ask_photo(call.message.edit_text, state)
+
+async def _poll_ask_photo(send_func, state: FSMContext):
+    await state.set_state(PollState.photo)
+    await send_func(
+        "🖼 So'rovnomaga rasm qo'shasizmi? (ixtiyoriy)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🖼 Ha, rasm yuboraman", callback_data="poll_photo_yes")],
+            [InlineKeyboardButton(text="➡️ Yo'q, rasmsiz yuborish", callback_data="poll_photo_no")],
+            [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_cat_comm")],
+        ])
+    )
+
+@dp.callback_query(PollState.photo, F.data == "poll_photo_yes")
+async def poll_photo_prompt(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.edit_text("🖼 Rasmni yuboring:", reply_markup=_poll_cancel_kb())
+
+@dp.callback_query(PollState.photo, F.data == "poll_photo_no")
+async def poll_photo_skip(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await _poll_send(call.message.chat.id, state, photo_id=None)
+
+@dp.message(PollState.photo, F.photo)
+async def poll_photo_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id):
+        return
+    await _poll_send(message.chat.id, state, photo_id=message.photo[-1].file_id)
+
+async def _poll_send(admin_chat_id, state: FSMContext, photo_id):
+    """So'rovnomani ANNOUNCE_CHANNEL'ga yuboradi va admin'ga natijani
+    xabar qiladi."""
+    data = await state.get_data()
+    await state.clear()
+    question = data.get("poll_question")
+    options = data.get("poll_options") or []
+    is_quiz = bool(data.get("poll_is_quiz"))
+    correct = data.get("poll_correct")
+
+    if photo_id:
+        try:
+            await bot.send_photo(ANNOUNCE_CHANNEL, photo_id)
+        except Exception as e:
+            logger.warning(f"[poll] rasm kanalga yuborilmadi: {e}")
+
+    poll_kwargs = dict(chat_id=ANNOUNCE_CHANNEL, question=question, options=options, is_anonymous=True)
+    if is_quiz:
+        poll_kwargs["type"] = "quiz"
+        poll_kwargs["correct_option_ids"] = [correct]
+    ok, err = False, None
+    try:
+        await bot.send_poll(**poll_kwargs)
+        ok = True
+    except TypeError:
+        # Eski aiogram: correct_option_ids (ko'plik, 10.0) o'rniga
+        # correct_option_id (birlik, eski Bot API) kutilishi mumkin.
+        if is_quiz:
+            poll_kwargs.pop("correct_option_ids", None)
+            poll_kwargs["correct_option_id"] = correct
+            try:
+                await bot.send_poll(**poll_kwargs)
+                ok = True
+            except Exception as e:
+                err = e
+        else:
+            err = "TypeError"
+    except Exception as e:
+        err = e
+    if not ok:
+        logger.error(f"[poll] yuborilmadi: {err}")
+
+    role = admin_role_cached(admin_chat_id)
+    text = "✅ So'rovnoma e'lon kanaliga yuborildi!" if ok else \
+        "❌ So'rovnoma yuborilmadi — log'ni tekshiring (ehtimol bot kanalda admin emas)."
+    await bot.send_message(admin_chat_id, text, reply_markup=admin_cat_comm_keyboard(role))
+
 # ---- FOYDALANUVCHI QIDIRISH ----
 @dp.callback_query(F.data == "admin_find_user")
 async def admin_find_user(call: CallbackQuery, state: FSMContext):
@@ -10271,7 +10629,12 @@ async def main():
     try:
         import aiogram as _aiogram_pkg
         rich_status = "YOQILGAN ✅" if _RICH_MESSAGE_SUPPORTED else "O'CHIQ ❌ — aiogram >= 3.29 kerak, hozircha eski HTML yo'l ishlatilyapti"
-        logger.info(f"aiogram versiyasi: {_aiogram_pkg.__version__} | Rich Message (AI javoblari uchun): {rich_status}")
+        draft_status = "YOQILGAN ✅" if _MESSAGE_DRAFT_SUPPORTED else "O'CHIQ ❌ — aiogram eski, AI javoblari 'kutib tur' rejimida"
+        guest_status = "YOQILGAN ✅ (BotFather'da ham yoqilganiga ishonch hosil qiling)" if _GUEST_MODE_SUPPORTED else "O'CHIQ ❌ — aiogram yangilanishi kerak"
+        logger.info(f"aiogram versiyasi: {_aiogram_pkg.__version__}")
+        logger.info(f"  Rich Message (AI javoblari formatlash): {rich_status}")
+        logger.info(f"  AI javob jonli oqimi (sendMessageDraft): {draft_status}")
+        logger.info(f"  Guest Mode (guruhlarda @mention javob): {guest_status}")
     except Exception as e:
         logger.warning(f"aiogram versiyasini aniqlab bo'lmadi: {e}")
     try:
