@@ -17,7 +17,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ChatMemberUpdated, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
-    WebAppInfo, FSInputFile, BufferedInputFile
+    WebAppInfo, FSInputFile, BufferedInputFile,
+    InlineQuery, InlineQueryResultPhoto, InlineQueryResultArticle, InputTextMessageContent
 )
 import json
 import gzip
@@ -160,6 +161,26 @@ try:
 except ImportError:
     _InputRichMessage = None
     _RICH_MESSAGE_SUPPORTED = False
+
+# Rich BLOCKS (Bot API 10.2, 2026-iyul) — Rich Message'ni erkin Markdown
+# o'rniga aniq TUZILGAN bloklar (sarlavha, jadval, kollaj va h.k.) bilan
+# qurish imkonini beradi. Bu — butun API'ning ENG YANGI qismi, shu sabab
+# eng kam sinovdan o'tgan joyi ham shu (pastda, anime "batafsil" ko'rinishi
+# uchun ishlatiladi, foydalanish joyida qo'shimcha izoh bor). Import
+# muvaffaqiyatsiz bo'lsa ham, import ICHIDAGI har bir sinf alohida
+# tekshirilmaydi — barchasi bitta try/except ostida, chunki ular hammasi
+# bir vaqtda (bitta aiogram versiyasida) qo'shilgan.
+try:
+    from aiogram.types import (
+        InputRichBlockSectionHeading as _InputRichBlockSectionHeading,
+        InputRichBlockParagraph as _InputRichBlockParagraph,
+        InputRichBlockTable as _InputRichBlockTable,
+        InputRichBlockPhoto as _InputRichBlockPhoto,
+        InputRichBlockDivider as _InputRichBlockDivider,
+    )
+    _RICH_BLOCKS_SUPPORTED = True
+except ImportError:
+    _RICH_BLOCKS_SUPPORTED = False
 
 # Quyidagilar FAQAT zaxira (fallback) yo'l uchun ishlatiladi: agar Rich
 # Message biror sababga ko'ra ishlamasa, AI matni shu regexlar bilan qo'lda
@@ -331,7 +352,7 @@ async def edit_ai_html(message_obj, html_text, **kwargs):
     return await message_obj.edit_text(html_text, parse_mode="HTML", **kwargs)
 
 
-async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6):
+async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6, message_thread_id=None):
     """ai_service.ask_ai_stream()dan kelayotgan bo'laklarni yig'ib,
     Telegram'ning sendMessageDraft (Bot API 9.5+) imkoniyati orqali
     foydalanuvchiga JONLI (Gemini "yozayotganda" ekranda so'z-so'z chiqadi)
@@ -340,6 +361,9 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6):
     draft'lar ATAYLAB oddiy (formatlanmagan) matn bilan yuboriladi, chunki
     bo'lak-bo'lak kelayotgan Markdown/HTML o'rtada kesilib, noto'g'ri
     formatlanib qolishi mumkin (masalan yopilmagan <b> tegi).
+
+    `message_thread_id` — berilsa (foydalanuvchining AI suhbati alohida
+    "mavzu"da ketayotgan bo'lsa), draft/typing shu mavzuga yuboriladi.
 
     _MESSAGE_DRAFT_SUPPORTED=False bo'lsa (eski aiogram), yoki draft
     yuborishda istalgan xatolik chiqsa, bu funksiya JIM ravishda faqat
@@ -355,7 +379,7 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6):
     last_sent_at = 0.0
     draft_ok = True
     try:
-        await bot.send_chat_action(chat_id, "typing")
+        await bot.send_chat_action(chat_id, "typing", message_thread_id=message_thread_id)
     except Exception:
         pass
     async for delta in stream_gen:
@@ -367,7 +391,7 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6):
             continue
         last_sent_at = now
         try:
-            await bot.send_message_draft(chat_id=chat_id, text=full_text[-4000:])
+            await bot.send_message_draft(chat_id=chat_id, text=full_text[-4000:], message_thread_id=message_thread_id)
         except Exception as e:
             # sendMessageDraft kutilganidek ishlamadi (masalan hasattr True
             # bo'lsa-da, aiogram versiyasi to'liq mos kelmadi) — qolgan
@@ -834,6 +858,39 @@ async def check_subscription(user_id):
     results = await asyncio.gather(*[_check_one(ch) for ch in channels])
     return all(results)
 
+async def get_missing_channels(user_id):
+    """check_subscription() bilan BIR XIL mantiq, lekin True/False o'rniga
+    aynan QAYSI majburiy kanal(lar)ga hali obuna bo'linmaganini (nomi
+    bilan) qaytaradi. Faqat ko'rsatish (UX) maqsadida ishlatiladi — asosiy
+    ruxsat qarori HAR DOIM check_subscription() orqali qabul qilinadi, bu
+    funksiya unga tegmaydi, shu sabab xavfsizlik/ruxsat mantig'ini
+    buzish xavfi yo'q.
+
+    Nega kerak: masalan admin YANGI majburiy kanal qo'shsa, eski
+    obunachilar "✅ Obuna bo'ldim" tugmasini bossa, oldin shunchaki umumiy
+    "hali obuna bo'lmadingiz" degan xabar ko'rar edi — aynan YANGI
+    kanalga obuna bo'lmaganini bilmasdan chalkashib qolishlari mumkin edi."""
+    if not user_id:
+        return []
+    premium = await asyncio.to_thread(db.get_premium_status, user_id)
+    if premium["is_premium"]:
+        return []
+    channels = await asyncio.to_thread(db.get_channels)
+    if not channels:
+        return []
+
+    async def _check_one(ch):
+        try:
+            member = await bot.get_chat_member(ch["channel_id"], user_id)
+            joined = member.status not in ["left", "kicked", "banned"]
+        except Exception as e:
+            logger.warning(f"get_missing_channels: {ch['channel_id']} tekshirilmadi: {e}")
+            joined = False
+        return ch, joined
+
+    results = await asyncio.gather(*[_check_one(ch) for ch in channels])
+    return [ch for ch, joined in results if not joined]
+
 async def sub_message_text():
     """Majburiy kanallar ekranida chiqadigan matn — kanallarga obuna bo'lish
     yoki Premium orqali cheklovsiz foydalanish haqida aniq imtiyozlar bilan."""
@@ -856,7 +913,8 @@ async def sub_keyboard():
     for ch in channels:
         buttons.append([InlineKeyboardButton(
             text=f"📢 {ch['channel_name']}",
-            url=f"https://t.me/{ch['channel_id'].lstrip('@')}"
+            url=f"https://t.me/{ch['channel_id'].lstrip('@')}",
+            style="primary"
         )])
     buttons.append([InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub", style="success")])
     buttons.append([InlineKeyboardButton(text="💎 Premium orqali kirish (kanalsiz)", callback_data="premium_menu", style="success")])
@@ -2404,6 +2462,7 @@ async def send_anime_card(chat_id, anime):
             InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
             InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
         ],
+        [InlineKeyboardButton(text="ℹ️ Batafsil", callback_data=f"details_{anime['id']}")],
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")]
     ])
     try:
@@ -2422,6 +2481,64 @@ async def send_anime_card(chat_id, anime):
             reply_markup=kb,
             parse_mode="HTML"
         )
+
+async def send_anime_details_rich(chat_id, anime):
+    """Anime haqida BATAFSIL, tuzilgan ko'rinish — Bot API 10.2'ning Rich
+    Blocks imkoniyati (sarlavha + jadval + tavsif + rasm) orqali chiqaradi.
+
+    OGOHLANTIRISH: bu — butun ushbu faylning ENG YANGI va ENG KAM sinovdan
+    o'tgan qismi. InputRichBlockTable/InputRichBlockPhoto kabi sinflarning
+    ANIQ maydon nomlari (masalan "rows" chindan shundaymi yoki boshqacha)
+    rasmiy hujjatlarda hali batafsil yoritilmagan (2026-iyul, juda yangi),
+    shu sabab pastdagi qurilma ENG YAXSHI TAXMIN asosida ishlangan.
+    Ishlamasa — https://core.telegram.org/bots/api#inputrichblocktable va
+    #inputrichblockphoto sahifalaridagi aniq maydonlarga solishtirib
+    tekshiring. Har qanday xatolikda (noto'g'ri maydon nomidan tortib,
+    Telegram rad etishigacha) DARHOL va JIMgina oddiy send_anime_card()ga
+    tushadi — foydalanuvchi hech qachon xabarsiz qolmaydi, faqat "chiroyli"
+    jadval ko'rinishi o'rniga odatdagi kartani ko'radi."""
+    if not (_RICH_MESSAGE_SUPPORTED and _RICH_BLOCKS_SUPPORTED):
+        await send_anime_card(chat_id, anime)
+        return
+    status_text = ANIME_STATUS_LABELS.get(anime.get("status") or "ongoing", ANIME_STATUS_LABELS["ongoing"])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
+            InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
+        ],
+        [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")]
+    ])
+    try:
+        blocks = [
+            _InputRichBlockSectionHeading(text=anime["title"]),
+            _InputRichBlockTable(rows=[
+                ["📅 Yil", str(anime.get("year") or "—")],
+                ["🌍 Davlat", str(anime.get("country") or "—")],
+                ["🎭 Janr", str(anime.get("genre") or "—")],
+                ["🌐 Til", str(anime.get("language") or "Nomalum")],
+                ["📊 Holat", status_text],
+            ]),
+            _InputRichBlockParagraph(text=anime.get("description") or ""),
+        ]
+        photo_id = anime.get("photo_id")
+        if photo_id:
+            blocks.append(_InputRichBlockDivider())
+            blocks.append(_InputRichBlockPhoto(media=photo_id))
+        rich_message = _InputRichMessage(blocks=blocks)
+        await bot.send_rich_message(chat_id=chat_id, rich_message=rich_message, reply_markup=kb)
+    except Exception as e:
+        logger.debug(f"[rich_blocks] batafsil ko'rinish ishlamadi ({e}), oddiy kartaga tushildi")
+        await send_anime_card(chat_id, anime)
+
+@dp.callback_query(F.data.startswith("details_"))
+async def anime_details_callback(call: CallbackQuery):
+    await call.answer()
+    anime_id = int(call.data.split("_")[1])
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    if not anime:
+        await call.answer("Anime topilmadi.", show_alert=True)
+        return
+    await send_anime_details_rich(call.message.chat.id, anime)
 
 def announce_caption_text(anime):
     """E'lon kanali uchun qisqa post matni — botning ichidagi to'liq karta
@@ -2812,7 +2929,21 @@ async def check_sub_handler(call: CallbackQuery, state: FSMContext):
     _invalidate_sub_cache(call.from_user.id)
     subscribed = await check_subscription(call.from_user.id)
     if not subscribed:
-        await call.answer("❌ Hali obuna bolmadingiz!", show_alert=True)
+        # Foydalanuvchiga aynan QAYSI kanal(lar) yetishmayotganini
+        # ko'rsatamiz (masalan admin yaqinda yangi kanal qo'shgan bo'lsa,
+        # eski obunachi shuni bilmasligi mumkin). Ruxsat qarorining o'zi
+        # baribir yuqoridagi check_subscription() natijasiga asoslanadi —
+        # bu yerda faqat xabar matni aniqlashtiriladi.
+        missing = await get_missing_channels(call.from_user.id)
+        if missing:
+            names = "\n".join(f"• {ch['channel_name']}" for ch in missing[:6])
+            extra = f"\n...va yana {len(missing) - 6} ta" if len(missing) > 6 else ""
+            await call.answer(
+                f"❌ Yana quyidagi kanal(lar)ga obuna bo'ling:\n{names}{extra}",
+                show_alert=True
+            )
+        else:
+            await call.answer("❌ Hali obuna bolmadingiz!", show_alert=True)
         return
 
     await call.answer()
@@ -2892,6 +3023,43 @@ def ai_image_result_keyboard():
         [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop")],
     ])
 
+# ---- Shaxsiy chatda "mavzular" (Topics, Bot API 9.4, 2026-fev) ----
+# AI suhbatini botning asosiy menyu oqimidan alohida "mavzu" (forum topic)
+# ichiga ajratib beradi — xuddi guruhlardagi forum mavzulari kabi, lekin
+# bu yerda foydalanuvchi bilan botning SHAXSIY chati ichida.
+#
+# Bu — Guest Mode va Rich Blocks kabi g'ayrioddiy yangi imkoniyat, shu
+# sabab eng EHTIYOTKORONA yondashuv qo'llanildi: mavzu ID xotirada (RAM)
+# saqlanadi — database.py'ga HECH QANDAY o'zgarish kiritilmadi. Bot qayta
+# ishga tushsa (Render'da deploy/restart), keyingi safar foydalanuvchi
+# uchun yangi mavzu yaratiladi — funksional muammo emas, faqat vaqti-vaqti
+# bilan eski mavzular "egasiz" qolib ketishi mumkin.
+_ai_topic_cache = {}
+_topics_supported = None
+
+async def _get_or_create_ai_topic(user_id):
+    """Muvaffaqiyatli bo'lsa message_thread_id qaytaradi, aks holda None
+    (bunday holda chaqiruvchi oddiy, mavzusiz rejimda davom etadi)."""
+    global _topics_supported
+    if _topics_supported is False:
+        return None
+    if user_id in _ai_topic_cache:
+        return _ai_topic_cache[user_id]
+    try:
+        topic = await bot.create_forum_topic(chat_id=user_id, name="🤖 AI Yordamchi")
+        thread_id = topic.message_thread_id
+        _ai_topic_cache[user_id] = thread_id
+        _topics_supported = True
+        return thread_id
+    except Exception as e:
+        # has_topics_enabled — BOT darajasidagi sozlama (barcha foydalanuvchilar
+        # uchun bir xil), shu sabab bitta muvaffaqiyatsiz urinishdan keyin
+        # global False qilib qo'yamiz — har bir yangi foydalanuvchida qayta-qayta
+        # urinib, keraksiz xato loglari hosil qilinmaydi.
+        logger.debug(f"[topics] shaxsiy chatda mavzu yaratilmadi ({e}) — bu funksiya o'chiq deb belgilandi")
+        _topics_supported = False
+        return None
+
 @dp.callback_query(F.data == "ai_menu")
 async def ai_menu_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -2919,12 +3087,23 @@ async def ai_chat_start(call: CallbackQuery, state: FSMContext):
         return
     await call.answer()
     await state.set_state(AIChatState.chatting)
-    await state.update_data(ai_history=[])
-    await call.message.edit_text(
+    thread_id = await _get_or_create_ai_topic(call.from_user.id)
+    await state.update_data(ai_history=[], ai_thread_id=thread_id)
+    text = (
         "💬 Suhbat boshlandi — anime haqida yoki istalgan mavzuda savol yozing.\n\n"
-        "Chiqish uchun pastdagi tugmani bosing.",
-        reply_markup=ai_chat_keyboard()
+        "Chiqish uchun pastdagi tugmani bosing."
     )
+    if thread_id:
+        # Alohida "AI Yordamchi" mavzusi ichida davom etish uchun — asl
+        # xabarni tahrirlash o'rniga o'sha mavzuga YANGI xabar yuboriladi
+        # (aks holda foydalanuvchi asosiy oqimda qolib, keyingi javoblar
+        # esa mavzuga tushib, ikkiga bo'linib qolar edi).
+        try:
+            await bot.send_message(call.from_user.id, text, message_thread_id=thread_id, reply_markup=ai_chat_keyboard())
+            return
+        except Exception as e:
+            logger.debug(f"[topics] mavzuga yuborilmadi ({e}), oddiy chatda davom etilyapti")
+    await call.message.edit_text(text, reply_markup=ai_chat_keyboard())
 
 @dp.callback_query(F.data == "ai_chat_stop")
 async def ai_chat_stop(call: CallbackQuery, state: FSMContext):
@@ -3070,6 +3249,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     history = data.get("ai_history", [])
+    thread_id = data.get("ai_thread_id")  # "Mavzular" yoqilgan bo'lsa, shu ID orqali javob o'sha mavzuga tushadi
     # Anime ro'yxati ikki maqsadda kerak: (1) katalog savoliga aniq javob
     # berish uchun promptga qo'shiladi (faqat shunga aloqador savolda), (2)
     # AI javobida nomi tilga olingan animening posterini birga yuborish
@@ -3093,7 +3273,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
     stream_gen = ai_service.ask_ai_stream(
         text, history=history, catalog_text=catalog_text, bot_info_text=bot_info_text
     )
-    reply = await stream_ai_reply(message.chat.id, stream_gen)
+    reply = await stream_ai_reply(message.chat.id, stream_gen, message_thread_id=thread_id)
     if not reply:
         await message.answer(
             "😕 Hozircha javob bera olmadim, birozdan keyin qayta urinib ko'ring.",
@@ -3104,7 +3284,8 @@ async def ai_chat_message(message: Message, state: FSMContext):
     history = history[-10:]  # tokenlarni tejash uchun faqat oxirgi almashinuvlar saqlanadi
     await state.update_data(ai_history=history)
     poster_ids = _match_catalog_posters(reply, animes)
-    await send_ai_text(message, reply, reply_markup=ai_chat_keyboard(), poster_ids=poster_ids)
+    extra = {"message_thread_id": thread_id} if thread_id else {}
+    await send_ai_text(message, reply, reply_markup=ai_chat_keyboard(), poster_ids=poster_ids, **extra)
     await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
@@ -3481,6 +3662,65 @@ else:
         "Guest Mode: joriy aiogram versiyasida qo'llab-quvvatlanmaydi "
         "(Bot API 10.0+ va yangiroq aiogram kerak) — bu funksiya o'chiq holda qoladi."
     )
+
+# ===================== INLINE REJIM (kanal/guruh uchun reklama) =====================
+# Bu — Bot API'ning ESKI, juda barqaror qismi (Guest Mode/Rich Blocks kabi
+# YANGI emas), lekin sizning botingizda hali ishlatilmagan edi. Endi
+# ISTALGAN chatda — jumladan o'z e'lon kanalingizda post yozayotganda —
+# shunchaki "@AniFilmBot Naruto" deb yozsangiz, mos animelar rasm+tugma
+# bilan chiqadi va birini tanlab, to'g'ridan-to'g'ri o'sha postga
+# "reklama" sifatida joylashtirishingiz mumkin.
+#
+# ESLATMA: bu ishlashi uchun @BotFather → botingiz → Bot Settings →
+# Inline Mode'ni yoqish kerak (/setinline buyrug'i orqali ham bo'ladi).
+@dp.inline_query()
+async def inline_search(inline_query: InlineQuery):
+    query = (inline_query.query or "").strip()
+    results = []
+    if query:
+        animes = await asyncio.to_thread(db.search_anime, query)
+        for a in (animes or [])[:20]:
+            title = a.get("title") or "Nomsiz"
+            year = a.get("year")
+            genre = a.get("genre")
+            subtitle = " | ".join(x for x in [str(year) if year else None, genre] if x)
+            caption = f"🎬 <b>{title}</b>" + (f"\n{subtitle}" if subtitle else "")
+            deep_link = f"https://t.me/{BOT_USERNAME}?start=anime_{a['id']}" if BOT_USERNAME else None
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="▶️ Tomosha qilish", url=deep_link)]
+            ]) if deep_link else None
+            photo_id = a.get("photo_id")
+            if photo_id:
+                results.append(InlineQueryResultPhoto(
+                    id=str(a["id"]),
+                    photo_file_id=photo_id,
+                    title=title,
+                    description=subtitle or None,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                ))
+            else:
+                results.append(InlineQueryResultArticle(
+                    id=str(a["id"]),
+                    title=title,
+                    description=subtitle or None,
+                    input_message_content=InputTextMessageContent(message_text=caption, parse_mode="HTML"),
+                    reply_markup=kb,
+                ))
+    else:
+        results.append(InlineQueryResultArticle(
+            id="hint",
+            title="Anime nomini yozing...",
+            description="Masalan: Naruto, One Piece",
+            input_message_content=InputTextMessageContent(
+                message_text=f"🎬 AniFilm Bot orqali anime izlang: @{BOT_USERNAME or ''}"
+            ),
+        ))
+    try:
+        await inline_query.answer(results, cache_time=300, is_personal=False)
+    except Exception as e:
+        logger.warning(f"[inline] javob berilmadi: {e}")
 
 # ===================== QIDIRUV =====================
 @dp.callback_query(F.data == "search")
@@ -10635,6 +10875,11 @@ async def main():
         logger.info(f"  Rich Message (AI javoblari formatlash): {rich_status}")
         logger.info(f"  AI javob jonli oqimi (sendMessageDraft): {draft_status}")
         logger.info(f"  Guest Mode (guruhlarda @mention javob): {guest_status}")
+        blocks_status = "YOQILGAN ✅ (eksperimental — batafsil ko'rinishda tekshiring)" if _RICH_BLOCKS_SUPPORTED else "O'CHIQ ❌ — aiogram eski, 'Batafsil' oddiy kartani ko'rsatadi"
+        topics_status = "sinaladi (birinchi AI suhbatida)" if _topics_supported is None else ("YOQILGAN ✅" if _topics_supported else "O'CHIQ ❌")
+        logger.info(f"  Rich Blocks (anime 'Batafsil' ko'rinishi): {blocks_status}")
+        logger.info(f"  Shaxsiy chatda mavzular (AI suhbat uchun): {topics_status}")
+        logger.info("  Inline rejim (@BotUsername orqali qidiruv): kod tayyor — @BotFather'da /setinline yoqilganiga ishonch hosil qiling")
     except Exception as e:
         logger.warning(f"aiogram versiyasini aniqlab bo'lmadi: {e}")
     try:
