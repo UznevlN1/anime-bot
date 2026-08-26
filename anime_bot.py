@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import html
+import inspect
 import logging
 import math
 import re
@@ -181,6 +182,39 @@ try:
     _RICH_BLOCKS_SUPPORTED = True
 except ImportError:
     _RICH_BLOCKS_SUPPORTED = False
+
+# Bot API 10.3 (2026-avgust-24) — bir kun oldin chiqqan, ENG YANGI qism.
+# ATAYLAB yuqoridagi 10.2 importidan ALOHIDA try/except'da ushlanadi: aiogram
+# 10.2 sinflarini allaqachon qo'llab-quvvatlashi, lekin 10.3'ni HALI
+# qo'llamasligi juda mumkin (kutubxona yangilanishi bir necha kun/hafta
+# kechikishi odatiy hol) — bitta try/except ostida bo'lganda, 10.3 importi
+# muvaffaqiyatsiz bo'lsa, allaqachon ISHLAB TURGAN 10.2 funksiyalar ham
+# (masalan anime "Batafsil" ko'rinishi) beixtiyor o'chib qolar edi.
+#
+# Rasmiy hujjatlarda (kecha e'lon qilingani uchun) quyidagi sinflarning HAR
+# BIR maydoni hali chuqur yoritilmagan — pastda ishlatilgan maydon nomlari
+# (masalan RichTextButton uchun text/callback_data, InputRichBlockButtons
+# uchun buttons=[[...]]) InlineKeyboardButton bilan bir xil, allaqachon
+# butun Telegram Bot API bo'ylab izchil qo'llaniladigan naqshga asoslangan
+# ENG YAXSHI TAXMIN. Har doimgidek — ishlamasa, chaqiruvchi joyda try/except
+# orqali eski (isbotlangan) yo'lga jimgina qaytiladi.
+try:
+    from aiogram.types import (
+        RichTextButton as _RichTextButton,
+        InputRichBlockButtons as _InputRichBlockButtons,
+        InputRichBlockExpandableBlockQuotation as _InputRichBlockExpandableBlockQuotation,
+        DisabledButton as _DisabledButton,
+        EphemeralMessageParameters as _EphemeralMessageParameters,
+    )
+    _RICH_BLOCKS_10_3_SUPPORTED = True
+except ImportError:
+    _RichTextButton = None
+    _InputRichBlockButtons = None
+    _InputRichBlockExpandableBlockQuotation = None
+    _DisabledButton = None
+    _EphemeralMessageParameters = None
+    _RICH_BLOCKS_10_3_SUPPORTED = False
+_EPHEMERAL_SUPPORTED = _EphemeralMessageParameters is not None
 
 # Quyidagilar FAQAT zaxira (fallback) yo'l uchun ishlatiladi: agar Rich
 # Message biror sababga ko'ra ishlamasa, AI matni shu regexlar bilan qo'lda
@@ -369,38 +403,92 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6, message_thr
     yuborishda istalgan xatolik chiqsa, bu funksiya JIM ravishda faqat
     matn yig'ish rejimiga o'tadi — foydalanuvchi "jonli" effektni
     ko'rmaydi, lekin OXIRIDA javobning o'zi baribir to'liq yetib boradi
-    (chaqiruvchi buni asosiy javob sifatida yuboradi)."""
+    (chaqiruvchi buni asosiy javob sifatida yuboradi).
+
+    TO'XTATISH (can_stop, Bot API 10.3, 2026-avgust-24): _DRAFT_STOP_SUPPORTED
+    bo'lsa, foydalanuvchiga oqim davomida "to'xtatish" tugmasi ko'rsatiladi.
+    Bosilsa, stopped_message_generation handleri (pastda) shu chat uchun
+    _active_ai_streams[chat_id]["stop"]ni True qiladi — shu yerda buni
+    sezib, stream_gen.aclose() orqali Gemini/Groq'ning O'ZIDAN kelayotgan
+    HAQIQIY oqimni to'xtatamiz (shunchaki ekranni emas) va o'shancha
+    yig'ilgan matnni qaytaramiz — xuddi ChatGPT/Claude'da "to'xtatish"
+    bosilgandagi kabi, qisman javob baribir yuboriladi (chaqiruvchi tomon
+    buni ODATDAGI to'liq javobdek qabul qiladi, alohida ishlov shart emas)."""
     full_text = ""
-    if not _MESSAGE_DRAFT_SUPPORTED:
+    _active_ai_streams[chat_id] = {"stop": False}
+    try:
+        if not _MESSAGE_DRAFT_SUPPORTED:
+            async for delta in stream_gen:
+                full_text += delta
+            return full_text
+
+        last_sent_at = 0.0
+        draft_ok = True
+        try:
+            await bot.send_chat_action(chat_id, "typing", message_thread_id=message_thread_id)
+        except Exception:
+            pass
         async for delta in stream_gen:
             full_text += delta
+            if _active_ai_streams.get(chat_id, {}).get("stop"):
+                try:
+                    await stream_gen.aclose()
+                except Exception:
+                    pass
+                break
+            if not draft_ok:
+                continue
+            now = time.monotonic()
+            if now - last_sent_at < throttle_seconds:
+                continue
+            last_sent_at = now
+            try:
+                draft_kwargs = {"chat_id": chat_id, "text": full_text[-4000:], "message_thread_id": message_thread_id}
+                if _DRAFT_STOP_SUPPORTED:
+                    draft_kwargs["can_stop"] = True
+                await bot.send_message_draft(**draft_kwargs)
+            except Exception as e:
+                # sendMessageDraft kutilganidek ishlamadi (masalan hasattr True
+                # bo'lsa-da, aiogram versiyasi to'liq mos kelmadi) — qolgan
+                # bo'laklarni jim yig'ishda davom etamiz, foydalanuvchi baribir
+                # oxirida to'liq javobni oladi.
+                logger.debug("sendMessageDraft ishlamadi (%s), jim rejimga o'tildi", e)
+                draft_ok = False
         return full_text
+    finally:
+        # Oqim qanday tugashidan qat'i nazar (to'liq, xato, yoki to'xtatish
+        # orqali) — kesh chiqindi yig'ib qolmasligi uchun har doim tozalanadi.
+        _active_ai_streams.pop(chat_id, None)
 
-    last_sent_at = 0.0
-    draft_ok = True
-    try:
-        await bot.send_chat_action(chat_id, "typing", message_thread_id=message_thread_id)
-    except Exception:
-        pass
-    async for delta in stream_gen:
-        full_text += delta
-        if not draft_ok:
-            continue
-        now = time.monotonic()
-        if now - last_sent_at < throttle_seconds:
-            continue
-        last_sent_at = now
-        try:
-            await bot.send_message_draft(chat_id=chat_id, text=full_text[-4000:], message_thread_id=message_thread_id)
-        except Exception as e:
-            # sendMessageDraft kutilganidek ishlamadi (masalan hasattr True
-            # bo'lsa-da, aiogram versiyasi to'liq mos kelmadi) — qolgan
-            # bo'laklarni jim yig'ishda davom etamiz, foydalanuvchi baribir
-            # oxirida to'liq javobni oladi.
-            logger.debug("sendMessageDraft ishlamadi (%s), jim rejimga o'tildi", e)
-            draft_ok = False
-    return full_text
 
+
+# stopped_message_generation (Bot API 10.3, 2026-avgust-24) — foydalanuvchi
+# AI javobi oqim holida chiqayotganda "to'xtatish" tugmasini bosganda keladi.
+# Rasmiy hujjatlarda hozircha faqat sinf borligi tasdiqlangan (MessageGenerationStopped),
+# ICHIDAGI aniq maydonlar (masalan chat obyekti "chat" nomi bilanmi) hali
+# batafsil yoritilmagan — shu sabab getattr(..., None) zanjiri bilan bir
+# nechta ehtimoliy nom sinab ko'riladi. Hech biri to'g'ri kelmasa, shunchaki
+# chat_id topilmaydi va "to'xtatish" amalda ishlamaydi (lekin hech narsa
+# QULAMAYDI) — Render loglarida "stopped_message_generation: chat_id
+# aniqlanmadi" ko'rinsa, shu joyni Bot API hujjatiga solishtirib tuzatish kifoya.
+if _STOP_GENERATION_SUPPORTED:
+    @dp.stopped_message_generation()
+    async def handle_stopped_generation(event):
+        chat_obj = getattr(event, "chat", None)
+        chat_id = getattr(chat_obj, "id", None) or getattr(event, "chat_id", None)
+        if chat_id is None:
+            logger.debug("stopped_message_generation: chat_id aniqlanmadi (%r)", event)
+            return
+        stream_state = _active_ai_streams.get(chat_id)
+        if stream_state is not None:
+            stream_state["stop"] = True
+    logger.info("AI javobini to'xtatish (can_stop) handleri ro'yxatdan o'tkazildi.")
+else:
+    logger.info(
+        "can_stop: joriy aiogram versiyasida stopped_message_generation "
+        "hali qo'llab-quvvatlanmaydi (Bot API 10.3 juda yangi) — AI oqimi "
+        "avvalgidek ishlaydi, faqat 'to'xtatish' tugmasi ko'rinmaydi."
+    )
 
 _extra_admin_cache = {"roles": {}, "loaded_at": 0}
 _EXTRA_ADMIN_TTL = 60
@@ -483,6 +571,29 @@ _GUEST_MODE_SUPPORTED = hasattr(dp, "guest_message")
 # holda AI JAVOBI FUNKSIYASI (pastda, ai_chat_message) avtomatik ravishda
 # eski "kutib tur, keyin bir martada yubor" usuliga o'tadi.
 _MESSAGE_DRAFT_SUPPORTED = hasattr(bot, "send_message_draft")
+
+# can_stop/keep_on_stop (Bot API 10.3, 2026-avgust-24) — foydalanuvchiga AI
+# javobi oqim holida chiqayotganda uni "to'xtatish" tugmasini ko'rsatadi.
+# _MESSAGE_DRAFT_SUPPORTED=True bo'lishi kifoya emas — metodning O'ZI
+# mavjudligi va uning ICHIDA can_stop degan YANGI parametr borligi ikki
+# xil narsa (eski aiogram send_message_draft'ni allaqachon qo'llab-quvvatlashi,
+# lekin can_stop kabi kecha qo'shilgan parametrni hali bilmasligi mumkin).
+# hasattr() bu yerda ishlamaydi (metodning o'zi baribir mavjud) — shu sabab
+# metodning haqiqiy imzosi (signature) ICHIGA qarab tekshiramiz.
+_DRAFT_STOP_SUPPORTED = False
+if _MESSAGE_DRAFT_SUPPORTED:
+    try:
+        _DRAFT_STOP_SUPPORTED = "can_stop" in inspect.signature(bot.send_message_draft).parameters
+    except (ValueError, TypeError):
+        _DRAFT_STOP_SUPPORTED = False
+# stopped_message_generation (Bot API 10.3) — foydalanuvchi "to'xtatish"
+# tugmasini bosganda keladigan yangilanish. Dispatcher observeri odatda
+# Update maydon nomi bilan bir xil nomlanadi (xuddi guest_message kabi).
+_STOP_GENERATION_SUPPORTED = hasattr(dp, "stopped_message_generation")
+# Har bir faol AI oqimi shu yerda ro'yxatga olinadi: chat_id -> {"stop": bool}.
+# stream_ai_reply() har bo'lakda shu bayroqni tekshiradi; stopped_message_generation
+# handleri esa mos chat_id uchun uni True qiladi.
+_active_ai_streams = {}
 
 # MUHIM (FLOOD_WAIT tuzatish): in_memory=True klient session_string bermasa, HAR
 # safar server qayta ishga tushganda (Render'da bu tez-tez bo'ladi) botni Telegram'ga
@@ -914,9 +1025,9 @@ async def sub_keyboard():
         buttons.append([InlineKeyboardButton(
             text=f"📢 {ch['channel_name']}",
             url=f"https://t.me/{ch['channel_id'].lstrip('@')}",
-            style="primary"
+            style="danger"
         )])
-    buttons.append([InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub", style="success")])
+    buttons.append([InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub")])
     buttons.append([InlineKeyboardButton(text="💎 Premium orqali kirish (kanalsiz)", callback_data="premium_menu", style="success")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -2463,7 +2574,7 @@ async def send_anime_card(chat_id, anime):
             InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
         ],
         [InlineKeyboardButton(text="ℹ️ Batafsil", callback_data=f"details_{anime['id']}")],
-        [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")]
+        [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
     ])
     try:
         await bot.send_photo(
@@ -2496,30 +2607,89 @@ async def send_anime_details_rich(chat_id, anime):
     tekshiring. Har qanday xatolikda (noto'g'ri maydon nomidan tortib,
     Telegram rad etishigacha) DARHOL va JIMgina oddiy send_anime_card()ga
     tushadi — foydalanuvchi hech qachon xabarsiz qolmaydi, faqat "chiroyli"
-    jadval ko'rinishi o'rniga odatdagi kartani ko'radi."""
+    jadval ko'rinishi o'rniga odatdagi kartani ko'radi.
+
+    2026-AVGUST-24 QO'SHILDI (Bot API 10.3), _RICH_BLOCKS_10_3_SUPPORTED
+    bilan ALOHIDA himoyalangan — 10.3 sinflaridan biri ishlamasa ham, 10.2
+    asosidagi Rich Blocks ko'rinishi (yuqoridagi tavsif) buzilmaydi:
+      • Tavsif endi RichBlockExpandableBlockQuotation ichida — uzun
+        syujet "..." bilan yopiq keladi, bosilsa ochiladi (spoylersiz).
+      • Jadval is_compact=True bilan ixchamroq chiqadi.
+      • "Yuklab olish"/"Random" tugmalari alohida klaviatura o'rniga
+        InputRichBlockButtons orqali xabarning ICHIGA joylanadi — pastda
+        faqat "Bosh menu" qoladi (tugmalar ikki marta chiqmasin uchun).
+    Har biri o'zining tor try/except'i bilan — biri ishlamasa, faqat o'sha
+    qismi eskicha ishlaydi, hammasi birga qulamaydi."""
     if not (_RICH_MESSAGE_SUPPORTED and _RICH_BLOCKS_SUPPORTED):
         await send_anime_card(chat_id, anime)
         return
     status_text = ANIME_STATUS_LABELS.get(anime.get("status") or "ongoing", ANIME_STATUS_LABELS["ongoing"])
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
-            InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
-        ],
-        [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")]
-    ])
+    embed_buttons = _RICH_BLOCKS_10_3_SUPPORTED
+    if embed_buttons:
+        # Asosiy amallar endi xabar ICHIDA joylanadi (pastga qarang) — bu
+        # yerda faqat navigatsiya qoladi, tugmalar ikki marta chiqmasin uchun.
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
+        ])
+    else:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
+                InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
+            ],
+            [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
+        ])
     try:
+        table_rows = [
+            ["📅 Yil", str(anime.get("year") or "—")],
+            ["🌍 Davlat", str(anime.get("country") or "—")],
+            ["🎭 Janr", str(anime.get("genre") or "—")],
+            ["🌐 Til", str(anime.get("language") or "Nomalum")],
+            ["📊 Holat", status_text],
+        ]
+        try:
+            anime_table = _InputRichBlockTable(rows=table_rows, is_compact=True)
+        except TypeError:
+            # is_compact hali qo'llanmayapti (10.3 sinflari o'zi ishlagan
+            # taqdirda ham, mavjud InputRichBlockTable'ga bu maydon aiogram
+            # tomonidan hali qo'shilmagan bo'lishi mumkin) — maydonsiz davom.
+            anime_table = _InputRichBlockTable(rows=table_rows)
+
+        description = anime.get("description") or ""
+        description_block = None
+        if embed_buttons and description:
+            try:
+                description_block = _InputRichBlockExpandableBlockQuotation(text=description)
+            except Exception as e:
+                logger.debug(f"[rich_blocks] spoyler blok ishlamadi ({e}), oddiy paragraf ishlatildi")
+        if description_block is None:
+            description_block = _InputRichBlockParagraph(text=description)
+
         blocks = [
             _InputRichBlockSectionHeading(text=anime["title"]),
-            _InputRichBlockTable(rows=[
-                ["📅 Yil", str(anime.get("year") or "—")],
-                ["🌍 Davlat", str(anime.get("country") or "—")],
-                ["🎭 Janr", str(anime.get("genre") or "—")],
-                ["🌐 Til", str(anime.get("language") or "Nomalum")],
-                ["📊 Holat", status_text],
-            ]),
-            _InputRichBlockParagraph(text=anime.get("description") or ""),
+            anime_table,
+            description_block,
         ]
+
+        if embed_buttons:
+            try:
+                blocks.append(_InputRichBlockButtons(buttons=[[
+                    _RichTextButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0"),
+                    _RichTextButton(text="🎲 Random", callback_data="random"),
+                ]]))
+            except Exception as e:
+                # Tugmalar xabar ICHIGA kirmadi — foydalanuvchi amalsiz
+                # qolmasin uchun pastdagi kb "faqat Bosh menu"dan to'liq
+                # to'plamga qaytariladi.
+                logger.debug(f"[rich_blocks] InputRichBlockButtons ishlamadi ({e}), kb to'liq tugmalarga qaytarildi")
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
+                        InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
+                    ],
+                    [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
+                ])
+
         photo_id = anime.get("photo_id")
         if photo_id:
             blocks.append(_InputRichBlockDivider())
@@ -2583,6 +2753,18 @@ def search_method_keyboard(prefix):
         [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
     ])
 
+def _truncate_label(text, max_len=40):
+    """Tugma matni juda uzun bo'lsa (masalan g'alati uzun anime nomi),
+    Telegram klaviaturasida chiroyli chiqmay qolishi mumkin — shu funksiya
+    "…" bilan xavfsiz qisqartiradi. Bu — Bot API versiyasiga bog'liq
+    bo'lmagan, umumiy UI yordamchisi (uzun so'z/sarlavhalarni tugmalarda
+    kichraytirish uchun)."""
+    text = text or ""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 1].rstrip() + "…"
+
+
 def admin_anime_list_keyboard(animes, page, total, prefix):
     per_page = 10
     total_pages = math.ceil(total / per_page) or 1
@@ -2591,10 +2773,10 @@ def admin_anime_list_keyboard(animes, page, total, prefix):
         icon = "🎬" if a["media_type"] == "film" else "📺"
         uploaded = a.get("episode_count") or 0
         if a["media_type"] == "film":
-            label = f"{icon} {a['title']}"
+            label = f"{icon} {_truncate_label(a['title'])}"
         else:
             planned = a.get("total_episodes")
-            label = f"{icon} {a['title']}  ·  {uploaded}/{planned if planned else uploaded} qism"
+            label = f"{icon} {_truncate_label(a['title'], 30)}  ·  {uploaded}/{planned if planned else uploaded} qism"
         buttons.append([InlineKeyboardButton(
             text=label, callback_data=f"{prefix}_{a['id']}"
         )])
@@ -3004,12 +3186,12 @@ def ai_menu_keyboard():
 
 def ai_chat_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚪 Suhbatni tugatish", callback_data="ai_chat_stop")]
+        [InlineKeyboardButton(text="🚪 Suhbatni tugatish", callback_data="ai_chat_stop", style="danger")]
     ])
 
 def ai_image_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop")]
+        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop", style="danger")]
     ])
 
 def ai_image_result_keyboard():
@@ -3020,7 +3202,7 @@ def ai_image_result_keyboard():
     yubormaslik uchun alohida callback orqali ANIQ yoqiladi)."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Tahrirlash", callback_data="ai_image_edit_start")],
-        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop")],
+        [InlineKeyboardButton(text="🚪 Chiqish", callback_data="ai_image_stop", style="danger")],
     ])
 
 # ---- Shaxsiy chatda "mavzular" (Topics, Bot API 9.4, 2026-fev) ----
@@ -3602,6 +3784,35 @@ async def ai_mood_message(message: Message, state: FSMContext):
             await send_anime_card(message.chat.id, anime)
 
 # ===================== GUEST MODE (Bot API 10.0, 2026-may) =====================
+async def send_private_reply(chat_id, user_id, text, **kwargs):
+    """EPHEMERAL (faqat so'ragan odamga ko'rinadigan) xabar — Bot API 10.2'da
+    kiritilgan, 10.3'da (2026-avgust-24) yanada kengaytirilgan imkoniyat.
+    Guruh chatida bot ODDIY A'ZO sifatida yozganda, javobni FAQAT `user_id`
+    ko'radi — qolgan a'zolar uchun ko'rinmaydi, guruh "iflos" bo'lib qolmaydi.
+
+    DIQQAT — QO'LLANISH DOIRASI: rasmiy o'zgarishlar jurnalida
+    ephemeral_message_parameters parametri sendMessage/sendPhoto/... va
+    sendRichMessage metodlariga qo'shilgani aniq yozilgan, LEKIN
+    answerGuestQuery bu ro'yxatda YO'Q (u — Guest Mode uchun butunlay
+    alohida, o'zining javob mexanizmi, pastga qarang). Shu sabab bu
+    funksiya Guest Mode'ning ASOSIY javobini emas, balki bot ODDIY A'ZO
+    bo'lgan chatlardagi sendMessage chaqiruvlarini qamrab oladi (masalan
+    pastdagi guest-mode ZAXIRA yo'li, yoki kelajakda qo'shilishi mumkin
+    bo'lgan guruh AI-suhbati). _EPHEMERAL_SUPPORTED=False bo'lsa yoki
+    Telegram rad etsa, ODATDAGI (hammaga ko'rinadigan) xabar sifatida
+    yuboriladi — foydalanuvchi javobsiz qolmaydi, faqat maxfiylik yo'qoladi."""
+    if _EPHEMERAL_SUPPORTED:
+        try:
+            return await bot.send_message(
+                chat_id, text,
+                ephemeral_message_parameters=_EphemeralMessageParameters(receiver_user_id=user_id),
+                **kwargs,
+            )
+        except Exception as e:
+            logger.debug(f"[ephemeral] ishlamadi ({e}), ochiq xabar sifatida yuborildi")
+    return await bot.send_message(chat_id, text, **kwargs)
+
+
 # Bot A'ZO BO'LMAGAN guruhlarda ham "@AniFilmBot Naruto" kabi @mention orqali
 # chaqirilganda ishlaydi — botni guruhga admin sifatida qo'shmasdan ham
 # odamlar anime qidirishi mumkin, bu esa botning guruhlar orqali tabiiy
@@ -3641,7 +3852,10 @@ async def guest_query_handler(message: Message):
     # AnswerGuestQuery — Guest Mode uchun maxsus javob usuli (juda yangi,
     # kutubxona versiyasiga qarab shakli farq qilishi mumkin). Ishlamasa,
     # oddiy Message.answer() bilan qayta urinamiz — ko'p hollarda guest
-    # xabarlari ham aslida oddiy Message obyekti sifatida keladi.
+    # xabarlari ham aslida oddiy Message obyekti sifatida keladi. Bu ZAXIRA
+    # yo'lda, agar so'ragan foydalanuvchi ma'lum bo'lsa, ephemeral (faqat
+    # unga ko'rinadigan) javob afzal — guruh notanish botning oddiy
+    # matnlari bilan to'lib qolmaydi (2026-avgust-24, Bot API 10.3).
     answered = False
     try:
         await bot.answer_guest_query(guest_query_id=message.guest_query_id, result=reply_text)
@@ -3650,7 +3864,10 @@ async def guest_query_handler(message: Message):
         logger.debug("answer_guest_query ishlamadi (%s), oddiy reply sinalyapti", e)
     if not answered:
         try:
-            await message.answer(reply_text)
+            if message.from_user:
+                await send_private_reply(message.chat.id, message.from_user.id, reply_text)
+            else:
+                await message.answer(reply_text)
         except Exception as e:
             logger.warning(f"[guest_mode] javob berilmadi: {e}")
 
@@ -3848,7 +4065,7 @@ async def download_handler(call: CallbackQuery):
                 pass
             return
         video_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"backcard_{anime_id}", style="primary")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"backcard_{anime_id}", style="danger")],
         ])
         try:
             await bot.copy_message(
@@ -4983,7 +5200,7 @@ async def admin_list(call: CallbackQuery):
     for a in animes:
         icon = "🎬" if a["media_type"] == "film" else "📺"
         buttons.append([InlineKeyboardButton(
-            text=f"{icon} {a['title']}", callback_data=f"alist_{a['id']}"
+            text=f"{icon} {_truncate_label(a['title'])}", callback_data=f"alist_{a['id']}"
         )])
     nav = []
     if page > 0:
@@ -10943,7 +11160,21 @@ async def main():
     try:
         await dp.start_polling(
             bot,
-            allowed_updates=["message", "callback_query", "my_chat_member", "web_app_data"]
+            # DIQQAT — mavjud xatolik tuzatildi: "guest_message" va
+            # "inline_query" uchun handlerlar allaqachon kodda bor
+            # (dp.guest_message.register(...) va @dp.inline_query()),
+            # lekin ILGARI shu ro'yxatda YO'Q edi. Long polling'da aniq
+            # (bo'sh bo'lmagan) allowed_updates ro'yxati berilsa, Telegram
+            # FAQAT shu yerda sanab o'tilgan turlarni yuboradi — demak Guest
+            # Mode va Inline Mode handlerlari yozilgan bo'lsa-da, amalda
+            # HECH QACHON chaqirilmagan bo'lishi mumkin edi. Endi qo'shildi.
+            # "stopped_message_generation" — Bot API 10.3 (2026-avgust-24),
+            # AI javobini "to'xtatish" tugmasi uchun (yuqoridagi
+            # stopped_message_generation handleriga bog'liq).
+            allowed_updates=[
+                "message", "callback_query", "my_chat_member", "web_app_data",
+                "guest_message", "inline_query", "stopped_message_generation",
+            ]
         )
     finally:
         if STREAM_ENABLED:
