@@ -2024,7 +2024,10 @@ async function openDetail(id){
     });
     if(!d.episodes||!d.episodes.length){grid.innerHTML='<div class="empty-msg">Epizodlar hali qoʻshilmagan</div>';}
     loadComments(id);
-  }catch(e){document.getElementById('detailTitle').textContent='Xatolik yuz berdi';}
+  }catch(e){
+    console.error('renderDetail xato:',e);
+    document.getElementById('detailTitle').textContent='😕 Yuklab bo\'lmadi: '+(e&&e.message?e.message:'nomalum xatolik');
+  }
 }
 document.getElementById('detailBack').addEventListener('click',()=>{closePlayer();showView('home');renderAllGrid();});
 
@@ -2053,6 +2056,20 @@ function appendAiChatBubble(role,text){
   log.appendChild(el);
   log.scrollTop=log.scrollHeight;
 }
+function aiChatErrorText(code){
+  // Backend /api/ai/chat qaytarishi mumkin bo'lgan {"error": code} kodlari —
+  // anime_bot.py:webapp_ai_chat bilan bir xil ro'yxat. Noma'lum kod kelsa ham
+  // xom kodni ko'rsatamiz — bu "Xatolik yuz berdi"dan ko'ra ancha foydali.
+  const map={
+    maintenance:"hozircha texnik ishlar olib borilyapti",
+    not_subscribed:"davom etish uchun kanallarga obuna bo'ling",
+    ai_disabled:"AI xizmati hozircha o'chirilgan",
+    ai_no_response:"AI javob qaytarmadi, birozdan keyin qayta urining",
+    "ruxsat yoq":"ruxsat yo'q, sahifani qayta yuklab ko'ring",
+    "juda tez-tez, birozdan keyin qayta urining":"juda tez-tez yozdingiz, birozdan keyin qayta urining",
+  };
+  return map[code] || (code ? `xatolik: ${code}` : "noma'lum xatolik yuz berdi");
+}
 async function sendAiChat(){
   const input=document.getElementById('aiChatInput');
   const text=input.value.trim();
@@ -2072,10 +2089,10 @@ async function sendAiChat(){
       AI_CHAT_HISTORY.push({role:'model',text:res.answer});
       AI_CHAT_HISTORY=AI_CHAT_HISTORY.slice(-8);
     }else{
-      appendAiChatBubble('model','😕 Hozircha javob bera olmadim.');
+      appendAiChatBubble('model','😕 '+aiChatErrorText(res.error));
     }
   }catch(e){
-    appendAiChatBubble('model','😕 Xatolik yuz berdi.');
+    appendAiChatBubble('model','😕 Aloqa uzildi — internetni tekshirib, qayta urining.');
   }
   sendBtn.disabled=false;
 }
