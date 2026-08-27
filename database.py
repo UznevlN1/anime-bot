@@ -3,8 +3,11 @@ import psycopg2.extras
 import psycopg2.pool
 import os
 import time
+import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -483,7 +486,9 @@ def add_user(user_id, username, full_name, phone=None, referred_by=None):
             (user_id, username, full_name, phone, next_number, referred_by))
         conn.commit()
         inserted = c.rowcount > 0
-    except:
+    except psycopg2.Error as e:
+        conn.rollback()  # muhim: aks holda pool'ga qaytgan ulanish "aborted transaction" holatida qolib, keyingi so'rovlar ham xato beradi
+        logger.error(f"add_user({user_id}): foydalanuvchi qo'shishda xato: {e}")
         inserted = False
     put_conn(conn)
     return inserted

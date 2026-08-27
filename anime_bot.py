@@ -4875,7 +4875,11 @@ async def _notify_all_new_anime(anime_id, title):
     fonda xabar yuboradi. bc_send() bilan bir xil FLOOD_WAIT qayta urinish
     mantiqidan foydalanadi — Telegram vaqtincha to'xtatsa, xabar tashlab
     yuborilmasdan, kutib qayta yuboriladi."""
-    users = await asyncio.to_thread(db.get_all_active_users)
+    try:
+        users = await asyncio.to_thread(db.get_all_active_users)
+    except Exception as e:
+        logger.error(f"_notify_all_new_anime({anime_id}): foydalanuvchilar ro'yxatini olishda xato: {e}")
+        return
     for user_id in users:
         for attempt in range(2):
             try:
