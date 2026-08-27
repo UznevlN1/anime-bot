@@ -460,36 +460,6 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6, message_thr
         # orqali) — kesh chiqindi yig'ib qolmasligi uchun har doim tozalanadi.
         _active_ai_streams.pop(chat_id, None)
 
-
-
-# stopped_message_generation (Bot API 10.3, 2026-avgust-24) — foydalanuvchi
-# AI javobi oqim holida chiqayotganda "to'xtatish" tugmasini bosganda keladi.
-# Rasmiy hujjatlarda hozircha faqat sinf borligi tasdiqlangan (MessageGenerationStopped),
-# ICHIDAGI aniq maydonlar (masalan chat obyekti "chat" nomi bilanmi) hali
-# batafsil yoritilmagan — shu sabab getattr(..., None) zanjiri bilan bir
-# nechta ehtimoliy nom sinab ko'riladi. Hech biri to'g'ri kelmasa, shunchaki
-# chat_id topilmaydi va "to'xtatish" amalda ishlamaydi (lekin hech narsa
-# QULAMAYDI) — Render loglarida "stopped_message_generation: chat_id
-# aniqlanmadi" ko'rinsa, shu joyni Bot API hujjatiga solishtirib tuzatish kifoya.
-if _STOP_GENERATION_SUPPORTED:
-    @dp.stopped_message_generation()
-    async def handle_stopped_generation(event):
-        chat_obj = getattr(event, "chat", None)
-        chat_id = getattr(chat_obj, "id", None) or getattr(event, "chat_id", None)
-        if chat_id is None:
-            logger.debug("stopped_message_generation: chat_id aniqlanmadi (%r)", event)
-            return
-        stream_state = _active_ai_streams.get(chat_id)
-        if stream_state is not None:
-            stream_state["stop"] = True
-    logger.info("AI javobini to'xtatish (can_stop) handleri ro'yxatdan o'tkazildi.")
-else:
-    logger.info(
-        "can_stop: joriy aiogram versiyasida stopped_message_generation "
-        "hali qo'llab-quvvatlanmaydi (Bot API 10.3 juda yangi) — AI oqimi "
-        "avvalgidek ishlaydi, faqat 'to'xtatish' tugmasi ko'rinmaydi."
-    )
-
 _extra_admin_cache = {"roles": {}, "loaded_at": 0}
 _EXTRA_ADMIN_TTL = 60
 
@@ -594,6 +564,35 @@ _STOP_GENERATION_SUPPORTED = hasattr(dp, "stopped_message_generation")
 # stream_ai_reply() har bo'lakda shu bayroqni tekshiradi; stopped_message_generation
 # handleri esa mos chat_id uchun uni True qiladi.
 _active_ai_streams = {}
+
+# stopped_message_generation (Bot API 10.3, 2026-avgust-24) — foydalanuvchi
+# AI javobi oqim holida chiqayotganda "to'xtatish" tugmasini bosganda keladi.
+# Rasmiy hujjatlarda hozircha faqat sinf borligi tasdiqlangan (MessageGenerationStopped),
+# ICHIDAGI aniq maydonlar (masalan chat obyekti "chat" nomi bilanmi) hali
+# batafsil yoritilmagan — shu sabab getattr(..., None) zanjiri bilan bir
+# nechta ehtimoliy nom sinab ko'riladi. Hech biri to'g'ri kelmasa, shunchaki
+# chat_id topilmaydi va "to'xtatish" amalda ishlamaydi (lekin hech narsa
+# QULAMAYDI) — Render loglarida "stopped_message_generation: chat_id
+# aniqlanmadi" ko'rinsa, shu joyni Bot API hujjatiga solishtirib tuzatish kifoya.
+if _STOP_GENERATION_SUPPORTED:
+    @dp.stopped_message_generation()
+    async def handle_stopped_generation(event):
+        chat_obj = getattr(event, "chat", None)
+        chat_id = getattr(chat_obj, "id", None) or getattr(event, "chat_id", None)
+        if chat_id is None:
+            logger.debug("stopped_message_generation: chat_id aniqlanmadi (%r)", event)
+            return
+        stream_state = _active_ai_streams.get(chat_id)
+        if stream_state is not None:
+            stream_state["stop"] = True
+    logger.info("AI javobini to'xtatish (can_stop) handleri ro'yxatdan o'tkazildi.")
+else:
+    logger.info(
+        "can_stop: joriy aiogram versiyasida stopped_message_generation "
+        "hali qo'llab-quvvatlanmaydi (Bot API 10.3 juda yangi) — AI oqimi "
+        "avvalgidek ishlaydi, faqat 'to'xtatish' tugmasi ko'rinmaydi."
+    )
+
 
 # MUHIM (FLOOD_WAIT tuzatish): in_memory=True klient session_string bermasa, HAR
 # safar server qayta ishga tushganda (Render'da bu tez-tez bo'ladi) botni Telegram'ga
