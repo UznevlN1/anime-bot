@@ -2697,7 +2697,7 @@ async def send_anime_details_rich(chat_id, anime):
         rich_message = _InputRichMessage(blocks=blocks)
         await bot.send_rich_message(chat_id=chat_id, rich_message=rich_message, reply_markup=kb)
     except Exception as e:
-        logger.debug(f"[rich_blocks] batafsil ko'rinish ishlamadi ({e}), oddiy kartaga tushildi")
+        logger.exception("[rich_blocks] batafsil ko'rinish ishlamadi, oddiy kartaga tushildi")
         await send_anime_card(chat_id, anime)
 
 @dp.callback_query(F.data.startswith("details_"))

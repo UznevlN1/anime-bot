@@ -12,6 +12,7 @@ ai_service.translate_description_to_uz() funksiyasidan foydalaning.
 Asosiy funksiya:
     search_anilist(title) -> dict | None
 """
+import difflib
 import logging
 import re
 import time
@@ -57,21 +58,43 @@ _COUNTRY_MAP = {
 
 _ANILIST_QUERY = """
 query ($search: String) {
-  Media(search: $search, type: ANIME) {
-    id
-    title { romaji english native }
-    description(asHtml: false)
-    genres
-    seasonYear
-    startDate { year }
-    episodes
-    countryOfOrigin
-    averageScore
-    coverImage { large extraLarge }
-    siteUrl
+  Page(perPage: 8) {
+    media(search: $search, type: ANIME) {
+      id
+      title { romaji english native }
+      description(asHtml: false)
+      genres
+      seasonYear
+      startDate { year }
+      episodes
+      countryOfOrigin
+      averageScore
+      coverImage { large extraLarge }
+      siteUrl
+    }
   }
 }
 """
+
+
+def _pick_best_match(query: str, candidates: list[dict]) -> dict:
+    """AniList so'ralgan nomga eng mosini har doim ham birinchi qaytarmaydi
+    (ayniqsa nom qisqartma, boshqacha yozilgan yoki lotin/original
+    romanizatsiyasi farq qilsa). Shu sabab bir nechta nomzod so'rab, har
+    birining uchala nom varianti (english/romaji/native) bilan so'ralgan
+    nomni solishtirib, ENG YAQININI o'zimiz tanlaymiz."""
+    q = query.strip().lower()
+    best, best_score = candidates[0], -1.0
+    for c in candidates:
+        titles = c.get("title") or {}
+        for t in (titles.get("english"), titles.get("romaji"), titles.get("native")):
+            if not t:
+                continue
+            score = difflib.SequenceMatcher(None, q, t.strip().lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best = c
+    return best
 
 # AniList tavsiflari <br> (qator ko'chirish) va <i> kabi teglar bilan keladi.
 # <br> -> "\n" ga aylantiriladi, qolgan teglar esa BO'SH emas, BO'SHLIQ bilan
@@ -90,7 +113,7 @@ async def search_anilist(title: str) -> dict | None:
     if not title:
         return None
 
-    cache_key = title.lower()
+    cache_key = re.sub(r"\s+", " ", title.lower())
     cached = _cache.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return cached[1]
@@ -110,9 +133,10 @@ async def search_anilist(title: str) -> dict | None:
         logger.warning(f"AniList so'rovida xato: {e}")
         return None
 
-    media = (data or {}).get("data", {}).get("Media")
-    if not media:
+    media_list = (data or {}).get("data", {}).get("Page", {}).get("media") or []
+    if not media_list:
         return None
+    media = _pick_best_match(title, media_list)
 
     desc_raw = media.get("description") or ""
     desc_clean = _BR_RE.sub("\n", desc_raw)

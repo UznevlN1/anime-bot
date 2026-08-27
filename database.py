@@ -72,6 +72,13 @@ def get_conn():
             except Exception:
                 pass
             conn = psycopg2.connect(DATABASE_URL, options=_CONN_OPTIONS)
+            # Bu ulanish _pool.getconn() orqali chiqmagan — pool uni "tanimaydi".
+            # Belgilab qo'yamiz, shunda put_conn() uni _pool.putconn()ga
+            # yubormaydi (aks holda psycopg2 "trying to put unkeyed connection"
+            # xatosini beradi; eski kodda bu try/except bilan tutilgani uchun
+            # ko'rinmas edi, lekin shu oraliqda jismoniy ulanishlar soni
+            # maxconn=25'dan qisqa muddatga oshib ketishi mumkin edi).
+            conn._uznev_standalone = True
             _last_checked[id(conn)] = now
     return conn
 
@@ -85,6 +92,16 @@ def put_conn(conn):
         conn.rollback()
     except Exception:
         pass
+    if getattr(conn, "_uznev_standalone", False):
+        # get_conn() o'lik ulanishni almashtirganda pool'dan tashqarida ochgan —
+        # pool.putconn() bunga "notanish" deb xato beradi, shuning uchun
+        # to'g'ridan-to'g'ri yopamiz.
+        _last_checked.pop(id(conn), None)
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
     try:
         _pool.putconn(conn)
     except Exception:
