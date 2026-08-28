@@ -136,6 +136,11 @@ def init_db():
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_plan TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT")
+    # Taklif qilingan foydalanuvchi tufayli uning taklif qilgan odamiga necha kun
+    # bonus berilgani — agar bu foydalanuvchi keyinchalik botni tark etsa
+    # (bloklasa), revoke_referral_bonus() aynan shu qadar kunni taklif qilgan
+    # odamning Premium muddatidan qaytarib oladi (suiiste'molning oldini olish).
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_days INTEGER DEFAULT 0")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_renew_notified INTEGER DEFAULT 0")
     # Webapp 🔔 bildirishnoma paneli — foydalanuvchi oxirgi ko'rgan bildirishnoma
     # id'si (shundan katta id'li bildirishnomalar "o'qilmagan" hisoblanadi).
@@ -735,14 +740,51 @@ def get_revenue_stats():
         "by_month": by_month,
     }
 
-def process_referral_bonus(referrer_id, bonus_days):
-    """Yangi foydalanuvchi kimningdir taklifi bilan kelganda, taklif qilgan odamga bonus kun qo'shadi."""
+def process_referral_bonus(referrer_id, bonus_days, referred_user_id=None):
+    """Yangi foydalanuvchi kimningdir taklifi bilan kelganda, taklif qilgan odamga bonus kun qo'shadi.
+    referred_user_id berilsa, taklif qilingan foydalanuvchining o'z yozuviga ham
+    'unga necha kun bonus berilgani' saqlanadi (referral_bonus_days) — bu, agar
+    o'sha foydalanuvchi keyinchalik botni tark etsa, revoke_referral_bonus() aynan
+    shu qadar kunni taklif qilgan odamdan qaytarib olishi uchun kerak."""
     if not referrer_id:
         return
     referrer = get_user(referrer_id)
     if not referrer:
         return
     extend_premium(referrer_id, bonus_days, plan=referrer.get("premium_plan") or "referral")
+    if referred_user_id:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE users SET referral_bonus_days=%s WHERE user_id=%s", (bonus_days, referred_user_id))
+        conn.commit()
+        put_conn(conn)
+
+def revoke_referral_bonus(user_id):
+    """Taklif qilingan foydalanuvchi botni bloklab/tark etganda chaqiriladi.
+    Agar bu foydalanuvchi kimningdir referal havolasi orqali qo'shilgan bo'lsa va
+    o'sha taklif uchun bonus kun berilgan bo'lsa (referral_bonus_days > 0) —
+    aynan o'sha kunlarni taklif qilgan odamning Premium muddatidan ayirib
+    tashlaydi (soxta/bir martalik akkountlar bilan bonus "termash"ning oldini
+    olish uchun). Har bir bonus faqat BIR MARTA qaytarib olinadi — shu sabab
+    ayirib bo'lgach referral_bonus_days darhol 0 ga tushiriladi, shu bilan
+    funksiya bir xil foydalanuvchi uchun tasodifan qayta chaqirilsa ham ikkinchi
+    marta ayirib qo'ymaydi. Haqiqatda qaytarib olingan kunlar sonini qaytaradi
+    (hech narsa qaytarilmagan bo'lsa 0 — masalan referal orqali kelmagan yoki
+    bonusi allaqachon qaytarib olingan foydalanuvchi uchun)."""
+    u = get_user(user_id)
+    if not u:
+        return 0
+    referrer_id = u.get("referred_by")
+    bonus_days = u.get("referral_bonus_days") or 0
+    if not referrer_id or bonus_days <= 0:
+        return 0
+    extend_premium(referrer_id, -bonus_days)
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET referral_bonus_days=0 WHERE user_id=%s", (user_id,))
+    conn.commit()
+    put_conn(conn)
+    return bonus_days
 
 def block_user(user_id):
     conn = get_conn()

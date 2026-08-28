@@ -3048,7 +3048,7 @@ async def reg_phone(message: Message, state: FSMContext):
     if is_new and referred_by:
         prices = await premium_settings()
         try:
-            await asyncio.to_thread(db.process_referral_bonus, referred_by, prices["ref_bonus"])
+            await asyncio.to_thread(db.process_referral_bonus, referred_by, prices["ref_bonus"], user.id)
             await bot.send_message(
                 referred_by,
                 f"🎁 Sizning havolangiz orqali yangi foydalanuvchi qo'shildi!\n"
@@ -8693,6 +8693,27 @@ async def mark_user_left(user_id, tg_user=None):
 
     if not was_active:
         return  # allaqachon nofaol/bloklangan edi — qayta xabar bermaymiz
+
+    # Agar bu foydalanuvchi kimningdir referal havolasi orqali qo'shilgan bo'lsa va
+    # o'sha taklif uchun bonus kun berilgan bo'lsa — botni tark etganda bonusni
+    # taklif qilgan odamning Premium muddatidan qaytarib olamiz (soxta/bir martalik
+    # akkountlar bilan referal bonusini suiiste'mol qilishning oldini olish uchun).
+    try:
+        revoked_days = await asyncio.to_thread(db.revoke_referral_bonus, user_id)
+        if revoked_days and u.get("referred_by"):
+            try:
+                await bot.send_message(
+                    u["referred_by"],
+                    f"⚠️ Siz referal havolangiz orqali taklif qilgan foydalanuvchi "
+                    f"botni tark etdi, shu sabab unga berilgan "
+                    f"<b>{revoked_days} kunlik bonus Premium</b> muddatingizdan "
+                    f"ayirib olindi.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     full_name = (tg_user.full_name if tg_user else None) or (u.get("full_name") if u else None) or "Nomalum"
     username = (tg_user.username if tg_user else None) or (u.get("username") if u else None)
