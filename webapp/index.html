@@ -527,6 +527,11 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
 .comment-item{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin-bottom:10px;}
 .comment-item.comment-premium{border-color:rgba(245,197,66,.4);background:linear-gradient(135deg,rgba(245,197,66,.06),var(--bg-card));}
 .comment-crown{font-size:11px;}
+.verified-badge{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:linear-gradient(135deg,#4ade80,#22c55e);box-shadow:0 0 6px rgba(74,222,128,.5);flex-shrink:0;vertical-align:middle;}
+.verified-badge svg{width:8px;height:8px;display:block;}
+.pf-name-wrap{display:flex;align-items:center;gap:6px;}
+.pf-name-wrap .verified-badge{width:16px;height:16px;}
+.pf-name-wrap .verified-badge svg{width:9px;height:9px;}
 .comment-user{font-size:12.5px;font-weight:800;color:var(--purple2);margin-bottom:3px;}
 .comment-text{font-size:13px;line-height:1.5;color:#dcdce4;}
 .comment-actions{display:flex;gap:14px;margin-top:8px;}
@@ -652,7 +657,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
       <div class="pf-card-row">
         <div class="pf-avatar"><div class="pf-avatar-img" id="profilAvatar">?</div><div class="pf-online"></div></div>
         <div style="flex:1;min-width:0;">
-          <div class="pf-name" id="profilName">Foydalanuvchi</div>
+          <div class="pf-name-wrap"><div class="pf-name" id="profilName">Foydalanuvchi</div><span class="verified-badge" id="profilVerifiedBadge" style="display:none;" title="Premium"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span></div>
           <div class="pf-username" id="profilUsername"></div>
           <div class="pf-joined">📅 &nbsp;<span id="profilJoined">Botga qo'shilgan sana: —</span></div>
         </div>
@@ -1875,6 +1880,7 @@ async function renderProfil(){
     badge.style.display='inline-flex';
     badge.textContent=`👑 Premium · ${p.premium_days_left} kun qoldi`;
     card.classList.add('pf-card-premium');
+    document.getElementById('profilVerifiedBadge').style.display='inline-flex';
 
     const vip=document.getElementById('pfVipSection');
     vip.style.display='';
@@ -2105,7 +2111,7 @@ function renderCommentItem(c,isReply){
   const el=document.createElement('div');el.className='comment-item'+(c.is_premium?' comment-premium':'');
   const uname=c.username?('@'+c.username):('Foydalanuvchi '+String(c.user_id).slice(-4));
   const safeUname=escapeHtml(uname);
-  const unameHtml=safeUname+(c.is_premium?' <span class="comment-crown">👑</span>':'');
+  const unameHtml=safeUname+(c.is_premium?' <span class="comment-crown">👑</span> <span class="verified-badge" title="Premium"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>':'');
   el.innerHTML=`<div class="comment-user">${unameHtml}</div><div class="comment-text"></div>
     <div class="comment-actions">
       <button class="comment-action-btn${c.liked_by_me?' liked':''}" data-cid="${c.id}" data-action="like">${c.liked_by_me?'❤️':'🤍'} <span class="like-count">${c.likes||0}</span></button>
