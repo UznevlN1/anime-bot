@@ -1288,7 +1288,7 @@ def get_active_non_premium_users(days=7, limit=150):
         JOIN watch_activity wa ON wa.user_id = u.user_id
         WHERE u.is_active=1 AND u.is_blocked=0
           AND (u.is_premium=0 OR u.is_premium IS NULL
-               OR u.premium_until IS NULL OR u.premium_until < NOW())
+               OR u.premium_until IS NULL OR u.premium_until < to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
         GROUP BY u.user_id, u.username, u.full_name
         HAVING MAX(wa.activity_date) >= (CURRENT_DATE - %s::int)
         ORDER BY last_seen DESC

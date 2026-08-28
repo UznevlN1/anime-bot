@@ -5215,7 +5215,7 @@ async def addepi_done(message: Message, state: FSMContext):
     # muvaffaqiyatli bo'lishi shart emas (ba'zilari xato bilan o'tkazib
     # yuborilishi mumkin) — shu sabab eng OXIRGI (eng yangi) muvaffaqiyatli
     # saqlangan qism raqami ishlatiladi.
-    latest_ep_num = max(ep_num for ep_num, _ in ok_pairs)
+    latest_ep_num = max(ep_num for ep_num, _, _ in ok_pairs)
     anime_row = await asyncio.to_thread(db.get_anime, data["episode_anime_id"])
     if anime_row:
         eps = await asyncio.to_thread(db.get_episodes, data["episode_anime_id"])
