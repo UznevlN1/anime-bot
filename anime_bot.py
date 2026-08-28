@@ -3308,7 +3308,7 @@ async def ai_chat_stop_cmd(message: Message, state: FSMContext):
 
 _BOT_INFO_SETTINGS_KEYS = [
     "profile_support_url", "premium_price_1m", "premium_price_3m",
-    "premium_price_1y", "premium_referral_bonus_days",
+    "premium_price_1y", "premium_referral_bonus_days", "premium_early_hours",
 ]
 
 
@@ -3324,6 +3324,7 @@ async def _build_bot_info_text():
     price_3m = settings.get("premium_price_3m")
     price_1y = settings.get("premium_price_1y")
     bonus_days = settings.get("premium_referral_bonus_days")
+    early_hours = settings.get("premium_early_hours")
     support_url = settings.get("profile_support_url")
 
     lines = [
@@ -3333,11 +3334,18 @@ async def _build_bot_info_text():
         "- 🔍 Qidiruv — anime nomi boʻyicha qidiruv",
         "- 🎬 Anime Film / 📺 Anime Serial — turlari boʻyicha roʻyxat",
         "- 🎲 Random — tasodifiy anime tavsiya qiladi",
+        "- 🤖 AI Yordamchi — aynan shu boʻlim, 3 ta rejimda ishlaydi: "
+        "💬 AI bilan suhbat (aynan hozirgi erkin suhbat), 🎯 Menga anime "
+        "tavsiya qil (foydalanuvchining sevimlilari/tarixiga qarab aniq "
+        "nomlar tanlab beradi), 🎭 Kayfiyatimga mos tanla (foydalanuvchi "
+        "hozirgi kayfiyatini yozsa, shunga mos anime tanlaydi)",
         "- 🎌 «Animelarni koʻrish» tugmasi mini-ilovani ochadi: u yerda "
         "barcha animelar/kategoriyalar, ❤️ Sevimlilar, 🕒 Tomosha tarixi "
         "(qaysi joyida toʻxtaganingiz eslab qolinadi), 💬 har bir anime "
-        "ostiga izoh qoldirish, 👤 Profil (statistika, obunalar, "
-        "sozlamalar) mavjud",
+        "ostiga izoh qoldirish, har bir anime sahifasida shu anime "
+        "haqida savol berish uchun alohida qisqa AI-chat (spoylersiz "
+        "javob beradi), 👤 Profil (statistika, obunalar, sozlamalar) "
+        "mavjud",
         "- 🔔 «Xabardor qil» — anime sahifasida bosilsa, shu animega yangi "
         "qism yoki jonli efir qoʻshilganda foydalanuvchiga shaxsiy xabar "
         "keladi",
@@ -3355,6 +3363,11 @@ async def _build_bot_info_text():
         price_parts.append(f"1 yil — {price_1y} soʻm")
     if price_parts:
         premium_lines.append("  Joriy narxlar: " + ", ".join(price_parts) + ".")
+    if early_hours:
+        premium_lines.append(
+            f"  Yangi qismlar Premium foydalanuvchilarga oddiy "
+            f"foydalanuvchilardan {early_hours} soat oldin chiqadi."
+        )
     if bonus_days:
         premium_lines.append(
             f"  Doʻstingizni referal havolangiz orqali taklif qilsangiz, u "
@@ -3369,6 +3382,48 @@ async def _build_bot_info_text():
     if support_url:
         lines.append(f"Savol yoki muammo boʻlsa murojaat: {support_url}")
     return "\n".join(lines)
+
+
+# AniList'dan kelgan janrlar odatda INGLIZ tilida keladi (Action, Comedy
+# va h.k. — qarang: anime_api.py). AI bilan suhbat uchun katalog matni
+# qurilayotganda bu soʻzlar xom holda promptga tushsa, AI ham javobida
+# ularni ingliz holicha qaytarib yuborishi (yoki oʻzbekcha gap ichiga
+# aralashtirib yozishi) mumkin edi. Shu sabab, FAQAT AI'ga yuborishdan
+# oldin, eng koʻp uchraydigan janrlar oʻzbekchaga oʻgiriladi — toʻliq
+# roʻyxat emas, tarjimasi notaniq janr asl holicha qoldiriladi (notoʻgʻri
+# tarjima qilishdan koʻra shu maʼqul). DIQQAT: botning oʻzida (masalan
+# anime sahifasidagi "🎭 Janr" qatorida) janr shu funksiyaga tegmasdan,
+# admin saqlagan holicha koʻrsatiladi — bu faqat AI chat promptiga xos
+# yengil filtr, bazadagi maʼlumotni oʻzgartirmaydi.
+_GENRE_UZ = {
+    "action": "jangari", "adventure": "sarguzasht", "comedy": "komediya",
+    "drama": "drama", "fantasy": "fantastika", "horror": "qoʻrqinchli",
+    "mystery": "sirli-detektiv", "romance": "romantik",
+    "sci-fi": "ilmiy-fantastika", "science fiction": "ilmiy-fantastika",
+    "slice of life": "kundalik hayot", "sports": "sport",
+    "supernatural": "gʻayritabiiy", "thriller": "triller",
+    "mecha": "mexanika (mecha)", "music": "musiqiy",
+    "psychological": "psixologik", "school": "maktab",
+    "historical": "tarixiy", "military": "harbiy",
+    "super power": "super kuch", "suspense": "hayajonli",
+    "family": "oilaviy", "crime": "jinoiy", "mythology": "mifologik",
+    "space": "kosmik", "workplace": "ish joyi haqida",
+    "isekai": "boshqa olamga tushish (isekai)",
+    "award winning": "mukofotlangan",
+}
+
+
+def _translate_genre_text(genre_text):
+    """AniList'dan (ingliz tilida) kelgan, vergul bilan ajratilgan janr
+    matnini AI promptiga qoʻshishdan oldin imkon qadar oʻzbekchaga
+    oʻgiradi (qarang: yuqoridagi _GENRE_UZ) — tarjimasi notaniq janr soʻzi
+    boʻlsa, xato tarjima qilishdan koʻra asl holida qoldiriladi."""
+    if not genre_text:
+        return genre_text
+    parts = [p.strip() for p in genre_text.split(",") if p.strip()]
+    if not parts:
+        return genre_text
+    return ", ".join(_GENRE_UZ.get(p.lower(), p) for p in parts)
 
 
 def _looks_like_catalog_question(text):
@@ -3441,7 +3496,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
     if _looks_like_catalog_question(text):
         catalog_text = "\n".join(
             f"{a['title']} ({a.get('year') or 'yil nomaʼlum'}, "
-            f"{a.get('genre') or 'janr nomaʼlum'}, "
+            f"{_translate_genre_text(a.get('genre')) or 'janr nomaʼlum'}, "
             f"{'film' if a.get('media_type') == 'film' else 'serial'})"
             for a in animes[:300]
         )
@@ -3470,6 +3525,7 @@ async def ai_chat_message(message: Message, state: FSMContext):
     await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
     await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
+    await asyncio.to_thread(db.log_ai_question, message.from_user.id, text)
 
 @dp.callback_query(F.data == "ai_image_start")
 async def ai_image_start(call: CallbackQuery, state: FSMContext):
@@ -7724,6 +7780,7 @@ async def admin_stats(call: CallbackQuery):
             [InlineKeyboardButton(text="📈 O'sish grafigi", callback_data="admin_growth_chart", style="primary")],
             [InlineKeyboardButton(text="🤖 AI tahlil", callback_data="admin_ai_stats", style="primary")],
             [InlineKeyboardButton(text="💬 Izohlar trendi (AI)", callback_data="admin_comment_trends", style="primary")],
+            [InlineKeyboardButton(text="❓ AI savollari", callback_data="admin_aiq_0", style="primary")],
             [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
         ]),
         parse_mode="HTML"
@@ -7801,6 +7858,43 @@ async def admin_comment_trends(call: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")],
         ]),
+    )
+
+# ---- AI'GA YOZILGAN SAVOLLAR RO'YXATI (ADMIN) ----
+@dp.callback_query(F.data.regexp(r"^admin_aiq_\d+$"))
+async def admin_ai_questions(call: CallbackQuery):
+    """Foydalanuvchilar AI chatga yozgan savollarini (sana + kim + matn)
+    eng yangisidan boshlab, sahifalab ko'rsatadi — botni yaxshilash uchun
+    admin qaysi mavzular ko'p so'ralayotganini kuzatishi mumkin."""
+    if not await is_admin_user(call.from_user.id):
+        return
+    page = int(call.data.split("_")[2])
+    per_page = 10
+    questions = await asyncio.to_thread(db.get_ai_questions, page=page, per_page=per_page)
+    total = await asyncio.to_thread(db.get_ai_questions_count)
+    total_pages = math.ceil(total / per_page) or 1
+    if not questions:
+        body = "Hozircha hech kim AI'ga savol yozmagan."
+    else:
+        blocks = []
+        for q in questions:
+            who = q.get("full_name") or (f"@{q['username']}" if q.get("username") else f"ID {q['user_id']}")
+            date = (q.get("created_at") or "")[:16]
+            snippet = q["text"][:200] + ("…" if len(q["text"]) > 200 else "")
+            blocks.append(f"🕐 {html.escape(date)} — <b>{html.escape(who)}</b>\n{html.escape(snippet)}")
+        body = "\n\n".join(blocks)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"admin_aiq_{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if page + 1 < total_pages:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"admin_aiq_{page+1}"))
+    buttons = [nav] if nav else []
+    buttons.append([InlineKeyboardButton(text="🔙 Statistika", callback_data="admin_stats")])
+    await call.message.edit_text(
+        f"❓ <b>AI'ga yozilgan savollar</b> (jami: {total})\n\n{body}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
     )
 
 def _sparkline(values):

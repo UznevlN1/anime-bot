@@ -395,6 +395,18 @@ def init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ai_chat_history_user ON ai_chat_history(user_id, id DESC)")
 
+    # AI'ga yozilgan savollarning DOIMIY jurnali (admin ko'rib chiqishi
+    # uchun, botni yaxshilash maqsadida) — yuqoridagi ai_chat_history'dan
+    # farqli o'laroq, bu yerda eski yozuvlar hech qachon tozalanmaydi.
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ai_questions_log (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ai_questions_log_id ON ai_questions_log(id DESC)")
+
     # Webapp 🔔 bildirishnoma paneli — yangi qism/anime va admin e'lonlari
     # shu jadvalga yoziladi, webapp uni /api/notifications orqali o'qiydi.
     c.execute("""
@@ -2221,5 +2233,47 @@ def add_ai_chat_message(user_id, role, text):
     """, (user_id, user_id))
     conn.commit()
     put_conn(conn)
+
+
+def log_ai_question(user_id, text):
+    """Foydalanuvchi AI'ga yozgan savolni DOIMIY jurnalga qo'shadi (admin
+    keyinchalik "AI savollari" bo'limida ko'rib chiqishi uchun) —
+    add_ai_chat_message'dan farqli o'laroq, bu yerdagi yozuvlar hech qachon
+    avtomatik o'chirilmaydi."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO ai_questions_log (user_id, text) VALUES (%s,%s)",
+        (user_id, text[:4000])
+    )
+    conn.commit()
+    put_conn(conn)
+
+
+def get_ai_questions(page=0, per_page=10):
+    """AI'ga yozilgan savollarni eng yangisidan boshlab sahifalab qaytaradi,
+    har biriga (agar mavjud bo'lsa) foydalanuvchi ismi/username'ini ham
+    qo'shib — admin panelidagi "AI savollari" ro'yxati uchun."""
+    conn = get_conn()
+    c = psycopg2.extras.RealDictCursor(conn)
+    offset = page * per_page
+    c.execute("""
+        SELECT q.id, q.user_id, q.text, q.created_at, u.full_name, u.username
+        FROM ai_questions_log q
+        LEFT JOIN users u ON u.user_id = q.user_id
+        ORDER BY q.id DESC LIMIT %s OFFSET %s
+    """, (per_page, offset))
+    rows = [dict(r) for r in c.fetchall()]
+    put_conn(conn)
+    return rows
+
+
+def get_ai_questions_count():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM ai_questions_log")
+    count = c.fetchone()[0]
+    put_conn(conn)
+    return count
 
 

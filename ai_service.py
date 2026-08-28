@@ -151,10 +151,17 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
       faqat erkin, chuqurroq fikr talab qiladigan suhbatlarda "low"/"medium"
       ishlatilsin.
 
-    is_admin: True (standart) — bu so'rov admin uchun (yoki admin panel/
-      backend jarayoni uchun) ekanini bildiradi, bunday holda Gemini
-      ASOSIY model bo'lib qoladi (Groq faqat Gemini butunlay ishlamasa
-      zaxira sifatida ishlatiladi).
+    is_admin: True (standart) — bu so'rov admin panel/backend jarayoni
+      uchun ekanini bildiradi. Bunday holda so'rov FAQAT Gemini orqali
+      yuboriladi — Groq'ga UMUMAN murojaat qilinmaydi (na birinchi
+      urinish, na oxirgi zaxira sifatida), hatto Gemini (asosiy + barcha
+      zaxira modellari) butunlay ishlamay qolsa ham — bu holda funksiya
+      xavfsiz None qaytaradi. Bu ataylab shunday: admin funksiyalari
+      (moderatsiya, to'lov cheki tekshiruvi, tavsif/tahlil yozish va h.k.)
+      doim BIR XIL, eng sifatli provayderdan (Gemini) kelishi kerak —
+      ular yakuniy qarorni qabul qiluvchi admin uchun yordamchi signal,
+      xolos, shu sabab sezilmasdan boshqa provayderga almashtirilishi
+      kerak emas.
       False — bu oddiy foydalanuvchiga real vaqtda ko'rsatiladigan AI
       javobi ekanini bildiradi. Bunday holda, agar Groq ulangan bo'lsa,
       SO'ROV AVVAL GROQ'GA yuboriladi (Gemini kvotasi/resursi admin
@@ -181,6 +188,17 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
         )
 
     if not GEMINI_API_KEY:
+        if is_admin:
+            # Admin so'rovlari FAQAT Gemini orqali yuboriladi — kalit
+            # sozlanmagan bo'lsa ham Groq'ga sezilmasdan o'tilmaydi,
+            # buning o'rniga xavfsiz "bo'sh" natija qaytariladi (barcha
+            # admin funksiyalari buni allaqachon kutadi va admin baribir
+            # qo'lda davom eta oladi — masalan to'lovni o'zi tekshiradi).
+            logger.warning(
+                "Admin so'rovi uchun GEMINI_API_KEY yo'q — is_admin=True "
+                "bo'lgani sabab Groq'ga o'tilmadi, bo'sh natija qaytarilyapti"
+            )
+            return None
         # Gemini kaliti umuman yo'q — Gemini modellarini sinab ko'rishning
         # ma'nosi yo'q, to'g'ridan-to'g'ri Groq'ga o'tamiz.
         return await _call_groq(
@@ -256,9 +274,12 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
                 logger.exception("Gemini (%s) so'rovida xatolik yuz berdi", model_name)
                 break  # keyingi zaxira modelni sinab ko'ramiz
 
-    # Gemini (asosiy + barcha zaxira modellari) muvaffaqiyatsiz bo'ldi —
-    # oxirgi chora sifatida Groq'ni sinab ko'ramiz (agar ulangan bo'lsa).
-    if GROQ_ENABLED:
+    # Gemini (asosiy + barcha zaxira modellari) muvaffaqiyatsiz bo'ldi.
+    # Admin so'rovlari uchun SHU YERDA to'xtaymiz — admin panel/backend
+    # AI muloqoti faqat Gemini bilan bo'lishi kerak, Groq'ga sezilmasdan
+    # o'tilmaydi (qarang: yuqoridagi is_admin izohi). Faqat oddiy
+    # foydalanuvchi so'rovi bo'lsa, oxirgi chora sifatida Groq sinaladi.
+    if not is_admin and GROQ_ENABLED:
         logger.warning(
             "Gemini'ning barcha modellari ishlamadi — Groq (%s) zaxira "
             "sifatida sinalyapti", GROQ_TEXT_MODEL,
@@ -271,7 +292,7 @@ async def _call_gemini(contents, system_instruction=None, temperature=0.7,
         if groq_result:
             return groq_result
 
-    return None  # Gemini va Groq — ikkalasi ham muvaffaqiyatsiz bo'ldi
+    return None  # Gemini muvaffaqiyatsiz bo'ldi (admin bo'lsa Groq sinalmadi)
 
 
 def _contents_has_image(contents):
@@ -366,34 +387,39 @@ async def _call_groq(contents, system_instruction=None, temperature=0.7,
         return None
 
 
-async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=None,
-                  bot_info_text=None):
-    """Erkin suhbat uchun javob qaytaradi.
-    history: [("user"|"model", matn), ...] — oldingi xabarlar (ixtiyoriy).
-    catalog_text: botdagi haqiqiy animelar ro'yxati (ixtiyoriy) — berilsa,
-    AI 'qanaqa anime bor' kabi savollarga OʻYLAB TOPMASDAN, shu roʻyxatga
-    asoslanib javob beradi.
-    bot_info_text: botning oʻzi haqidagi haqiqiy maʼlumot (boʻlimlar,
-    Premium narxlari va h.k.) — berilsa, AI bot haqida soʻralganda
-    OʻYLAB TOPMASDAN, shu maʼlumotga asoslanib javob beradi."""
-    contents = []
-    for role, text in (history or []):
-        contents.append({"role": role, "parts": [{"text": text}]})
-    contents.append({"role": "user", "parts": [{"text": user_text}]})
-
-    sys_prompt = system_instruction or (
+def _default_chat_system_prompt():
+    """ask_ai() va _build_chat_prompt() ikkalasi ham ishlatadigan asosiy
+    (bot_info_text/catalog_text qo'shilishidan OLDINGI) tizim prompti —
+    bitta joyda saqlanadi, shu sabab ikkalasi hech qachon bir-biridan
+    farqlanib qolmaydi (oldin bu matn ikki joyda qo'lda takrorlangan edi,
+    bu esa ularning vaqt o'tishi bilan bir-biridan chetlashish xavfini
+    tug'dirar edi — endi bunday xavf yo'q)."""
+    return (
         "Sen umumiy chatbot emassan — sen aynan 'AniFilm Bot' telegram "
         "botining oʻziga tegishli, shu botning ichida ishlaydigan shaxsiy "
-        "AI-yordamchisan. Har bir javobingda oʻzingni shu botning bir "
-        "qismi sifatida tut: kerak boʻlganda botning oʻzi (uning "
-        "katalogi, boʻlimlari, imkoniyatlari — 🔍 Qidiruv, 📚 Katalog, "
-        "tavsiyalar va h.k.) bilan bogʻlab gapir.\n\n"
-        "Anime, kino, serial yoki botning oʻzi haqidagi savollarga "
-        "oʻzbek tilida toʻliq, mazmunli va foydali javob ber — kerak "
-        "boʻlsa misollar, tafsilotlar va tushuntirishlar bilan boy javob "
-        "yoz, faqat bir-ikki gap bilan cheklanma. Sayoz yoki umumiy "
-        "javoblardan qoch — aniq faktlar, nomlar va tavsiyalar bilan "
-        "javob ber.\n\n"
+        "AI-yordamchisan. Eng muhim ustuvorliging — botning oʻzini chuqur "
+        "va aniq bilish: botning haqiqiy boʻlimlari/tugmalari (🔍 Qidiruv, "
+        "🎬 Anime Film / 📺 Anime Serial, 🎲 Random, 🎌 «Animelarni "
+        "koʻrish» mini-ilovasi), AI Yordamchining oʻzga rejimlari (🎯 "
+        "tavsiya, 🎭 kayfiyat) va Premium shartlari haqida savol berilsa, "
+        "pastda berilgan HAQIQIY maʼlumotga tayanib aniq javob ber — "
+        "mavjud boʻlmagan tugma yoki boʻlim haqida gapirma (masalan, "
+        "alohida \"Katalog\" nomli boʻlim yoʻq). Kerak boʻlganda "
+        "foydalanuvchini botning aynan shu haqiqiy boʻlimiga yoʻnaltir.\n\n"
+        "Anime, kino yoki serial haqidagi savollarga oʻzbek tilida aniq "
+        "va foydali javob ber, lekin soʻralmagan qoʻshimcha tafsilot yoki "
+        "tarix bilan javobni ortiqcha choʻzma — savolga qancha kerak "
+        "boʻlsa, shuncha yoz. Foydalanuvchi aniq \"batafsil ayt\", "
+        "\"koʻproq gapir\" kabi soʻrasagina, misollar va tafsilotlar "
+        "bilan kengroq javob ber. Sayoz yoki notoʻgʻri javoblardan ham "
+        "qoch — aniq faktlar va nomlar bilan javob ber, lekin kerak "
+        "boʻlmagan joyda gapni choʻzma.\n\n"
+        "MUHIM — til qoidasi: FAQAT oʻzbek tilida yoz. Ingliz yoki "
+        "boshqa til soʻz va iboralarini oʻzbekcha gap ichiga "
+        "aralashtirma — janr yoki atama ingliz tilida uchrasa (masalan "
+        "\"Action\", \"Romance\"), oʻzbekcha muqobili bilan yoz. "
+        "Anime/kino nomlari va personaj ismlarini original holida "
+        "qoldirish mumkin (ularni majburan tarjima qilma).\n\n"
         "Agar savol anime/kino/serial va botning oʻzi bilan UMUMAN "
         "bogʻliq boʻlmasa (masalan matematika, siyosat, boshqa aloqasiz "
         "mavzu), unga qisqagina, xushmuomalalik bilan javob ber-da, "
@@ -401,6 +427,13 @@ async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=
         "va katalogiga — qaytar. Bunday aloqasiz savollarga anime "
         "savollari kabi chuqur va batafsil yozib oʻtirma."
     )
+
+
+def _append_chat_context(sys_prompt, catalog_text=None, bot_info_text=None):
+    """Berilgan tizim promptiga bot_info_text/catalog_text qo'shimchalarini
+    qo'shib qaytaradi — ask_ai() va _build_chat_prompt() ikkalasi ham shu
+    orqali, bir xil formatda, botning HAQIQIY ma'lumotlarini promptga
+    kiritadi (qarang: yuqoridagi _default_chat_system_prompt())."""
     if bot_info_text:
         sys_prompt += (
             "\n\nBot haqida HAQIQIY maʼlumot (bot qanday ishlashi, "
@@ -417,11 +450,38 @@ async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=
             "\n\nAgar foydalanuvchi \"qanaqa anime bor\", \"nima koʻrsam "
             "boʻladi\", \"roʻyxat\" kabi savol bersa — shu roʻyxatdan mavzuga "
             "yoki janrga mos bir nechta nomni aniq aytib ber (ixtiyoriy "
-            "ravishda yil/janrini ham qoʻsh), va 🔍 Qidiruv yoki 📚 Katalog "
-            "tugmasidan toʻliq roʻyxatni koʻrishni maslahat ber. Agar roʻyxat "
-            "boʻsh boʻlsa yoki mos nom topa olmasang, buni rostgoʻylik bilan "
-            "ayt — hech qachon mavjud boʻlmagan sarlavha oʻylab topma."
+            "ravishda yil/janrini ham qoʻsh), va 🔍 Qidiruv yoki 🎌 "
+            "«Animelarni koʻrish» tugmasidan toʻliq roʻyxatni koʻrishni "
+            "maslahat ber. Agar roʻyxat boʻsh boʻlsa yoki mos nom topa "
+            "olmasang, buni rostgoʻylik bilan ayt — hech qachon mavjud "
+            "boʻlmagan sarlavha oʻylab topma."
         )
+    return sys_prompt
+
+
+async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=None,
+                  bot_info_text=None):
+    """Erkin suhbat uchun javob qaytaradi.
+    history: [("user"|"model", matn), ...] — oldingi xabarlar (ixtiyoriy).
+    catalog_text: botdagi haqiqiy animelar ro'yxati (ixtiyoriy) — berilsa,
+    AI 'qanaqa anime bor' kabi savollarga OʻYLAB TOPMASDAN, shu roʻyxatga
+    asoslanib javob beradi.
+    bot_info_text: botning oʻzi haqidagi haqiqiy maʼlumot (boʻlimlar,
+    Premium narxlari va h.k.) — berilsa, AI bot haqida soʻralganda
+    OʻYLAB TOPMASDAN, shu maʼlumotga asoslanib javob beradi.
+    system_instruction berilmasa, _default_chat_system_prompt() bilan bir
+    xil (standart) tizim prompti ishlatiladi — ask_ai_stream() aynan
+    shundan (_build_chat_prompt() orqali) foydalanadi, shu sabab ikkalasi
+    har doim bir xil xulq-atvorga ega bo'ladi."""
+    contents = []
+    for role, text in (history or []):
+        contents.append({"role": role, "parts": [{"text": text}]})
+    contents.append({"role": "user", "parts": [{"text": user_text}]})
+
+    sys_prompt = _append_chat_context(
+        system_instruction or _default_chat_system_prompt(),
+        catalog_text=catalog_text, bot_info_text=bot_info_text,
+    )
 
     return await _call_gemini(contents, system_instruction=sys_prompt,
                                temperature=0.85, max_output_tokens=1800,
@@ -434,9 +494,10 @@ async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=
 # tayyor bo'lguncha kutish o'rniga, matn generatsiya qilinayotgan paytning
 # o'zida bo'lak-bo'lak (chunk) qaytariladi.
 #
-# ask_ai() bilan BIR XIL tizim promptini quradi (asosiy funksiyaga
-# tegmaslik uchun ataylab qisqacha takrorlangan — agar kelajakda ask_ai()
-# dagi promptni o'zgartirsangiz, shu yerdagisini ham moslashtiring).
+# ask_ai() bilan BIR XIL tizim promptidan foydalanadi — ikkalasi ham
+# _default_chat_system_prompt() + _append_chat_context()ga tayanadi, shu
+# sabab bittasini o'zgartirish avtomatik ikkalasiga ham ta'sir qiladi
+# (oldin bu yerda alohida, qo'lda takrorlangan edi — bu endi shart emas).
 #
 # Ishonchlilik zanjiri (eng tezidan eng ishonchlisiga):
 #   1) Groq orqali HAQIQIY oqim (agar GROQ_API_KEY bor bo'lsa — OpenAI-
@@ -448,50 +509,14 @@ async def ask_ai(user_text, history=None, system_instruction=None, catalog_text=
 #      lekin foydalanuvchi baribir "yozilayotganini" ko'radi va — eng
 #      muhimi — javob HECH QACHON butunlay yo'qolib qolmaydi).
 def _build_chat_prompt(user_text, catalog_text=None, bot_info_text=None):
-    """ask_ai() dagi bilan bir xil (qarang: yuqorida) — faqat ikkalasi ham
-    (oqimli va oqimsiz) foydalanishi uchun alohida chiqarilgan."""
-    sys_prompt = (
-        "Sen umumiy chatbot emassan — sen aynan 'AniFilm Bot' telegram "
-        "botining oʻziga tegishli, shu botning ichida ishlaydigan shaxsiy "
-        "AI-yordamchisan. Har bir javobingda oʻzingni shu botning bir "
-        "qismi sifatida tut: kerak boʻlganda botning oʻzi (uning "
-        "katalogi, boʻlimlari, imkoniyatlari — 🔍 Qidiruv, 📚 Katalog, "
-        "tavsiyalar va h.k.) bilan bogʻlab gapir.\n\n"
-        "Anime, kino, serial yoki botning oʻzi haqidagi savollarga "
-        "oʻzbek tilida toʻliq, mazmunli va foydali javob ber — kerak "
-        "boʻlsa misollar, tafsilotlar va tushuntirishlar bilan boy javob "
-        "yoz, faqat bir-ikki gap bilan cheklanma. Sayoz yoki umumiy "
-        "javoblardan qoch — aniq faktlar, nomlar va tavsiyalar bilan "
-        "javob ber.\n\n"
-        "Agar savol anime/kino/serial va botning oʻzi bilan UMUMAN "
-        "bogʻliq boʻlmasa (masalan matematika, siyosat, boshqa aloqasiz "
-        "mavzu), unga qisqagina, xushmuomalalik bilan javob ber-da, "
-        "keyin suhbatni botning asosiy mavzusiga — anime/kino tavsiyalari "
-        "va katalogiga — qaytar. Bunday aloqasiz savollarga anime "
-        "savollari kabi chuqur va batafsil yozib oʻtirma."
+    """ask_ai() bilan bir xil tizim promptini quradi (qarang:
+    _default_chat_system_prompt() va _append_chat_context() yuqorida) —
+    faqat ikkalasi ham (oqimli va oqimsiz) foydalanishi uchun alohida
+    chiqarilgan."""
+    return _append_chat_context(
+        _default_chat_system_prompt(),
+        catalog_text=catalog_text, bot_info_text=bot_info_text,
     )
-    if bot_info_text:
-        sys_prompt += (
-            "\n\nBot haqida HAQIQIY maʼlumot (bot qanday ishlashi, "
-            "boʻlimlari, Premium narxlari va h.k. haqida savol berilsa, "
-            "FAQAT shu maʼlumotga tayan — boshqa narsa oʻylab topma, "
-            "eskirgan yoki taxminiy narx aytma):\n" + bot_info_text
-        )
-    if catalog_text:
-        sys_prompt += (
-            "\n\nBotning HAQIQIY kataloridagi animelar roʻyxati (FAQAT "
-            "shular botda mavjud — bu roʻyxatdan tashqari hech qanday "
-            "animeni \"bizda bor\" deb aytma, oʻylab ham topma):\n"
-            + catalog_text +
-            "\n\nAgar foydalanuvchi \"qanaqa anime bor\", \"nima koʻrsam "
-            "boʻladi\", \"roʻyxat\" kabi savol bersa — shu roʻyxatdan mavzuga "
-            "yoki janrga mos bir nechta nomni aniq aytib ber (ixtiyoriy "
-            "ravishda yil/janrini ham qoʻsh), va 🔍 Qidiruv yoki 📚 Katalog "
-            "tugmasidan toʻliq roʻyxatni koʻrishni maslahat ber. Agar roʻyxat "
-            "boʻsh boʻlsa yoki mos nom topa olmasang, buni rostgoʻylik bilan "
-            "ayt — hech qachon mavjud boʻlmagan sarlavha oʻylab topma."
-        )
-    return sys_prompt
 
 
 async def _stream_groq(contents, system_instruction, temperature=0.85, max_output_tokens=1800, timeout=30):
@@ -1196,11 +1221,12 @@ async def chat_about_anime(question, anime_title, anime_description, history=Non
     sys_prompt = (
         f"Sen '{anime_title}' anime'si haqidagi AI-yordamchisan. "
         f"Tavsif: {anime_description or 'yoq'}\n\n"
-        "Foydalanuvchi savollariga o'zbek tilida, qisqa va foydali javob "
-        "ber. MUHIM: syujetning muhim burilishlari, oxiri yoki kim "
-        "o'lishi/kim kim ekanligi kabi SPOYLER bo'lishi mumkin bo'lgan "
-        "narsalarni OCHIB BERMA — agar foydalanuvchi aynan shuni so'rasa, "
-        "spoyler berishdan xushmuomalalik bilan bosh tort va buning o'rniga "
+        "Foydalanuvchi savollariga FAQAT o'zbek tilida (ingliz so'z yoki "
+        "iboralarni aralashtirmasdan), qisqa va foydali javob ber. MUHIM: "
+        "syujetning muhim burilishlari, oxiri yoki kim o'lishi/kim kim "
+        "ekanligi kabi SPOYLER bo'lishi mumkin bo'lgan narsalarni OCHIB "
+        "BERMA — agar foydalanuvchi aynan shuni so'rasa, spoyler "
+        "berishdan xushmuomalalik bilan bosh tort va buning o'rniga "
         "umumiy, spoylersiz tavsif ber."
     )
     return await _call_gemini(contents, system_instruction=sys_prompt,
