@@ -1839,7 +1839,7 @@ async function renderProfil(){
   // Avatar/ism ikkala holatda ham (locked va full) kerak
   [['profilAvatar','profilName','profilUsername'],['lockAvatar','lockName','lockUsername']].forEach(([avId,nameId,unId])=>{
     const av=document.getElementById(avId);
-    if(u?.photo_url){av.innerHTML=`<img src="${u.photo_url}">`;}
+    if(u?.photo_url){av.innerHTML=`<img src="${escapeHtml(u.photo_url)}">`;}
     else{av.textContent=initial;}
     document.getElementById(nameId).textContent=name;
     document.getElementById(unId).textContent=uname;
@@ -2002,7 +2002,7 @@ async function openDetail(id){
     const eyeSvg='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
     let metaHtml=`<span class="meta-chip">${typeLabel}</span>`;
     if(d.year)metaHtml+=`<span class="meta-chip">${calSvg}${d.year}</span>`;
-    if(d.genre)metaHtml+=`<span class="meta-chip">${globeSvg}${d.genre}</span>`;
+    if(d.genre)metaHtml+=`<span class="meta-chip">${globeSvg}${escapeHtml(d.genre)}</span>`;
     metaHtml+=`<span class="meta-chip gold">${eyeSvg}${formatViews(d.views)}</span>`;
     if(d.watched_today>0)metaHtml+=`<span class="meta-chip live">🔥 bugun ${d.watched_today} marta koʻrildi</span>`;
     document.getElementById('detailMeta').innerHTML=metaHtml;
