@@ -32,6 +32,7 @@ _session_lock = asyncio.Lock()
 # oddiy xotiradagi TTL kesh. Kalit — normallashtirilgan (lower+strip) nom.
 _CACHE_TTL = 6 * 3600  # 6 soat — anime metama'lumotlari kamdan-kam o'zgaradi
 _cache: dict[str, tuple] = {}  # normalized_title -> (expires_at, result)
+_MAX_CACHE_ENTRIES = 300  # cheksiz o'sishning oldini olish uchun oddiy chegara
 
 
 async def _get_session():
@@ -41,6 +42,27 @@ async def _get_session():
             if _session is None or _session.closed:
                 _session = aiohttp.ClientSession()
     return _session
+
+
+async def close_session():
+    """Bot to'xtayotganda chaqirilishi kerak — ochiq aiohttp session'ni yopadi."""
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
+    _session = None
+
+
+def _prune_cache():
+    """Muddati o'tgan yozuvlarni tozalaydi; agar kesh baribir juda katta
+    bo'lib qolsa (juda ko'p turli nom qidirilgan bo'lsa), eng eski
+    yozuvlarni chiqarib, xotira cheksiz o'sib ketishining oldini oladi."""
+    now = time.monotonic()
+    for k in [k for k, (exp, _) in _cache.items() if exp <= now]:
+        _cache.pop(k, None)
+    if len(_cache) > _MAX_CACHE_ENTRIES:
+        overflow = len(_cache) - _MAX_CACHE_ENTRIES
+        for k in list(_cache.keys())[:overflow]:  # dict tartibi = qo'shilish tartibi
+            _cache.pop(k, None)
 
 
 # AniList "countryOfOrigin" ISO kod qaytaradi (JP, KR, CN, TW, US va h.k.).
@@ -168,5 +190,6 @@ async def search_anilist(title: str) -> dict | None:
         "cover_url": cover.get("extraLarge") or cover.get("large"),
         "site_url": media.get("siteUrl"),
     }
+    _prune_cache()
     _cache[cache_key] = (time.monotonic() + _CACHE_TTL, result)
     return result
