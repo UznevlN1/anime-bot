@@ -2,6 +2,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 import os
+import json
 import time
 import logging
 from datetime import datetime, timedelta
@@ -467,6 +468,19 @@ def init_db():
         )
     """)
 
+    # FSM holati (ro'yxatdan o'tish, admin oqimlari, AI suhbat jarayoni va
+    # h.k.) — ilgari faqat RAM'da (aiogram MemoryStorage) saqlanardi va
+    # Render qayta ishga tushganda butunlay yo'qolardi. Endi shu jadvalda
+    # saqlanadi (pastga, "FSM STORAGE" bo'limiga qarang), shu bilan restart
+    # bo'lsa ham foydalanuvchi jarayoni uzilib qolmaydi.
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS fsm_storage (
+        storage_key TEXT PRIMARY KEY,
+        state TEXT,
+        data TEXT NOT NULL DEFAULT '{}',
+        updated_at TEXT DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+    )""")
+
     # Default sozlamalar
     c.execute("INSERT INTO settings VALUES ('maintenance', '0') ON CONFLICT DO NOTHING")
     c.execute("INSERT INTO settings VALUES ('content_protect', '1') ON CONFLICT DO NOTHING")
@@ -484,6 +498,83 @@ def init_db():
 
     conn.commit()
     put_conn(conn)
+
+# ===== FSM STORAGE (aiogram holati; klass o'zi anime_bot.py'da — PostgresStorage) =====
+def fsm_get_state(storage_key):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT state FROM fsm_storage WHERE storage_key=%s", (storage_key,))
+    row = c.fetchone()
+    put_conn(conn)
+    return row[0] if row else None
+
+def fsm_set_state(storage_key, state):
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            INSERT INTO fsm_storage (storage_key, state, updated_at)
+            VALUES (%s, %s, to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            ON CONFLICT (storage_key) DO UPDATE SET
+                state = EXCLUDED.state, updated_at = EXCLUDED.updated_at
+        """, (storage_key, state))
+        conn.commit()
+    except psycopg2.Error as e:
+        conn.rollback()
+        logger.error(f"fsm_set_state({storage_key}): xato: {e}")
+    put_conn(conn)
+
+def fsm_get_data(storage_key):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT data FROM fsm_storage WHERE storage_key=%s", (storage_key,))
+    row = c.fetchone()
+    put_conn(conn)
+    if not row or not row[0]:
+        return {}
+    try:
+        return json.loads(row[0])
+    except Exception:
+        return {}
+
+def fsm_set_data(storage_key, data):
+    payload = json.dumps(data)
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            INSERT INTO fsm_storage (storage_key, data, updated_at)
+            VALUES (%s, %s, to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+            ON CONFLICT (storage_key) DO UPDATE SET
+                data = EXCLUDED.data, updated_at = EXCLUDED.updated_at
+        """, (storage_key, payload))
+        conn.commit()
+    except psycopg2.Error as e:
+        conn.rollback()
+        logger.error(f"fsm_set_data({storage_key}): xato: {e}")
+    put_conn(conn)
+
+def cleanup_stale_fsm_rows(older_than_days=3):
+    """Holati bo'sh (None) va uzoq vaqtdan beri yangilanmagan FSM qatorlarini
+    o'chiradi (masalan foydalanuvchi bir jarayonni tugatib/tashlab ketgach) —
+    aks holda jadval asossiz o'sib boradi. Faol holati bor qatorlarga
+    tegilmaydi, qancha eski bo'lishidan qat'iy nazar."""
+    cutoff = (now_tz() - timedelta(days=older_than_days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute(
+            "DELETE FROM fsm_storage WHERE state IS NULL AND updated_at < %s",
+            (cutoff,)
+        )
+        conn.commit()
+        deleted = c.rowcount
+    except psycopg2.Error as e:
+        conn.rollback()
+        logger.error(f"cleanup_stale_fsm_rows: xato: {e}")
+        deleted = 0
+    put_conn(conn)
+    return deleted
 
 # ===== FOYDALANUVCHILAR =====
 def add_user(user_id, username, full_name, phone=None, referred_by=None):
@@ -1909,6 +2000,29 @@ def mark_password_reset_used(token):
     conn.commit()
     put_conn(conn)
     return row[0] if row else None
+
+def cleanup_expired_reset_tokens(older_than_hours=24):
+    """Ishlatib bo'lingan (used=1) yoki muddati o'tgan parol-tiklash
+    tokenlarini o'chiradi — aks holda site_password_resets jadvali vaqt
+    o'tishi bilan cheksiz o'sib boradi. Tokenlar aslida 1 soatdan keyin
+    funksional jihatdan eskiradi (webapp_site_reset_password'ga qarang),
+    24 soatlik standart shunchaki xavfsiz zaxira."""
+    cutoff = (now_tz() - timedelta(hours=older_than_hours)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute(
+            "DELETE FROM site_password_resets WHERE used=1 OR created_at < %s",
+            (cutoff,)
+        )
+        conn.commit()
+        deleted = c.rowcount
+    except psycopg2.Error as e:
+        conn.rollback()
+        logger.error(f"cleanup_expired_reset_tokens: xato: {e}")
+        deleted = 0
+    put_conn(conn)
+    return deleted
 
 def toggle_site_favorite(site_user_id, anime_id):
     """Sevimlilarga qo'shadi/olib tashlaydi. Yangi holatni (True=sevimli) qaytaradi."""

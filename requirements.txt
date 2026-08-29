@@ -1,7 +1,15 @@
+# 2026-08-29: GitHub'dagi asl requirements.txt bilan solishtirilib moslashtirildi —
+# versiyalar shu yerdan olindi (allaqachon sinovdan o'tgan, real ishlab turgan
+# konfiguratsiya, mening avvalgi pin qilinmagan taxminimdan ko'ra ishonchliroq).
+
 aiogram>=3.20.0
 aiohttp>=3.9.0
 psycopg2-binary
 pyrogram>=2.0.106
 tgcrypto>=1.2.5
-imageio-ffmpeg
+imageio-ffmpeg   # DIQQAT: joriy 4 ta .py faylda bu paket hech qayerda import qilinmaydi —
+                 # ffmpeg subprocess orqali tizim PATH'idagi "ffmpeg" buyrug'i sifatida
+                 # chaqiriladi, uni Dockerfile ham apt orqali alohida o'rnatadi. Ya'ni bu
+                 # qator hozircha ishlatilmayotganga o'xshaydi (ehtimol eski qoldiq), lekin
+                 # zarar ham keltirmaydi — GitHub'dagi asl holicha qoldirdim.
 Pillow
