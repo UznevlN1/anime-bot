@@ -26,7 +26,7 @@ import gzip
 from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, KICKED
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.base import BaseStorage, StorageKey
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from aiohttp import web
@@ -517,8 +517,43 @@ async def log_admin_action(user, action, details=None):
     except Exception as e:
         logger.warning(f"Admin log yozilmadi: {e}")
 
+class PostgresStorage(BaseStorage):
+    """aiogram'ning standart MemoryStorage'i FSM holatini faqat RAM'da
+    saqlaydi va Render qayta ishga tushganda (deploy, restart, "uxlab
+    qolgan" servisning uyg'onishi) buni butunlay yo'qotadi — ro'yxatdan
+    o'tish, admin oqimlari, AI suhbat kabi jarayonlar o'rtada uzilib
+    qoladi. Bu klass xuddi shu ma'lumotni database.py orqali Postgres'da
+    saqlaydi, shu bilan restart bo'lsa ham foydalanuvchi jarayoni davom
+    etadi. Interfeys aiogram 3.x BaseStorage'ga mos (set_state/get_state/
+    set_data/get_data + close; update_data BaseStorage'dagi standart
+    (get+merge+set) implementatsiyasidan foydalanadi)."""
+
+    @staticmethod
+    def _key(key: StorageKey) -> str:
+        # StorageKey — dataclass (bot_id, chat_id, user_id, thread_id, destiny...).
+        # str(key) barcha maydonlarni o'z ichiga olgan barqaror, o'ziga xos
+        # identifikator beradi va aiogram versiyasi maydon qo'shsa ham buzilmaydi.
+        return str(key)
+
+    async def set_state(self, key: StorageKey, state=None) -> None:
+        value = state.state if isinstance(state, State) else state
+        await asyncio.to_thread(db.fsm_set_state, self._key(key), value)
+
+    async def get_state(self, key: StorageKey):
+        return await asyncio.to_thread(db.fsm_get_state, self._key(key))
+
+    async def set_data(self, key: StorageKey, data) -> None:
+        await asyncio.to_thread(db.fsm_set_data, self._key(key), dict(data))
+
+    async def get_data(self, key: StorageKey) -> dict:
+        return await asyncio.to_thread(db.fsm_get_data, self._key(key))
+
+    async def close(self) -> None:
+        pass
+
+
 bot = Bot(token=BOT_TOKEN)
-storage = MemoryStorage()
+storage = PostgresStorage()
 dp = Dispatcher(storage=storage)
 # Ko'pgina handlerlar (ayniqsa admin panelidagi 60+ tugma) o'zi call.answer()
 # chaqirmaydi — natijada Telegram mijozi tugmani "yuklanmoqda" holatida
@@ -9623,6 +9658,26 @@ async def premium_maintenance_task():
         except Exception as e:
             logger.error(f"Premium eslatma xatosi: {e}")
 
+async def maintenance_cleanup_task():
+    """Har kuni bir marta: eskirgan (ishlatilgan yoki muddati o'tgan)
+    parol-tiklash tokenlarini va holati bo'sh, uzoq vaqt yangilanmagan FSM
+    qatorlarini tozalaydi — aks holda bu jadvallar vaqt o'tishi bilan
+    asossiz o'sib boradi."""
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            deleted = await asyncio.to_thread(db.cleanup_expired_reset_tokens)
+            if deleted:
+                logger.info(f"Eskirgan parol-tiklash tokenlari tozalandi: {deleted}")
+        except Exception as e:
+            logger.error(f"Parol-tiklash tokenlarini tozalashda xato: {e}")
+        try:
+            deleted = await asyncio.to_thread(db.cleanup_stale_fsm_rows)
+            if deleted:
+                logger.info(f"Bo'sh FSM qatorlari tozalandi: {deleted}")
+        except Exception as e:
+            logger.error(f"FSM qatorlarini tozalashda xato: {e}")
+
 async def weekly_ai_report_task():
     """Har 7 kunda bir marta, oxirgi haftalik statistikani AI orqali tahlil
     qilib, adminga qisqa hisobot yuboradi. Shu bilan birga, oxirgi hafta
@@ -9851,12 +9906,30 @@ def _rate_limited(key: str, max_hits: int, window_seconds: float) -> bool:
     return False
 
 def _client_ip(request) -> str:
-    """Render/nginx kabi teskari proksi ortida to'g'ridan-to'g'ri request.remote
-    proksining o'z IP'ini qaytaradi, shuning uchun avval X-Forwarded-For
-    sarlavhasiga qaraladi (birinchi qiymat — haqiqiy mijoz IP'i)."""
+    """Render kabi teskari proksi ortida to'g'ridan-to'g'ri request.remote
+    proksining o'z IP'ini qaytaradi, shuning uchun boshqa manbalarga qaraladi.
+
+    DIQQAT (tuzatildi): oldin X-Forwarded-For'ning BIRINCHI qiymati olinardi —
+    bu esa mijozning o'zi yuboradigan header bo'lgani uchun, istalgan
+    foydalanuvchi o'zi xohlagan qiymatni birinchi o'ringa qo'yib, IP asosidagi
+    rate-limit'ni aylanib o'tishi mumkin edi. Ishonchli yagona teskari proksi
+    (Render) ortida bo'lganda, proksi haqiqiy mijoz IP'ini ro'yxat OXIRIGA
+    qo'shadi, shuning uchun endi shu qiymat olinadi. Agar servis Cloudflare
+    orqasida bo'lsa, CF-Connecting-IP undan ham ishonchliroq (buni faqat
+    Cloudflare o'zi qo'yadi, mijoz soxtalashtira olmaydi) — shu sabab birinchi
+    navbatda shu tekshiriladi.
+
+    Baribir buni yagona xavfsizlik chegarasi sifatida ishlatmaslik kerak —
+    rate-limit uchun Telegram user_id (initData orqali HMAC bilan
+    tekshirilgan) ancha ishonchli mezon bo'lib qoladi."""
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
     fwd = request.headers.get("X-Forwarded-For")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.remote or "noma'lum"
 
 def _make_site_token(site_user_id: int) -> str:
@@ -10416,7 +10489,11 @@ async def webapp_send_episode(request):
             f"send_episode xato: user_id={user_id} episode_id={episode_id} "
             f"channel_message_id={ep.get('channel_message_id')} xato={e}"
         )
-        return web.json_response({"error": str(e)}, status=500)
+        # DIQQAT (tuzatildi): oldin str(e) to'g'ridan-to'g'ri clientga
+        # qaytarilardi — bu Telegram API xatosi ichidagi ichki tafsilotlarni
+        # (kanal/xabar ID va h.k.) foydalanuvchiga oshkor qilishi mumkin edi.
+        # To'liq xato faqat yuqoridagi log'da qoladi.
+        return web.json_response({"error": "server_error"}, status=500)
 
 # Rasm keshi — bir xil poster/baner qayta-qayta Telegramdan yuklab olinmasligi uchun (tezlik + trafik tejash)
 _PHOTO_CACHE = {}
@@ -11275,6 +11352,7 @@ async def main():
     asyncio.create_task(premium_maintenance_task())
     asyncio.create_task(db_keepalive_task())
     asyncio.create_task(db_backup_task())
+    asyncio.create_task(maintenance_cleanup_task())
     try:
         await dp.start_polling(
             bot,
@@ -11301,6 +11379,17 @@ async def main():
                     await _client.stop()
                 except Exception:
                     pass
+        # ai_service.py va anime_api.py umumiy aiohttp session'larini yopish —
+        # aks holda "Unclosed client session" ogohlantirishi va resurs sizishi
+        # bo'lishi mumkin edi.
+        try:
+            await ai_service.close_session()
+        except Exception as e:
+            logger.warning(f"ai_service session yopilmadi: {e}")
+        try:
+            await anime_api.close_session()
+        except Exception as e:
+            logger.warning(f"anime_api session yopilmadi: {e}")
 
 if __name__ == "__main__":
     # asyncio.run() emas — importda yaratilgan _MAIN_LOOP'ning aynan oʻzida ishga tushiramiz,
