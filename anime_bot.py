@@ -1115,7 +1115,7 @@ async def premium_settings():
     promo_effective = False
     if (promo_active_raw or "0") == "1" and promo_end_raw:
         try:
-            if datetime.now() < datetime.fromisoformat(promo_end_raw):
+            if db.now_tz() < datetime.fromisoformat(promo_end_raw):
                 promo_effective = True
         except Exception:
             pass
@@ -1806,7 +1806,7 @@ async def padm_promo_quick(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id):
         return
     hours = int(call.data.replace("padm_promo_quick_", ""))
-    end_dt = datetime.now() + timedelta(hours=hours)
+    end_dt = db.now_tz() + timedelta(hours=hours)
     await asyncio.gather(
         asyncio.to_thread(db.set_setting, "premium_promo_active", "1"),
         asyncio.to_thread(db.set_setting, "premium_promo_end", end_dt.isoformat()),
@@ -1849,7 +1849,7 @@ async def padm_promo_end_save(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Format noto'g'ri. Masalan: 25.12.2026 20:00 shaklida yuboring.")
         return
-    if end_dt <= datetime.now():
+    if end_dt <= db.now_tz():
         await message.answer("❌ Sana kelajakda bo'lishi kerak. Qaytadan yuboring.")
         return
     await asyncio.gather(
