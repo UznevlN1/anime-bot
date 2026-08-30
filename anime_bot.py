@@ -163,57 +163,18 @@ except ImportError:
     _InputRichMessage = None
     _RICH_MESSAGE_SUPPORTED = False
 
-# Rich BLOCKS (Bot API 10.2, 2026-iyul) — Rich Message'ni erkin Markdown
-# o'rniga aniq TUZILGAN bloklar (sarlavha, jadval, kollaj va h.k.) bilan
-# qurish imkonini beradi. Bu — butun API'ning ENG YANGI qismi, shu sabab
-# eng kam sinovdan o'tgan joyi ham shu (pastda, anime "batafsil" ko'rinishi
-# uchun ishlatiladi, foydalanish joyida qo'shimcha izoh bor). Import
-# muvaffaqiyatsiz bo'lsa ham, import ICHIDAGI har bir sinf alohida
-# tekshirilmaydi — barchasi bitta try/except ostida, chunki ular hammasi
-# bir vaqtda (bitta aiogram versiyasida) qo'shilgan.
+# Bot API 10.3 (2026-avgust-24) — guruh AI-suhbatida faqat so'ragan
+# foydalanuvchiga ko'rinadigan ("ephemeral") javob uchun ishlatiladi
+# (pastda, _EPHEMERAL_SUPPORTED tekshiruvi orqali). Eski aiogram'da import
+# xato beradi va oddiy (hammaga ko'rinadigan) javobga jimgina qaytiladi.
 try:
     from aiogram.types import (
-        InputRichBlockSectionHeading as _InputRichBlockSectionHeading,
-        InputRichBlockParagraph as _InputRichBlockParagraph,
-        InputRichBlockTable as _InputRichBlockTable,
-        InputRichBlockPhoto as _InputRichBlockPhoto,
-        InputRichBlockDivider as _InputRichBlockDivider,
-    )
-    _RICH_BLOCKS_SUPPORTED = True
-except ImportError:
-    _RICH_BLOCKS_SUPPORTED = False
-
-# Bot API 10.3 (2026-avgust-24) — bir kun oldin chiqqan, ENG YANGI qism.
-# ATAYLAB yuqoridagi 10.2 importidan ALOHIDA try/except'da ushlanadi: aiogram
-# 10.2 sinflarini allaqachon qo'llab-quvvatlashi, lekin 10.3'ni HALI
-# qo'llamasligi juda mumkin (kutubxona yangilanishi bir necha kun/hafta
-# kechikishi odatiy hol) — bitta try/except ostida bo'lganda, 10.3 importi
-# muvaffaqiyatsiz bo'lsa, allaqachon ISHLAB TURGAN 10.2 funksiyalar ham
-# (masalan anime "Batafsil" ko'rinishi) beixtiyor o'chib qolar edi.
-#
-# Rasmiy hujjatlarda (kecha e'lon qilingani uchun) quyidagi sinflarning HAR
-# BIR maydoni hali chuqur yoritilmagan — pastda ishlatilgan maydon nomlari
-# (masalan RichTextButton uchun text/callback_data, InputRichBlockButtons
-# uchun buttons=[[...]]) InlineKeyboardButton bilan bir xil, allaqachon
-# butun Telegram Bot API bo'ylab izchil qo'llaniladigan naqshga asoslangan
-# ENG YAXSHI TAXMIN. Har doimgidek — ishlamasa, chaqiruvchi joyda try/except
-# orqali eski (isbotlangan) yo'lga jimgina qaytiladi.
-try:
-    from aiogram.types import (
-        RichTextButton as _RichTextButton,
-        InputRichBlockButtons as _InputRichBlockButtons,
-        InputRichBlockExpandableBlockQuotation as _InputRichBlockExpandableBlockQuotation,
         DisabledButton as _DisabledButton,
         EphemeralMessageParameters as _EphemeralMessageParameters,
     )
-    _RICH_BLOCKS_10_3_SUPPORTED = True
 except ImportError:
-    _RichTextButton = None
-    _InputRichBlockButtons = None
-    _InputRichBlockExpandableBlockQuotation = None
     _DisabledButton = None
     _EphemeralMessageParameters = None
-    _RICH_BLOCKS_10_3_SUPPORTED = False
 _EPHEMERAL_SUPPORTED = _EphemeralMessageParameters is not None
 
 # Quyidagilar FAQAT zaxira (fallback) yo'l uchun ishlatiladi: agar Rich
@@ -2607,7 +2568,6 @@ async def send_anime_card(chat_id, anime):
             InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
             InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
         ],
-        [InlineKeyboardButton(text="ℹ️ Batafsil", callback_data=f"details_{anime['id']}")],
         [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
     ])
     try:
@@ -2626,123 +2586,6 @@ async def send_anime_card(chat_id, anime):
             reply_markup=kb,
             parse_mode="HTML"
         )
-
-async def send_anime_details_rich(chat_id, anime):
-    """Anime haqida BATAFSIL, tuzilgan ko'rinish — Bot API 10.2'ning Rich
-    Blocks imkoniyati (sarlavha + jadval + tavsif + rasm) orqali chiqaradi.
-
-    OGOHLANTIRISH: bu — butun ushbu faylning ENG YANGI va ENG KAM sinovdan
-    o'tgan qismi. InputRichBlockTable/InputRichBlockPhoto kabi sinflarning
-    ANIQ maydon nomlari (masalan "rows" chindan shundaymi yoki boshqacha)
-    rasmiy hujjatlarda hali batafsil yoritilmagan (2026-iyul, juda yangi),
-    shu sabab pastdagi qurilma ENG YAXSHI TAXMIN asosida ishlangan.
-    Ishlamasa — https://core.telegram.org/bots/api#inputrichblocktable va
-    #inputrichblockphoto sahifalaridagi aniq maydonlarga solishtirib
-    tekshiring. Har qanday xatolikda (noto'g'ri maydon nomidan tortib,
-    Telegram rad etishigacha) DARHOL va JIMgina oddiy send_anime_card()ga
-    tushadi — foydalanuvchi hech qachon xabarsiz qolmaydi, faqat "chiroyli"
-    jadval ko'rinishi o'rniga odatdagi kartani ko'radi.
-
-    2026-AVGUST-24 QO'SHILDI (Bot API 10.3), _RICH_BLOCKS_10_3_SUPPORTED
-    bilan ALOHIDA himoyalangan — 10.3 sinflaridan biri ishlamasa ham, 10.2
-    asosidagi Rich Blocks ko'rinishi (yuqoridagi tavsif) buzilmaydi:
-      • Tavsif endi RichBlockExpandableBlockQuotation ichida — uzun
-        syujet "..." bilan yopiq keladi, bosilsa ochiladi (spoylersiz).
-      • Jadval is_compact=True bilan ixchamroq chiqadi.
-      • "Yuklab olish"/"Random" tugmalari alohida klaviatura o'rniga
-        InputRichBlockButtons orqali xabarning ICHIGA joylanadi — pastda
-        faqat "Bosh menu" qoladi (tugmalar ikki marta chiqmasin uchun).
-    Har biri o'zining tor try/except'i bilan — biri ishlamasa, faqat o'sha
-    qismi eskicha ishlaydi, hammasi birga qulamaydi."""
-    if not (_RICH_MESSAGE_SUPPORTED and _RICH_BLOCKS_SUPPORTED):
-        await send_anime_card(chat_id, anime)
-        return
-    status_text = ANIME_STATUS_LABELS.get(anime.get("status") or "ongoing", ANIME_STATUS_LABELS["ongoing"])
-    embed_buttons = _RICH_BLOCKS_10_3_SUPPORTED
-    if embed_buttons:
-        # Asosiy amallar endi xabar ICHIDA joylanadi (pastga qarang) — bu
-        # yerda faqat navigatsiya qoladi, tugmalar ikki marta chiqmasin uchun.
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
-        ])
-    else:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
-                InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
-            ],
-            [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
-        ])
-    try:
-        table_rows = [
-            ["📅 Yil", str(anime.get("year") or "—")],
-            ["🌍 Davlat", str(anime.get("country") or "—")],
-            ["🎭 Janr", str(anime.get("genre") or "—")],
-            ["🌐 Til", str(anime.get("language") or "Nomalum")],
-            ["📊 Holat", status_text],
-        ]
-        try:
-            anime_table = _InputRichBlockTable(rows=table_rows, is_compact=True)
-        except TypeError:
-            # is_compact hali qo'llanmayapti (10.3 sinflari o'zi ishlagan
-            # taqdirda ham, mavjud InputRichBlockTable'ga bu maydon aiogram
-            # tomonidan hali qo'shilmagan bo'lishi mumkin) — maydonsiz davom.
-            anime_table = _InputRichBlockTable(rows=table_rows)
-
-        description = anime.get("description") or ""
-        description_block = None
-        if embed_buttons and description:
-            try:
-                description_block = _InputRichBlockExpandableBlockQuotation(text=description)
-            except Exception as e:
-                logger.debug(f"[rich_blocks] spoyler blok ishlamadi ({e}), oddiy paragraf ishlatildi")
-        if description_block is None:
-            description_block = _InputRichBlockParagraph(text=description)
-
-        blocks = [
-            _InputRichBlockSectionHeading(text=anime["title"]),
-            anime_table,
-            description_block,
-        ]
-
-        if embed_buttons:
-            try:
-                blocks.append(_InputRichBlockButtons(buttons=[[
-                    _RichTextButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0"),
-                    _RichTextButton(text="🎲 Random", callback_data="random"),
-                ]]))
-            except Exception as e:
-                # Tugmalar xabar ICHIGA kirmadi — foydalanuvchi amalsiz
-                # qolmasin uchun pastdagi kb "faqat Bosh menu"dan to'liq
-                # to'plamga qaytariladi.
-                logger.debug(f"[rich_blocks] InputRichBlockButtons ishlamadi ({e}), kb to'liq tugmalarga qaytarildi")
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="⬇️ Yuklab olish", callback_data=f"download_{anime['id']}_0", style="success"),
-                        InlineKeyboardButton(text="🎲 Random", callback_data="random", style="primary"),
-                    ],
-                    [InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="danger")]
-                ])
-
-        photo_id = anime.get("photo_id")
-        if photo_id:
-            blocks.append(_InputRichBlockDivider())
-            blocks.append(_InputRichBlockPhoto(media=photo_id))
-        rich_message = _InputRichMessage(blocks=blocks)
-        await bot.send_rich_message(chat_id=chat_id, rich_message=rich_message, reply_markup=kb)
-    except Exception as e:
-        logger.exception("[rich_blocks] batafsil ko'rinish ishlamadi, oddiy kartaga tushildi")
-        await send_anime_card(chat_id, anime)
-
-@dp.callback_query(F.data.startswith("details_"))
-async def anime_details_callback(call: CallbackQuery):
-    await call.answer()
-    anime_id = int(call.data.split("_")[1])
-    anime = await asyncio.to_thread(db.get_anime, anime_id)
-    if not anime:
-        await call.answer("Anime topilmadi.", show_alert=True)
-        return
-    await send_anime_details_rich(call.message.chat.id, anime)
 
 def announce_caption_text(anime):
     """E'lon kanali uchun qisqa post matni — botning ichidagi to'liq karta
@@ -3485,7 +3328,14 @@ def _match_catalog_posters(reply_text, animes, max_posters=2):
     ularning poster file_id'sini qaytaradi (eng ko'pi bilan max_posters
     dona) — AI chat javobiga rasm sifatida ergashtirish uchun (send_ai_text
     poster_ids). 2 belgidan qisqa nomlar (tasodifiy mos kelish xavfi
-    yuqori) e'tiborsiz qoldiriladi."""
+    yuqori) e'tiborsiz qoldiriladi.
+
+    TUZATILDI: ilgari oddiy substring qidiruv edi (`title.lower() in
+    reply_lower`) — bu katalogda o'nlab-yuzlab anime bo'lsa, deyarli har
+    qanday javobda TASODIFAN moslik topib, amalda "har safar rasm
+    yuboriladi" holatiga olib kelardi (masalan qisqa nom boshqa so'z
+    ICHIDA ham "topilardi"). Endi nom faqat BUTUN so'z/ibora sifatida
+    (chegaralari bilan) uchrasa hisoblanadi."""
     poster_ids, seen = [], set()
     reply_lower = reply_text.lower()
     for a in animes:
@@ -3493,7 +3343,11 @@ def _match_catalog_posters(reply_text, animes, max_posters=2):
         aid = a.get("id")
         if len(title) < 3 or aid in seen:
             continue
-        if title.lower() in reply_lower:
+        try:
+            pattern = re.compile(r"\b" + re.escape(title.lower()) + r"\b")
+        except re.error:
+            continue
+        if pattern.search(reply_lower):
             photo_id = a.get("photo_id")
             if photo_id:
                 poster_ids.append(photo_id)
@@ -3524,11 +3378,16 @@ async def ai_chat_message(message: Message, state: FSMContext):
     # Anime ro'yxati ikki maqsadda kerak: (1) katalog savoliga aniq javob
     # berish uchun promptga qo'shiladi (faqat shunga aloqador savolda), (2)
     # AI javobida nomi tilga olingan animening posterini birga yuborish
-    # uchun (har doim tekshiriladi). Funksiya keshlangan — qayta so'rash
-    # arzon.
+    # uchun (TUZATILDI: ilgari har doim tekshirilardi — bu tizim prompti
+    # "aloqasiz savollarda ham tavsiyaga qayt" deb buyurgani sabab, AI
+    # deyarli har javobda biror nom aytib, deyarli har javobga keraksiz
+    # rasm ilashtirib yuborardi. Endi xuddi shu — foydalanuvchi chindan
+    # ro'yxat/tavsiya so'ragan — shartda tekshiriladi). Funksiya
+    # keshlangan — qayta so'rash arzon.
     animes = await asyncio.to_thread(db.get_animes_for_webapp)
+    is_catalog_question = _looks_like_catalog_question(text)
     catalog_text = None
-    if _looks_like_catalog_question(text):
+    if is_catalog_question:
         catalog_text = "\n".join(
             f"{a['title']} ({a.get('year') or 'yil nomaʼlum'}, "
             f"{_translate_genre_text(a.get('genre')) or 'janr nomaʼlum'}, "
@@ -3554,13 +3413,19 @@ async def ai_chat_message(message: Message, state: FSMContext):
     history = history + [("user", text), ("model", reply)]
     history = history[-10:]  # tokenlarni tejash uchun faqat oxirgi almashinuvlar saqlanadi
     await state.update_data(ai_history=history)
-    poster_ids = _match_catalog_posters(reply, animes)
+    poster_ids = _match_catalog_posters(reply, animes) if is_catalog_question else []
     extra = {"message_thread_id": thread_id} if thread_id else {}
     await send_ai_text(message, reply, reply_markup=ai_chat_keyboard(), poster_ids=poster_ids, **extra)
-    await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
-    await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
-    await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
-    await asyncio.to_thread(db.log_ai_question, message.from_user.id, text)
+    try:
+        await asyncio.to_thread(db.mark_ai_used, message.from_user.id)
+        await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "user", text)
+        await asyncio.to_thread(db.add_ai_chat_message, message.from_user.id, "model", reply)
+        await asyncio.to_thread(db.log_ai_question, message.from_user.id, text)
+    except Exception as e:
+        # Javob foydalanuvchiga ALLAQACHON yetib bo'lgan (yuqorida) — shu
+        # sabab bu yerdagi statistika/tarix yozuvidagi xatolik suhbatni
+        # "osilib qolgan" holga keltirmasligi kerak, faqat log'ga tushadi.
+        logger.warning(f"ai_chat_message: keyingi yozuvlarda xato: {e}")
 
 @dp.callback_query(F.data == "ai_image_start")
 async def ai_image_start(call: CallbackQuery, state: FSMContext):
@@ -11287,9 +11152,7 @@ async def main():
         logger.info(f"  Rich Message (AI javoblari formatlash): {rich_status}")
         logger.info(f"  AI javob jonli oqimi (sendMessageDraft): {draft_status}")
         logger.info(f"  Guest Mode (guruhlarda @mention javob): {guest_status}")
-        blocks_status = "YOQILGAN ✅ (eksperimental — batafsil ko'rinishda tekshiring)" if _RICH_BLOCKS_SUPPORTED else "O'CHIQ ❌ — aiogram eski, 'Batafsil' oddiy kartani ko'rsatadi"
         topics_status = "sinaladi (birinchi AI suhbatida)" if _topics_supported is None else ("YOQILGAN ✅" if _topics_supported else "O'CHIQ ❌")
-        logger.info(f"  Rich Blocks (anime 'Batafsil' ko'rinishi): {blocks_status}")
         logger.info(f"  Shaxsiy chatda mavzular (AI suhbat uchun): {topics_status}")
         logger.info("  Inline rejim (@BotUsername orqali qidiruv): kod tayyor — @BotFather'da /setinline yoqilganiga ishonch hosil qiling")
     except Exception as e:
