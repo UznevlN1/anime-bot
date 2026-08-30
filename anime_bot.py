@@ -5208,7 +5208,7 @@ async def admin_add_episode(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "addepi_list")
 async def addepi_list(call: CallbackQuery, state: FSMContext):
-    animes = await asyncio.to_thread(db.get_animes, "serial", 0)
+    animes = await asyncio.to_thread(db.get_animes, "serial", 0, incomplete_first=True)
     total = await asyncio.to_thread(db.get_anime_count, "serial")
     if not animes:
         await call.answer("📺 Hozircha serial yoq!", show_alert=True)
@@ -5226,7 +5226,7 @@ async def addepi_list(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data.startswith("addepi_sel_page_"))
 async def addepi_sel_page(call: CallbackQuery, state: FSMContext):
     page = int(call.data.split("_")[-1])
-    animes = await asyncio.to_thread(db.get_animes, "serial", page)
+    animes = await asyncio.to_thread(db.get_animes, "serial", page, incomplete_first=True)
     total = await asyncio.to_thread(db.get_anime_count, "serial")
     try:
         await call.message.edit_text(

@@ -1130,18 +1130,35 @@ def add_anime(title, year, country, genre, description, language, photo_id, medi
     finally:
         put_conn(conn)
 
-def get_animes(media_type=None, page=0, per_page=10):
+def get_animes(media_type=None, page=0, per_page=10, incomplete_first=False):
+    """`incomplete_first=True` bo'lsa, hali TO'LIQ yuklanmagan serial-lar
+    (status='ongoing', yoki e'lon qilingan umumiy qism soni bor-u hali
+    hammasi yuklanmagan) ro'yxat boshiga chiqariladi — bu faqat admin
+    "davom (qism) qo'shish" oqimida ishlatiladi, aynan shu yerda admin
+    ko'pincha "qaysi serialga yangi qism qo'shishim kerak" deb qidiradi.
+    Boshqa hech qaysi chaqiruvda (asosiy katalog, tahrirlash/o'chirish
+    ro'yxatlari) bu yoqilmagan — ular hamon eskicha eng yangisidan
+    boshlab (id DESC) tartiblanadi."""
     conn = get_conn()
     try:
         c = psycopg2.extras.RealDictCursor(conn)
         offset = page * per_page
+        order_by = "id DESC"
+        if incomplete_first:
+            order_by = """
+                CASE WHEN status = 'ongoing'
+                          OR (total_episodes IS NOT NULL AND total_episodes > 0
+                              AND episode_count < total_episodes)
+                     THEN 0 ELSE 1 END,
+                id DESC
+            """
         if media_type:
-            c.execute("""SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
-                         FROM animes a WHERE media_type=%s ORDER BY id DESC LIMIT %s OFFSET %s""",
+            c.execute(f"""SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
+                         FROM animes a WHERE media_type=%s ORDER BY {order_by} LIMIT %s OFFSET %s""",
                       (media_type, per_page, offset))
         else:
-            c.execute("""SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
-                         FROM animes a ORDER BY id DESC LIMIT %s OFFSET %s""",
+            c.execute(f"""SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
+                         FROM animes a ORDER BY {order_by} LIMIT %s OFFSET %s""",
                       (per_page, offset))
         rows = [dict(r) for r in c.fetchall()]
         return rows
