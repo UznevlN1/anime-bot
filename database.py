@@ -2713,3 +2713,15 @@ def get_ai_questions_count():
         put_conn(conn)
 
 
+def clear_ai_questions():
+    """AI'ga yozilgan savollar jurnalini butunlay tozalaydi (admin panelidagi
+    "AI savollari" bo'limidagi "🗑 Tozalash" tugmasi uchun) — nechta yozuv
+    o'chirilganini qaytaradi."""
+    with db_conn() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM ai_questions_log")
+        deleted = c.rowcount
+        conn.commit()
+        return deleted
+
+
