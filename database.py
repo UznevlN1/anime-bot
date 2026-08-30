@@ -1153,12 +1153,16 @@ def get_animes(media_type=None, page=0, per_page=10, incomplete_first=False):
                 id DESC
             """
         if media_type:
-            c.execute(f"""SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
-                         FROM animes a WHERE media_type=%s ORDER BY {order_by} LIMIT %s OFFSET %s""",
+            c.execute(f"""SELECT * FROM (
+                             SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
+                             FROM animes a WHERE media_type=%s
+                         ) sub ORDER BY {order_by} LIMIT %s OFFSET %s""",
                       (media_type, per_page, offset))
         else:
-            c.execute(f"""SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
-                         FROM animes a ORDER BY {order_by} LIMIT %s OFFSET %s""",
+            c.execute(f"""SELECT * FROM (
+                             SELECT a.*, (SELECT COUNT(*) FROM episodes e WHERE e.anime_id=a.id) AS episode_count
+                             FROM animes a
+                         ) sub ORDER BY {order_by} LIMIT %s OFFSET %s""",
                       (per_page, offset))
         rows = [dict(r) for r in c.fetchall()]
         return rows
