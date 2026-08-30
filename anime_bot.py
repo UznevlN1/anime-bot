@@ -4764,11 +4764,42 @@ async def add_total_episodes(message: Message, state: FSMContext):
     await state.set_state(AddAnime.status)
     await message.answer("📊 Holatini tanlang:", reply_markup=_status_choice_keyboard())
 
+# Yuklanayotgan video-tasklar (asyncio.Task) FSM holatida (PostgresStorage →
+# Postgres) ATAYLAB SAQLANMAYDI. Sabab: asyncio.Task JSON'ga serializatsiya
+# qilinmaydi — demak tasklar ro'yxati bilan `state.update_data(...)`
+# chaqirilganda, fsm_set_data() ichidagi json.dumps(...) TypeError bilan
+# yiqilar edi va BUTUN yozuv (shu chaqiriqdagi boshqa maydonlar bilan birga)
+# saqlanmay qolar edi — bu xato hech qayerda ko'rsatilmagan, faqat log'da
+# qolgan. Natijada har bir keyingi video doim "birinchi" ep_num bilan
+# hisoblanardi (masalan har doim 6-qism), va /done bosilganda videolar
+# STORAGE_CHANNEL'ga muvaffaqiyatli yuklangan bo'lsa-da "❌ Video
+# yuklanmadi!" chiqib, `episodes` jadvaliga umuman qo'shilmasdi. Task/holder
+# obyektlari process qayta ishga tushganda baribir yashab qololmaydi
+# (Postgres'da saqlashning hech qanday foydasi yo'q edi) — shu sabab endi
+# oddiy jarayon-ichi lug'atda, admin chat_id bo'yicha saqlanadi.
+_upload_sessions: dict[int, dict] = {}
+
+def _reset_upload_session(chat_id: int) -> None:
+    """Yangi video-yuklash oqimi (AddAnime.videos yoki AddEpisode.videos)
+    boshlanganda chaqiriladi — shu chat uchun eski (masalan oldingi bekor
+    qilingan/yakunlanmagan urinishdan qolgan) task ro'yxatlarini tozalaydi."""
+    _upload_sessions[chat_id] = {
+        "video_tasks": [], "video_task_holders": [],
+        "episode_tasks": [], "episode_task_holders": [],
+    }
+
+def _upload_session(chat_id: int) -> dict:
+    return _upload_sessions.setdefault(chat_id, {
+        "video_tasks": [], "video_task_holders": [],
+        "episode_tasks": [], "episode_task_holders": [],
+    })
+
 @dp.callback_query(AddAnime.status, F.data.in_(["addstatus_ongoing", "addstatus_finished"]))
 async def add_status(call: CallbackQuery, state: FSMContext):
     status = call.data.replace("addstatus_", "")
     await state.update_data(status=status)
     await state.set_state(AddAnime.videos)
+    _reset_upload_session(call.message.chat.id)
     await call.message.edit_text(
         "🎬 Videolarni yuboring. Xato/takror yuborsangiz — /bekor (oxirgi qismni bekor qiladi).\nTugagach /done yozing:"
     )
@@ -4779,9 +4810,9 @@ async def add_video_cancel_last(message: Message, state: FSMContext):
 
 @dp.message(AddAnime.videos, F.video)
 async def add_video(message: Message, state: FSMContext):
-    data = await state.get_data()
-    tasks = data.get("video_tasks", [])
-    holders = data.get("video_task_holders", [])
+    sess = _upload_session(message.chat.id)
+    tasks = sess["video_tasks"]
+    holders = sess["video_task_holders"]
     ep_num = len(tasks) + 1
     # MUHIM: avval bu yerda to'g'ridan-to'g'ri bot.copy_message ishlatilib,
     # kodek moslik tekshiruvi (H.264/AAC'ga o'tkazish) butunlay o'tkazib
@@ -4800,7 +4831,6 @@ async def add_video(message: Message, state: FSMContext):
     ))
     tasks.append(task)
     holders.append(holder)
-    await state.update_data(video_tasks=tasks, video_task_holders=holders)
     await message.answer(f"📥 {ep_num}-video qabul qilindi, fonda qayta ishlanmoqda... /done yozing yoki davom eting. (xato bo'lsa /bekor)")
 
 _add_done_in_progress = set()
@@ -4865,7 +4895,7 @@ async def _add_done_impl(message: Message, state: FSMContext):
     if await state.get_state() != AddAnime.videos.state:
         return
     data = await state.get_data()
-    tasks = data.get("video_tasks", [])
+    tasks = _upload_session(message.chat.id)["video_tasks"]
     if not tasks:
         await message.answer("❌ Video yuklanmadi!")
         return
@@ -4897,6 +4927,7 @@ async def _add_done_impl(message: Message, state: FSMContext):
             fix_prompts.append((ep_id, ep_num))
     video_ids = [msg_id for _, msg_id, _ in ok_pairs]
     await state.clear()
+    _upload_sessions.pop(message.chat.id, None)
     if failed_nums:
         nums_str = ", ".join(str(n) for n in failed_nums)
         await message.answer(
@@ -4998,7 +5029,8 @@ async def addepi_selected(call: CallbackQuery, state: FSMContext):
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     next_ep = len(episodes) + 1
-    await state.update_data(episode_anime_id=anime_id, episode_tasks=[], next_ep=next_ep)
+    await state.update_data(episode_anime_id=anime_id, next_ep=next_ep)
+    _reset_upload_session(call.message.chat.id)
     await state.set_state(AddEpisode.videos)
     title = anime.get("title") if anime else "—"
     total = anime.get("total_episodes") if anime else None
@@ -5022,16 +5054,15 @@ async def _cancel_last_upload_task(message: Message, state: FSMContext, tasks_ke
     (qarang: _upload_episode_to_storage). Bazaga (db) hali hech narsa
     yozilmagani uchun (bu faqat /done bosilganda sodir bo'ladi) boshqa
     qo'shimcha tozalash shart emas."""
-    data = await state.get_data()
-    tasks = data.get(tasks_key, [])
-    holders = data.get(holders_key, [])
+    sess = _upload_session(message.chat.id)
+    tasks = sess[tasks_key]
+    holders = sess[holders_key]
     if not tasks:
         await message.answer("❌ Bekor qilinadigan video yo'q.")
         return
     last_task = tasks.pop()
     last_holder = holders.pop() if holders else {}
     ep_num = base_ep_num + len(tasks)
-    await state.update_data(**{tasks_key: tasks, holders_key: holders})
 
     if not last_task.done():
         last_task.cancel()
@@ -5054,8 +5085,9 @@ async def addepi_cancel_last(message: Message, state: FSMContext):
 @dp.message(AddEpisode.videos, F.video)
 async def addepi_video(message: Message, state: FSMContext):
     data = await state.get_data()
-    tasks = data.get("episode_tasks", [])
-    holders = data.get("episode_task_holders", [])
+    sess = _upload_session(message.chat.id)
+    tasks = sess["episode_tasks"]
+    holders = sess["episode_task_holders"]
     ep_num = data["next_ep"] + len(tasks)
     holder = {}
     # TEZLIK: fonda ishga tushiriladi (qarang: add_video izohi) — admin
@@ -5065,13 +5097,12 @@ async def addepi_video(message: Message, state: FSMContext):
     ))
     tasks.append(task)
     holders.append(holder)
-    await state.update_data(episode_tasks=tasks, episode_task_holders=holders)
     await message.answer(f"📥 {ep_num}-qism qabul qilindi, fonda qayta ishlanmoqda... (xato bo'lsa /bekor yozing)")
 
 @dp.message(AddEpisode.videos, Command("done"))
 async def addepi_done(message: Message, state: FSMContext):
     data = await state.get_data()
-    tasks = data.get("episode_tasks", [])
+    tasks = _upload_session(message.chat.id)["episode_tasks"]
     if not tasks:
         await message.answer("❌ Video yuklanmadi!")
         return
@@ -5089,6 +5120,7 @@ async def addepi_done(message: Message, state: FSMContext):
     if not ok_pairs:
         await message.answer("❌ Hech qaysi qism saqlanmadi (barchasida xato yuz berdi). Qaytadan urinib ko'ring.")
         await state.clear()
+        _upload_sessions.pop(message.chat.id, None)
         return
     fix_prompts = []
     for ep_num, msg_id, needs_fix in ok_pairs:
@@ -5097,6 +5129,7 @@ async def addepi_done(message: Message, state: FSMContext):
             fix_prompts.append((ep_id, ep_num))
     episode_msg_ids = [msg_id for _, msg_id, _ in ok_pairs]
     await state.clear()
+    _upload_sessions.pop(message.chat.id, None)
     if failed_nums:
         nums_str = ", ".join(str(n) for n in failed_nums)
         await message.answer(
