@@ -382,7 +382,18 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6, message_thr
     bosilgandagi kabi, qisman javob baribir yuboriladi (chaqiruvchi tomon
     buni ODATDAGI to'liq javobdek qabul qiladi, alohida ishlov shart emas)."""
     full_text = ""
-    _active_ai_streams[chat_id] = {"stop": False}
+    # MUHIM (tuzatildi): avval bu yerda faqat _active_ai_streams[chat_id]ga
+    # yozib, pastda har safar qayta shu yerdan o'qilardi. Agar bitta chatda
+    # ikkinchi AI so'rov birinchisi hali oqib turganida boshlansa, ikkinchisi
+    # ushbu yozuvni o'ziniki bilan almashtirib qo'yar edi — shundan keyin
+    # "to'xtatish" tugmasi noto'g'ri oqimga ta'sir qilardi, va qaysi oqim
+    # birinchi tugasa, uning finally bloki ikkinchi (hali FAOL) oqimning
+    # holatini o'chirib yuborardi. Endi har bir oqim faqat O'ZINING lokal
+    # obyektini (`my_stream_state`) tekshiradi — umumiy lug'at faqat
+    # stopped_message_generation handleri "hozir qaysi oqim faol" deb
+    # bilishi uchun ishlatiladi.
+    my_stream_state = {"stop": False}
+    _active_ai_streams[chat_id] = my_stream_state
     try:
         if not _MESSAGE_DRAFT_SUPPORTED:
             async for delta in stream_gen:
@@ -397,7 +408,7 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6, message_thr
             pass
         async for delta in stream_gen:
             full_text += delta
-            if _active_ai_streams.get(chat_id, {}).get("stop"):
+            if my_stream_state["stop"]:
                 try:
                     await stream_gen.aclose()
                 except Exception:
@@ -424,8 +435,13 @@ async def stream_ai_reply(chat_id, stream_gen, throttle_seconds=0.6, message_thr
         return full_text
     finally:
         # Oqim qanday tugashidan qat'i nazar (to'liq, xato, yoki to'xtatish
-        # orqali) — kesh chiqindi yig'ib qolmasligi uchun har doim tozalanadi.
-        _active_ai_streams.pop(chat_id, None)
+        # orqali) — kesh chiqindi yig'ib qolmasligi uchun tozalanadi. LEKIN
+        # faqat lug'atdagi yozuv HALI HAM aynan shu oqimning o'ziga tegishli
+        # bo'lsagina — aks holda (agar shu orada yangi oqim ustidan yozgan
+        # bo'lsa) o'sha yangi, hali faol oqimning yozuvini o'chirib
+        # yubormaslik uchun.
+        if _active_ai_streams.get(chat_id) is my_stream_state:
+            _active_ai_streams.pop(chat_id, None)
 
 _extra_admin_cache = {"roles": {}, "loaded_at": 0}
 _EXTRA_ADMIN_TTL = 60
@@ -7308,11 +7324,13 @@ async def _ai_pick_best_window(path, target_duration, total_duration, progress_c
         logger.error(f"[ai-highlight] xato: {e}")
         return None
     finally:
-        try:
+        def _cleanup_tmp_dir():
             if os.path.exists(tmp_dir):
                 for fn in os.listdir(tmp_dir):
                     os.remove(os.path.join(tmp_dir, fn))
                 os.rmdir(tmp_dir)
+        try:
+            await asyncio.to_thread(_cleanup_tmp_dir)
         except Exception:
             pass
 
@@ -7833,10 +7851,12 @@ async def process_highlight_clip(admin_chat_id, channel_msg_id, duration, status
             await asyncio.to_thread(db.delete_setting, f"clipjob_{job_id}")
         except Exception:
             pass
+        def _rm_if_exists(path):
+            if os.path.exists(path):
+                os.remove(path)
         for p in (src_path, out_h_path, out_v_path):
             try:
-                if os.path.exists(p):
-                    os.remove(p)
+                await asyncio.to_thread(_rm_if_exists, p)
             except Exception:
                 pass
 
@@ -8816,6 +8836,12 @@ async def bc_ai_invite_send(call: CallbackQuery, state: FSMContext):
             except Exception:
                 failed += 1
                 break
+        else:
+            # Tuzatildi: ikkala urinish ham TelegramRetryAfter bilan tugasa
+            # (juda kam uchraydi), break chaqirilmagani uchun bu foydalanuvchi
+            # avval na sent, na failed'ga qo'shilmay qolardi — endi shunday
+            # holat ham "failed" deb hisoblanadi.
+            failed += 1
         await asyncio.sleep(BROADCAST_DELAY)
     try:
         await call.message.edit_text(
@@ -8926,6 +8952,13 @@ async def bc_send(call: CallbackQuery, state: FSMContext):
             except Exception:
                 failed += 1
                 break
+        else:
+            # Tuzatildi: ikkala urinish ham TelegramRetryAfter bilan tugasa,
+            # break chaqirilmagani uchun bu foydalanuvchi na sent, na
+            # failed'ga qo'shilmay qolardi — endi shunday holat ham
+            # "failed" deb hisoblanadi (sent+failed=len(users) doim to'g'ri
+            # chiqishi uchun).
+            failed += 1
         # Har xabardan keyin qisqa pauza — Telegramning flood-limitiga
         # (~30 xabar/soniya) uchramaslik uchun.
         await asyncio.sleep(BROADCAST_DELAY)
@@ -10222,7 +10255,7 @@ async def send_db_backup(chat_id=None, reason="qoʻlda"):
     data = await asyncio.to_thread(db.export_backup)
     raw = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
     compressed = gzip.compress(raw)
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    ts = db.now_tz().strftime("%Y-%m-%d_%H-%M")
     filename = f"anifilm_backup_{ts}.json.gz"
     target = chat_id or ADMIN_ID
     total_rows = sum(len(rows) for rows in data.values())
@@ -10977,7 +11010,10 @@ async def webapp_anime_detail(request):
         return web.json_response({"error": "maintenance"}, status=503)
     if not status["subscribed"]:
         return web.json_response({"error": "not_subscribed", "channels": status["channels"]}, status=403)
-    anime_id = int(request.match_info["anime_id"])
+    try:
+        anime_id = int(request.match_info["anime_id"])
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
     data = await asyncio.to_thread(db.get_anime_detail_for_webapp, anime_id)
     if not data:
         return web.json_response({"error": "topilmadi"}, status=404)
@@ -11341,7 +11377,10 @@ async def webapp_get_comments(request):
         return web.json_response({"error": "maintenance"}, status=503)
     if not status["subscribed"]:
         return web.json_response({"error": "not_subscribed", "channels": status["channels"]}, status=403)
-    anime_id = int(request.match_info["anime_id"])
+    try:
+        anime_id = int(request.match_info["anime_id"])
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
     comments = await asyncio.to_thread(db.get_comments, anime_id, 50, viewer_id)
     return web.json_response(comments)
 
@@ -11576,7 +11615,13 @@ async def serve_webapp_index(request):
             },
         )
     except Exception as e:
-        return web.Response(text=f"Xato: {e} | path: {filepath}", status=500)
+        # DIQQAT (tuzatildi): oldin bu yerda xato matni VA serverning ichki
+        # fayl yo'li to'g'ridan-to'g'ri javobda mijozga qaytarilardi (kichik
+        # ma'lumot sizib chiqishi). Xuddi shu naqsh webapp_send_episode()da
+        # ilgari tuzatilgan edi — endi bu yerda ham xato faqat serverda log
+        # qilinadi, mijozga esa umumiy xabar qaytariladi.
+        logger.error(f"serve_webapp_index xato: {e} | path: {filepath}")
+        return web.Response(text="Server xatosi yuz berdi", status=500)
 
 async def start_web_server():
     import os

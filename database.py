@@ -115,17 +115,17 @@ def put_conn(conn):
         except Exception:
             pass
 
-# DIQQAT: quyidagi 100+ funksiyaning deyarli barchasi hozircha
-# `conn = get_conn(); ... ; put_conn(conn)` shaklida yozilgan — ORASIDA
-# xatolik chiqsa (masalan execute() constraint xatosi, kutilmagan None
-# qiymat va h.k.), put_conn(conn) HECH QACHON chaqirilmaydi va shu ulanish
-# pool'dan (jami 25 tadan) abadiy "yo'qoladi". Vaqt o'tishi bilan (ayniqsa
-# xato tez-tez chiqadigan joylarda) pool butunlay tugab, BARCHA baza
-# amallari to'xtab qolishi mumkin — buni faqat process qayta ishga
-# tushirish tuzatadi. Quyidagi context manager shu muammoni butunlay yo'q
-# qiladi (finally: orqali put_conn() har doim chaqirilishini kafolatlaydi).
-# Yangi funksiyalarda shuni ishlating; eskilarini ham asta-sekin shunga
-# o'tkazish tavsiya etiladi:
+# ESLATMA (2026-08-31: tekshirilib tasdiqlandi): bu yerda avval "quyidagi
+# 100+ funksiyaning deyarli barchasi try/finally'siz yozilgan, xato chiqsa
+# put_conn() chaqirilmay qolib, pool asta-sekin tugab qolishi mumkin" degan
+# ogohlantirish bor edi. Kod avtomatik (AST orqali, qator-baqator) qayta
+# tekshirilganda bu tasdiqlanmadi: pastdagi barcha ~130 ta
+# `conn = get_conn()` chaqiruvi ALLAQACHON to'g'ri
+# `try: ... finally: put_conn(conn)` bilan o'ralgan ekan — demak muammo
+# avvalroq tuzatilgan, faqat shu izoh yangilanmay qolib ketgan edi.
+# Shunga qaramay, quyidagi db_conn() context manager yangi kod uchun
+# tavsiya etiladi — u xuddi shu kafolatni (finally orqali put_conn() har
+# doim chaqirilishi) qisqaroq va xato qilish qiyinroq shaklda beradi:
 #
 #   def some_func(...):
 #       with db_conn() as conn:
