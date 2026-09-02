@@ -1,15 +1,27 @@
 # 2026-08-29: GitHub'dagi asl requirements.txt bilan solishtirilib moslashtirildi —
 # versiyalar shu yerdan olindi (allaqachon sinovdan o'tgan, real ishlab turgan
 # konfiguratsiya, mening avvalgi pin qilinmagan taxminimdan ko'ra ishonchliroq).
-
-aiogram>=3.20.0
-aiohttp>=3.9.0
-psycopg2-binary
-pyrogram>=2.0.106
-tgcrypto>=1.2.5
+#
+# 2026-09-02: Barcha versiyalar ANIQ raqamga (==) qadab qo'yildi. Sabab: "kamida
+# shuncha" (>=) yozilganda, Render qayta deploy qilganda paketning YANGI (va
+# potentsial mos kelmaydigan) versiyasi o'zi o'rnatilib qolishi mumkin edi —
+# aynan shu tarzda avval aiogram'ning yangi versiyasi bilan
+# _STOP_GENERATION_SUPPORTED xatosi chiqqan edi. Har bir raqam quyidagicha aniqlandi:
+# - aiogram: sizning Render build logingizda allaqachon tasdiqlangan 3.31.0
+# - qolganlari: shu kungi (2026-09-02) PyPI'dagi eng so'nggi barqaror versiya
+# DIQQAT: agar hozir ishlab turgan serveringizda "pip freeze" boshqacha
+# (masalan eskiroq) raqam ko'rsatsa, ENG XAVFSIZI — shu yerga aynan o'sha,
+# hozir sinovdan o'tgan raqamlarni yozib qo'yish (yangi emas, balki "ishlab turgan").
+aiogram==3.31.0
+aiohttp==3.14.3
+psycopg2-binary==2.9.12
+pyrogram==2.0.106
+tgcrypto==1.2.5  # rasmiy paket 2026-boshida "endi qo'llab-quvvatlanmaydi" deb
+                 # e'lon qilingan (arxivlangan) — 1.2.5 uning oxirgi versiyasi
 imageio-ffmpeg   # DIQQAT: joriy 4 ta .py faylda bu paket hech qayerda import qilinmaydi —
                  # ffmpeg subprocess orqali tizim PATH'idagi "ffmpeg" buyrug'i sifatida
                  # chaqiriladi, uni Dockerfile ham apt orqali alohida o'rnatadi. Ya'ni bu
                  # qator hozircha ishlatilmayotganga o'xshaydi (ehtimol eski qoldiq), lekin
-                 # zarar ham keltirmaydi — GitHub'dagi asl holicha qoldirdim.
-Pillow
+                 # zarar ham keltirmaydi — GitHub'dagi asl holicha qoldirdim (versiyasiz —
+                 # ishlatilmagani uchun aniq raqam qidirib ishonchsiz taxmin qilishdan koʻra).
+Pillow==12.3.0

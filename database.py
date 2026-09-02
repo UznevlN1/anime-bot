@@ -40,12 +40,21 @@ def now_tz():
 # belgilaydi (har bir so'rovda qo'shimcha "SET TIME ZONE" round-trip shart
 # emas), shu bilan NOW()/CURRENT_DATE doim Toshkent vaqtida ishlaydi.
 _CONN_OPTIONS = "-c timezone=Asia/Tashkent"
+# Neon uyg'onayotganda (bepul reja, 5 daqiqa harakatsizlikdan keyin "uxlab
+# qoladi") yoki tarmoqda vaqtinchalik uzilish bo'lganda, connect_timeout
+# berilmasa ulanish OS standart TCP vaqti tugaguncha (ba'zan bir necha
+# daqiqagacha) noaniq osilib qolishi mumkin edi — shu vaqt davomida o'sha
+# ulanishni kutayotgan handler (masalan /done) ham "muzlab qolgandek" ko'rinadi.
+# 10 soniya — Neon'ning odatiy uyg'onish vaqtidan (1-3+ soniya) ancha keng
+# zaxira bilan, lekin cheksiz emas.
+_CONNECT_TIMEOUT = 10
 _pool = psycopg2.pool.ThreadedConnectionPool(
     minconn=1,
     maxconn=25,  # 10 dan oshirildi: bot + webapp bir vaqtda ko'p so'rov yuborganda
                  # ulanish yetishmay ("pool exhausted") xatolik/sekinlashuv bo'lmasligi uchun
     dsn=DATABASE_URL,
     options=_CONN_OPTIONS,
+    connect_timeout=_CONNECT_TIMEOUT,
 )
 
 # Ulanish tirikligini har safar tekshirish (SELECT 1) qoʻshimcha DB round-trip
@@ -75,7 +84,17 @@ def get_conn():
                 _pool.putconn(conn, close=True)
             except Exception:
                 pass
-            conn = psycopg2.connect(DATABASE_URL, options=_CONN_OPTIONS)
+            try:
+                conn = psycopg2.connect(DATABASE_URL, options=_CONN_OPTIONS, connect_timeout=_CONNECT_TIMEOUT)
+            except Exception:
+                # Birinchi urinish muddati tugadi — Neon hali to'liq
+                # "uyg'onmagan" bo'lishi mumkin. Butunlay taslim bo'lish
+                # o'rniga, qisqa kutib, bir marta qayta urinamiz (bu
+                # get_conn() allaqachon thread ichida — asyncio.to_thread
+                # orqali — chaqirilgani uchun, shu yerdagi time.sleep()
+                # asosiy event loop'ni bloklamaydi, faqat shu ishchi threadni).
+                time.sleep(2)
+                conn = psycopg2.connect(DATABASE_URL, options=_CONN_OPTIONS, connect_timeout=_CONNECT_TIMEOUT)
             # Bu ulanish _pool.getconn() orqali chiqmagan — pool uni "tanimaydi".
             # Belgilab qo'yamiz, shunda put_conn() uni _pool.putconn()ga
             # yubormaydi (aks holda psycopg2 "trying to put unkeyed connection"
