@@ -168,6 +168,25 @@ async def get_announce_channel():
         _announce_channel_cache["loaded"] = True
     return _announce_channel_cache["value"]
 
+# Qismlar uchun ALOHIDA e'lon kanali (ixtiyoriy). Agar admin buni maxsus
+# o'rnatmagan bo'lsa, yangi qism e'lonlari ham xuddi avvalgidek asosiy
+# (anime) e'lon kanaliga tushaveradi — hech narsa kutilmaganda to'xtab
+# qolmaydi. Alohida o'rnatilsagina, qismlar O'SHA kanalga ajratiladi.
+_episode_announce_channel_cache = {"loaded": False, "value": None}
+
+def _invalidate_episode_announce_channel_cache():
+    _episode_announce_channel_cache["loaded"] = False
+
+async def get_episode_announce_channel():
+    """Qismlar uchun joriy kanalni qaytaradi: avval baza ("episode_announce_channel"),
+    sozlanmagan bo'lsa — asosiy e'lon kanaliga (get_announce_channel) qaytadi."""
+    if not _episode_announce_channel_cache["loaded"]:
+        raw = await asyncio.to_thread(db.get_setting, "episode_announce_channel")
+        value = _parse_channel_value(raw) if raw else await get_announce_channel()
+        _episode_announce_channel_cache["value"] = value
+        _episode_announce_channel_cache["loaded"] = True
+    return _episode_announce_channel_cache["value"]
+
 # Onlayn video striming uchun (my.telegram.org dan olinadi)
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
@@ -856,6 +875,9 @@ class AddChannelState(StatesGroup):
     channel = State()
 
 class AnnounceChannelState(StatesGroup):
+    channel = State()
+
+class EpisodeAnnounceChannelState(StatesGroup):
     channel = State()
 
 class LinksState(StatesGroup):
@@ -2612,7 +2634,10 @@ def admin_cat_settings_keyboard():
             InlineKeyboardButton(text="🔗 Havolalar", callback_data="admin_links", style="primary"),
         ],
         [
-            InlineKeyboardButton(text="📣 E'lon kanali", callback_data="admin_announce_channel", style="primary"),
+            InlineKeyboardButton(text="📣 E'lon kanali (anime)", callback_data="admin_announce_channel", style="primary"),
+        ],
+        [
+            InlineKeyboardButton(text="📺 E'lon kanali (qismlar)", callback_data="admin_episode_announce_channel", style="primary"),
         ],
         [
             InlineKeyboardButton(text="🔒 Kontent himoyasi", callback_data="admin_content", style="primary"),
@@ -2780,11 +2805,11 @@ def episode_announce_caption_text(anime, episode_number):
     )
 
 async def post_episode_to_announce_channel(anime, episode):
-    """Mavjud animega yangi qo'shilgan QISMni e'lon kanaliga post qiladi —
-    post_anime_to_announce_channel bilan bir xil uslubda (animening rasmi +
-    'Tomosha qilish' tugmasi), lekin tugma endi shu aniq qismga (?start=ep_<id>)
-    olib boradi, birinchi qismga emas."""
-    channel = await get_announce_channel()
+    """Mavjud animega yangi qo'shilgan QISMni qismlar uchun e'lon kanaliga
+    post qiladi — post_anime_to_announce_channel bilan bir xil uslubda
+    (animening rasmi + 'Tomosha qilish' tugmasi), lekin tugma endi shu aniq
+    qismga (?start=ep_<id>) olib boradi, birinchi qismga emas."""
+    channel = await get_episode_announce_channel()
     if not channel:
         return
     photo = anime.get("landscape_photo_id") or anime["photo_id"]
@@ -9242,11 +9267,10 @@ async def ch_del_done(call: CallbackQuery):
     await admin_channels(call)
 
 # ---- E'LON KANALI ----
-# Bu "📢 Kanallar" (majburiy obuna kanallari)dan FARQLI: bu yerda faqat BITTA
-# kanal — yangi anime/qism qo'shilganda avtomatik post qilinadigan ochiq
-# reklama kanali. Ilgari faqat Render Environment (ANNOUNCE_CHANNEL) orqali
-# sozlanardi, endi shu yerdan — kompyutersiz, to'g'ridan-to'g'ri telefondan —
-# ham o'rnatish/almashtirish/o'chirish mumkin.
+# Bu "📢 Kanallar" (majburiy obuna kanallari)dan FARQLI: bu yerda YANGI ANIME
+# qo'shilganda avtomatik post qilinadigan ochiq reklama kanali. Qismlar uchun
+# alohida sozlash — pastdagi "📺 E'lon kanali (qismlar)" bo'limida (agar u
+# sozlanmagan bo'lsa, qismlar ham shu yerdagi kanalga tushadi).
 @dp.callback_query(F.data == "admin_announce_channel")
 async def admin_announce_channel(call: CallbackQuery):
     if not await is_admin_user(call.from_user.id, min_role="super"):
@@ -9255,12 +9279,12 @@ async def admin_announce_channel(call: CallbackQuery):
     channel = await get_announce_channel()
     current_line = f"<code>{channel}</code>" if channel else "sozlanmagan"
     text = (
-        f"📣 <b>E'lon kanali</b>\n\n"
+        f"📣 <b>E'lon kanali (anime)</b>\n\n"
         f"Joriy: {current_line}\n\n"
-        f"Yangi anime yoki qism qo'shilganda, shu kanalga animening rasmi + "
-        f"\"▶️ Tomosha qilish\" tugmasi bilan avtomatik post qilinadi — boshqa "
-        f"hech narsa qilish shart emas. Tugma foydalanuvchini to'g'ridan-to'g'ri "
-        f"o'sha anime/qismga olib boradi."
+        f"Yangi ANIME qo'shilganda, shu kanalga animening rasmi + "
+        f"\"▶️ Tomosha qilish\" tugmasi bilan avtomatik post qilinadi. "
+        f"Qismlar uchun kanal alohida — \"📺 E'lon kanali (qismlar)\" "
+        f"bo'limida (sozlanmasa, ular ham shu yerga tushadi)."
     )
     buttons = [[InlineKeyboardButton(text="✏️ O'rnatish / almashtirish", callback_data="announce_channel_set")]]
     if channel:
@@ -9318,7 +9342,7 @@ async def announce_channel_save(message: Message, state: FSMContext):
         await bot.send_message(
             value,
             "✅ AniFilm Bot ushbu kanalga ulandi — bundan buyon yangi anime "
-            "va qismlar shu yerga avtomatik post qilinadi."
+            "shu yerga avtomatik post qilinadi."
         )
     except Exception as e:
         logger.error(f"[announce_channel_save] test xabar yuborilmadi ({value}): {e}")
@@ -9332,8 +9356,9 @@ async def announce_channel_save(message: Message, state: FSMContext):
         return
     await asyncio.to_thread(db.set_setting, "announce_channel", str(value))
     _invalidate_announce_channel_cache()
+    _invalidate_episode_announce_channel_cache()  # fallback qiymati o'zgargani uchun
     await message.answer(
-        "✅ E'lon kanali saqlandi! Endi yangi anime va qismlar shu kanalga "
+        "✅ E'lon kanali saqlandi! Endi yangi anime shu kanalga "
         "avtomatik post qilinadi.",
         reply_markup=admin_keyboard()
     )
@@ -9345,8 +9370,118 @@ async def announce_channel_remove(call: CallbackQuery):
         return
     await asyncio.to_thread(db.delete_setting, "announce_channel")
     _invalidate_announce_channel_cache()
+    _invalidate_episode_announce_channel_cache()  # fallback qiymati o'zgargani uchun
     await call.answer("🗑 O'chirildi!", show_alert=True)
     await admin_announce_channel(call)
+
+# ---- E'LON KANALI (QISMLAR) ----
+# Yangi ANIME kanalidan mustaqil, ixtiyoriy sozlama. Sozlanmasa, qismlar
+# yuqoridagi asosiy e'lon kanaliga tushadi (hech narsa to'xtab qolmaydi).
+@dp.callback_query(F.data == "admin_episode_announce_channel")
+async def admin_episode_announce_channel(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    own_raw = await asyncio.to_thread(db.get_setting, "episode_announce_channel")
+    channel = await get_episode_announce_channel()
+    if own_raw:
+        current_line = f"<code>{channel}</code>"
+    elif channel:
+        current_line = f"<code>{channel}</code> (anime kanali bilan bir xil)"
+    else:
+        current_line = "sozlanmagan"
+    text = (
+        f"📺 <b>E'lon kanali (qismlar)</b>\n\n"
+        f"Joriy: {current_line}\n\n"
+        f"Yangi QISM qo'shilganda, shu kanalga animening 16:9 rasmi + "
+        f"\"▶️ Tomosha qilish\" tugmasi bilan avtomatik post qilinadi. "
+        f"Alohida o'rnatilmasa, qismlar anime kanaliga tushaveradi."
+    )
+    buttons = [[InlineKeyboardButton(text="✏️ O'rnatish / almashtirish", callback_data="episode_announce_channel_set")]]
+    if own_raw:
+        buttons.append([InlineKeyboardButton(text="🗑 O'chirish (anime kanaliga qaytarish)", callback_data="episode_announce_channel_remove")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_cat_settings")])
+    try:
+        await call.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            raise
+
+@dp.callback_query(F.data == "episode_announce_channel_set")
+async def episode_announce_channel_set(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    await state.set_state(EpisodeAnnounceChannelState.channel)
+    try:
+        await call.message.edit_text(
+            "📺 Qismlar uchun kanal ID yoki @username yuboring.\n"
+            "Masalan: <code>-1001234567890</code> yoki <code>@mychannel</code>\n\n"
+            "⚠️ Bot avval o'sha kanalga <b>ADMIN</b> qilib qo'shilgan bo'lishi "
+            "kerak (kamida post yuborish huquqi bilan), aks holda ulanish "
+            "muvaffaqiyatsiz tugaydi.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            raise
+
+@dp.message(EpisodeAnnounceChannelState.channel)
+async def episode_announce_channel_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id, min_role="super"):
+        return
+    await state.clear()
+    value = _parse_channel_value(message.text)
+    valid = value and (
+        (isinstance(value, int) and value < 0) or
+        (isinstance(value, str) and value.startswith("@"))
+    )
+    if not valid:
+        await message.answer(
+            "❌ Noto'g'ri format. Kanal ID manfiy raqam bilan boshlanishi "
+            "kerak (masalan: -1001234567890) yoki @ bilan boshlanishi kerak "
+            "(masalan: @mychannel). Admin panel → ⚙️ Sozlamalar → 📺 E'lon "
+            "kanali (qismlar) orqali qaytadan urinib ko'ring.",
+            reply_markup=admin_keyboard()
+        )
+        return
+    try:
+        await bot.send_message(
+            value,
+            "✅ AniFilm Bot ushbu kanalga ulandi — bundan buyon yangi qismlar "
+            "shu yerga avtomatik post qilinadi."
+        )
+    except Exception as e:
+        logger.error(f"[episode_announce_channel_save] test xabar yuborilmadi ({value}): {e}")
+        await message.answer(
+            "❌ Bu kanalga xabar yubora olmadim. Botni o'sha kanalga <b>ADMIN</b> "
+            "qilib qo'shganingizga ishonch hosil qiling (kamida \"Post yuborish\" "
+            "huquqi bilan), so'ng qaytadan urinib ko'ring.",
+            reply_markup=admin_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+    await asyncio.to_thread(db.set_setting, "episode_announce_channel", str(value))
+    _invalidate_episode_announce_channel_cache()
+    await message.answer(
+        "✅ Qismlar uchun e'lon kanali saqlandi! Endi yangi qismlar shu "
+        "kanalga avtomatik post qilinadi.",
+        reply_markup=admin_keyboard()
+    )
+
+@dp.callback_query(F.data == "episode_announce_channel_remove")
+async def episode_announce_channel_remove(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    await asyncio.to_thread(db.delete_setting, "episode_announce_channel")
+    _invalidate_episode_announce_channel_cache()
+    await call.answer("🗑 O'chirildi — qismlar endi anime kanaliga tushadi.", show_alert=True)
+    await admin_episode_announce_channel(call)
 
 # ---- BLOKLASH ----
 @dp.callback_query(F.data == "admin_block")
