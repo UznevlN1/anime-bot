@@ -220,6 +220,10 @@ def init_db():
         c.execute("ALTER TABLE animes ADD COLUMN IF NOT EXISTS is_premium_only INTEGER DEFAULT 0")
         # Anime holati: 'ongoing' (davom etmoqda) yoki 'finished' (tugagan)
         c.execute("ALTER TABLE animes ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ongoing'")
+        # Gorizontal (16:9) rasm — faqat "yangi qism" e'lon kanali posti uchun.
+        # Ixtiyoriy: o'rnatilmasa, o'sha post oddiy vertikal poster (photo_id)
+        # bilan davom etadi.
+        c.execute("ALTER TABLE animes ADD COLUMN IF NOT EXISTS landscape_photo_id TEXT")
 
         # Bannerlar (webapp bosh sahifasidagi reklama/eʼlon suratlari)
         c.execute("""
@@ -1324,7 +1328,7 @@ def delete_anime(anime_id):
 ALLOWED_ANIME_FIELDS = {
     "title", "year", "country", "genre",
     "description", "language", "photo_id", "media_type", "category",
-    "total_episodes", "status",
+    "total_episodes", "status", "landscape_photo_id",
 }
 
 def update_anime(anime_id, field, value):

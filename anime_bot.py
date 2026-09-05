@@ -127,18 +127,46 @@ EPISODE_CREDIT_TAG = "@Ani_Max"
 def episode_caption(ep_num: int) -> str:
     return f"{EPISODE_CREDIT_TAG} kanali uchun maxsus ({ep_num}-qism)"
 
-# Yangi anime qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan ochiq
-# reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina o'chiq
-# hisoblanadi va botning boshqa ishiga ta'sir qilmaydi.
-# Yangi anime qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan ochiq
-# reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina o'chiq
-# hisoblanadi va botning boshqa ishiga ta'sir qilmaydi. Raqamli ID (-100...)
-# yoki @kanal_username shaklida yozilishi mumkin.
+# Yangi anime/qism qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan
+# ochiq reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina
+# o'chiq hisoblanadi va botning boshqa ishiga ta'sir qilmaydi. Raqamli ID
+# (-100...) yoki @kanal_username shaklida yozilishi mumkin.
+#
+# Bu — FALLBACK qiymat (Render Environment'dan). Endi admin panel ichidan
+# ham (Sozlamalar → E'lon kanali) o'rnatish/o'zgartirish mumkin — o'sha holda
+# baza (settings jadvali, "announce_channel" kaliti) ustunlik qiladi, shu
+# ENV o'zgaruvchisi esa faqat u sozlanmagan holatlar uchun zaxira bo'lib qoladi.
 ANNOUNCE_CHANNEL_raw = os.environ.get("ANNOUNCE_CHANNEL")
 if ANNOUNCE_CHANNEL_raw:
     ANNOUNCE_CHANNEL = int(ANNOUNCE_CHANNEL_raw) if ANNOUNCE_CHANNEL_raw.lstrip("-").isdigit() else ANNOUNCE_CHANNEL_raw
 else:
     ANNOUNCE_CHANNEL = None
+
+_announce_channel_cache = {"loaded": False, "value": None}
+
+def _invalidate_announce_channel_cache():
+    _announce_channel_cache["loaded"] = False
+
+def _parse_channel_value(raw):
+    """'@kanal' -> shundayligicha; '-1001234567890' -> int. Bo'sh/None -> None."""
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    return int(raw) if raw.lstrip("-").isdigit() else raw
+
+async def get_announce_channel():
+    """Joriy e'lon kanalini qaytaradi: avval baza (admin panelda o'rnatilgan),
+    topilmasa ENV (ANNOUNCE_CHANNEL) qiymatiga qaytadi. Natija keshlanadi —
+    admin uni o'zgartirganda/o'chirganda _invalidate_announce_channel_cache()
+    chaqiriladi."""
+    if not _announce_channel_cache["loaded"]:
+        raw = await asyncio.to_thread(db.get_setting, "announce_channel")
+        value = _parse_channel_value(raw) if raw else ANNOUNCE_CHANNEL
+        _announce_channel_cache["value"] = value
+        _announce_channel_cache["loaded"] = True
+    return _announce_channel_cache["value"]
 
 # Onlayn video striming uchun (my.telegram.org dan olinadi)
 API_ID = os.environ.get("API_ID")
@@ -825,6 +853,9 @@ class BroadcastState(StatesGroup):
     confirm = State()
 
 class AddChannelState(StatesGroup):
+    channel = State()
+
+class AnnounceChannelState(StatesGroup):
     channel = State()
 
 class LinksState(StatesGroup):
@@ -2581,6 +2612,9 @@ def admin_cat_settings_keyboard():
             InlineKeyboardButton(text="🔗 Havolalar", callback_data="admin_links", style="primary"),
         ],
         [
+            InlineKeyboardButton(text="📣 E'lon kanali", callback_data="admin_announce_channel", style="primary"),
+        ],
+        [
             InlineKeyboardButton(text="🔒 Kontent himoyasi", callback_data="admin_content", style="primary"),
             InlineKeyboardButton(text="🚫 So'z filtri", callback_data="admin_wordfilter", style="danger"),
         ],
@@ -2713,7 +2747,8 @@ async def post_anime_to_announce_channel(anime):
     ochiq e'lon kanaliga post qiladi. Tugma bosilganda foydalanuvchi botga
     o'tib, deep-link (?start=anime_<id>) orqali to'g'ridan-to'g'ri 1-qismni
     oladi."""
-    if not ANNOUNCE_CHANNEL:
+    channel = await get_announce_channel()
+    if not channel:
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -2724,7 +2759,7 @@ async def post_anime_to_announce_channel(anime):
     ])
     try:
         await bot.send_photo(
-            ANNOUNCE_CHANNEL,
+            channel,
             photo=anime["photo_id"],
             caption=announce_caption_text(anime),
             reply_markup=kb,
@@ -2732,6 +2767,44 @@ async def post_anime_to_announce_channel(anime):
         )
     except Exception as e:
         logger.error(f"[post_anime_to_announce_channel] e'lon kanaliga post qilinmadi (anime_id={anime['id']}): {e}")
+
+def episode_announce_caption_text(anime, episode_number):
+    """E'lon kanali uchun yangi QISM posti matni — foydalanuvchi ko'rsatgan
+    namunadagi (• Nomi / • QISM - NN / #hashtag) uslubda, sodda va qisqa."""
+    hashtag = re.sub(r"[^0-9A-Za-z_\u0400-\u04FF]+", "_", anime["title"]).strip("_")
+    ep_str = str(episode_number).zfill(2) if isinstance(episode_number, int) else episode_number
+    return (
+        f"• {anime['title']}\n"
+        f"• QISM - {ep_str}\n\n"
+        f"#{hashtag}"
+    )
+
+async def post_episode_to_announce_channel(anime, episode):
+    """Mavjud animega yangi qo'shilgan QISMni e'lon kanaliga post qiladi —
+    post_anime_to_announce_channel bilan bir xil uslubda (animening rasmi +
+    'Tomosha qilish' tugmasi), lekin tugma endi shu aniq qismga (?start=ep_<id>)
+    olib boradi, birinchi qismga emas."""
+    channel = await get_announce_channel()
+    if not channel:
+        return
+    photo = anime.get("landscape_photo_id") or anime["photo_id"]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="▶️ Tomosha qilish",
+            url=f"https://t.me/{BOT_USERNAME}?start=ep_{episode['id']}",
+            style="danger"
+        )]
+    ])
+    try:
+        await bot.send_photo(
+            channel,
+            photo=photo,
+            caption=episode_announce_caption_text(anime, episode["episode_number"]),
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"[post_episode_to_announce_channel] e'lon kanaliga post qilinmadi (episode_id={episode['id']}): {e}")
 
 def search_method_keyboard(prefix):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -5170,10 +5243,11 @@ async def _add_done_impl(message: Message, state: FSMContext):
             f"Muammoli qism(lar)ni keyinroq \"Qism qo'shish\" orqali alohida yuklashingiz mumkin."
         )
 
-    # Yangi anime kartasini ochiq e'lon kanaliga post qilish (ANNOUNCE_CHANNEL
-    # o'rnatilgan bo'lsa). anime dict'ini db'dan qayta olamiz — chunki
-    # add_anime natijasi faqat ID, to'liq maydonlar emas.
-    if ANNOUNCE_CHANNEL:
+    # Yangi anime kartasini ochiq e'lon kanaliga post qilish (e'lon kanali
+    # o'rnatilgan bo'lsa — admin panel yoki ENV orqali). anime dict'ini
+    # db'dan qayta olamiz — chunki add_anime natijasi faqat ID, to'liq
+    # maydonlar emas.
+    if await get_announce_channel():
         new_anime = await asyncio.to_thread(db.get_anime, anime_id)
         if new_anime:
             await post_anime_to_announce_channel(new_anime)
@@ -5224,6 +5298,8 @@ async def admin_add_episode(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "addepi_list")
 async def addepi_list(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     animes = await asyncio.to_thread(db.get_animes, "serial", 0, incomplete_first=True)
     total = await asyncio.to_thread(db.get_anime_count, "serial")
     if not animes:
@@ -5241,6 +5317,8 @@ async def addepi_list(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("addepi_sel_page_"))
 async def addepi_sel_page(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     page = int(call.data.split("_")[-1])
     animes = await asyncio.to_thread(db.get_animes, "serial", page, incomplete_first=True)
     total = await asyncio.to_thread(db.get_anime_count, "serial")
@@ -5255,6 +5333,8 @@ async def addepi_sel_page(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "addepi_search")
 async def addepi_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await state.set_state(AddEpisode.choose_method)
     try:
         await call.message.edit_text("🔍 Serial nomini yoki ID/kod raqamini yozing:")
@@ -5275,6 +5355,8 @@ async def addepi_search_result(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("addepi_sel_"))
 async def addepi_selected(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     anime_id = int(call.data.split("_")[2])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
@@ -5418,6 +5500,10 @@ async def addepi_done(message: Message, state: FSMContext):
                 data["episode_anime_id"],
                 f"{body}\n\n👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
             ))
+            # Ochiq e'lon kanaliga ham post (kanal o'rnatilgan bo'lsa) — admin
+            # hech narsa qilmasa ham, anime rasmi + "Tomosha qilish" tugmasi
+            # bilan avtomatik chiqadi (tugma shu aniq QISMga olib boradi).
+            asyncio.create_task(post_episode_to_announce_channel(anime_row, new_ep))
         # Webapp 🔔 paneli uchun bildirishnoma
         await asyncio.to_thread(
             db.create_notification, "episode",
@@ -5539,6 +5625,8 @@ async def admin_edit(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "edit_list")
 async def edit_list(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     animes = await asyncio.to_thread(db.get_animes, page=0)
     total = await asyncio.to_thread(db.get_anime_count)
     try:
@@ -5552,6 +5640,8 @@ async def edit_list(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("editsel_page_"))
 async def editsel_page(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     page = int(call.data.split("_")[-1])
     animes = await asyncio.to_thread(db.get_animes, page=page)
     total = await asyncio.to_thread(db.get_anime_count)
@@ -5566,6 +5656,8 @@ async def editsel_page(call: CallbackQuery):
 
 @dp.callback_query(F.data == "edit_search")
 async def edit_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await state.set_state(EditAnime.search_query)
     try:
         await call.message.edit_text("🔍 Anime nomini yoki ID/kod raqamini yozing:")
@@ -5584,6 +5676,8 @@ async def edit_search_result(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("editsel_"))
 async def editsel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     anime_id = int(call.data.split("_")[1])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     title = anime.get("title") if anime else "—"
@@ -5601,6 +5695,7 @@ async def editsel(call: CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text="📝 Malumot", callback_data="efield_description")],
                 [InlineKeyboardButton(text="🔢 Jami qism soni", callback_data="efield_total_episodes")],
                 [InlineKeyboardButton(text="📊 Holat", callback_data="efield_status")],
+                [InlineKeyboardButton(text="🖼 16:9 rasm (qism uchun)", callback_data="efield_landscape_photo_id")],
                 [InlineKeyboardButton(text="❌ Bekor", callback_data="admin_back")],
             ])
         )
@@ -5614,6 +5709,8 @@ async def edit_choose_field_fallback(message: Message):
 
 @dp.callback_query(F.data.startswith("efield_"))
 async def edit_field(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     field = call.data.replace("efield_", "")
     await state.update_data(edit_field=field)
     data = await state.get_data()
@@ -5632,6 +5729,19 @@ async def edit_field(call: CallbackQuery, state: FSMContext):
             if not _is_message_not_modified(e):
                 raise
         return
+    if field == "landscape_photo_id":
+        await state.set_state(EditAnime.new_value)
+        try:
+            await call.message.edit_text(
+                f"📌 {title}\n\n"
+                f"🖼 Yangi 16:9 (gorizontal) rasmni yuboring — bu rasm faqat "
+                f"\"yangi qism\" e'lonlarida ishlatiladi, asosiy poster o'zgarmaydi.\n\n"
+                f"O'chirish uchun /ochirish deb yozing."
+            )
+        except Exception as e:
+            if not _is_message_not_modified(e):
+                raise
+        return
     await state.set_state(EditAnime.new_value)
     try:
         await call.message.edit_text(f"📌 {title}\n\n✏️ Yangi qiymatni yozing:")
@@ -5641,6 +5751,8 @@ async def edit_field(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("setstatus_"))
 async def set_anime_status(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     status = call.data.replace("setstatus_", "")
     data = await state.get_data()
     anime_id = data.get("edit_anime_id")
@@ -5659,6 +5771,22 @@ async def set_anime_status(call: CallbackQuery, state: FSMContext):
 @dp.message(EditAnime.new_value)
 async def edit_value(message: Message, state: FSMContext):
     data = await state.get_data()
+    if data["edit_field"] == "landscape_photo_id":
+        if message.text and message.text.strip().lower() == "/ochirish":
+            value = None
+        elif message.photo:
+            value = message.photo[-1].file_id
+        else:
+            await message.answer("🖼 Iltimos, rasm yuboring (yoki o'chirish uchun /ochirish yozing).")
+            return
+        await asyncio.to_thread(db.update_anime, data["edit_anime_id"], "landscape_photo_id", value)
+        await state.clear()
+        await log_admin_action(message.from_user, "Animeni tahrirladi", f"maydon: landscape_photo_id, anime_id: {data['edit_anime_id']}")
+        await message.answer(
+            "✅ O'chirildi — endi qism e'lonlarida asosiy poster ishlatiladi." if value is None else "✅ Yangilandi!",
+            reply_markup=admin_keyboard()
+        )
+        return
     value = message.text
     if data["edit_field"] == "total_episodes":
         try:
@@ -5783,6 +5911,8 @@ async def banner_photo_ai_prompt(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "banner_ai_retry")
 async def banner_ai_retry(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     data = await state.get_data()
     prompt = data.get("_pending_ai_prompt")
     if not prompt:
@@ -5799,6 +5929,8 @@ async def banner_ai_retry(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "banner_ai_use")
 async def banner_ai_use(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     data = await state.get_data()
     photo_id = data.get("_pending_ai_photo_id")
     if not photo_id:
@@ -5815,6 +5947,8 @@ async def banner_ai_use(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "banner_ai_cancel")
 async def banner_ai_cancel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await call.answer("Bekor qilindi")
     try:
         await call.message.delete()
@@ -6073,6 +6207,8 @@ async def admin_delete(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "del_list")
 async def del_list(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     animes = await asyncio.to_thread(db.get_animes, page=0)
     total = await asyncio.to_thread(db.get_anime_count)
     try:
@@ -6086,6 +6222,8 @@ async def del_list(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("delsel_page_"))
 async def delsel_page(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     page = int(call.data.split("_")[-1])
     animes = await asyncio.to_thread(db.get_animes, page=page)
     total = await asyncio.to_thread(db.get_anime_count)
@@ -6100,6 +6238,8 @@ async def delsel_page(call: CallbackQuery):
 
 @dp.callback_query(F.data == "del_search")
 async def del_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await state.set_state(DeleteAnime.search_query)
     try:
         await call.message.edit_text("🔍 Anime nomini yoki ID/kod raqamini yozing:")
@@ -6118,6 +6258,8 @@ async def del_search_result(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("delsel_"))
 async def delsel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     anime_id = int(call.data.split("_")[1])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     await state.update_data(del_anime_id=anime_id)
@@ -6139,6 +6281,8 @@ async def delsel(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "del_confirm_yes")
 async def del_confirm(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     data = await state.get_data()
     anime = await asyncio.to_thread(db.get_anime, data["del_anime_id"])
     await asyncio.to_thread(db.delete_anime, data["del_anime_id"])
@@ -6289,6 +6433,8 @@ async def admin_check_videos(call: CallbackQuery):
 
 @dp.callback_query(F.data == "ep_del")
 async def ep_del(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await state.update_data(ep_action="del")
     try:
         await call.message.edit_text(
@@ -6301,6 +6447,8 @@ async def ep_del(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "ep_edit")
 async def ep_edit(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await state.update_data(ep_action="edit")
     try:
         await call.message.edit_text(
@@ -6313,6 +6461,8 @@ async def ep_edit(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "epact_list")
 async def epact_list(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     animes = await asyncio.to_thread(db.get_animes, "serial", 0)
     total = await asyncio.to_thread(db.get_anime_count, "serial")
     await state.set_state(EditEpisode.choose_episode)
@@ -6327,6 +6477,8 @@ async def epact_list(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("epact_sel_page_"))
 async def epact_sel_page(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     page = int(call.data.split("_")[-1])
     animes = await asyncio.to_thread(db.get_animes, "serial", page)
     total = await asyncio.to_thread(db.get_anime_count, "serial")
@@ -6341,6 +6493,8 @@ async def epact_sel_page(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "epact_search")
 async def epact_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     await state.set_state(EditEpisode.search_query)
     try:
         await call.message.edit_text("🔍 Serial nomini yoki ID/kod raqamini yozing:")
@@ -6360,6 +6514,8 @@ async def epact_search_result(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("epact_sel_"))
 async def epact_sel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     anime_id = int(call.data.split("_")[2])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     title = anime.get("title") if anime else "—"
@@ -6390,6 +6546,8 @@ async def epact_sel(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("epact_ep_"))
 async def epact_ep(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="moderator"):
+        return
     ep_id = int(call.data.split("_")[2])
     data = await state.get_data()
     action = data.get("ep_action")
@@ -8000,6 +8158,8 @@ async def clip_source_db(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "clipa_list")
 async def clipa_list(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
     animes = await asyncio.to_thread(db.get_animes, None, 0)
     total = await asyncio.to_thread(db.get_anime_count)
     if not animes:
@@ -8016,6 +8176,8 @@ async def clipa_list(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "clipa_search")
 async def clipa_search(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
     await state.set_state(ClipVideo.search_query)
     try:
         await call.message.edit_text("🔍 Nomini yoki ID/kod raqamini yozing:")
@@ -8035,6 +8197,8 @@ async def clipa_search_result(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("clipa_sel_page_"))
 async def clipa_sel_page(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
     page = int(call.data.split("_")[-1])
     animes = await asyncio.to_thread(db.get_animes, None, page)
     total = await asyncio.to_thread(db.get_anime_count)
@@ -8049,6 +8213,8 @@ async def clipa_sel_page(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.regexp(r"^clipa_sel_(\d+)$"))
 async def clipa_sel(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
     anime_id = int(call.data.split("_")[-1])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
     title = anime.get("title") if anime else "—"
@@ -8075,6 +8241,8 @@ async def clipa_sel(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.regexp(r"^clipep_(\d+)$"))
 async def clipep_selected(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id):
+        return
     ep_id = int(call.data.split("_")[1])
     ep = await asyncio.to_thread(db.get_episode, ep_id)
     if not ep:
@@ -8772,6 +8940,9 @@ async def admin_premium_pitch_go(call: CallbackQuery):
 async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
     """AI-yordamchidan hali foydalanmagan foydalanuvchilarga, AI o'zi
     yozgan taklif xabarini yuboradi (admin oldindan ko'rib, tasdiqlaydi)."""
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     if not ai_service.AI_ENABLED:
         await call.answer("AI hozircha sozlanmagan", show_alert=True)
         return
@@ -8804,6 +8975,9 @@ async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "bc_ai_invite_send")
 async def bc_ai_invite_send(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     data = await state.get_data()
     await state.clear()
     text = data.get("ai_invite_text")
@@ -8854,6 +9028,9 @@ async def bc_ai_invite_send(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "bc_simple")
 async def bc_simple(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     await state.update_data(bc_type="simple")
     await state.set_state(BroadcastState.message)
     try:
@@ -8864,6 +9041,9 @@ async def bc_simple(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "bc_inline")
 async def bc_inline(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     await state.update_data(bc_type="inline")
     await state.set_state(BroadcastState.message)
     try:
@@ -8918,6 +9098,9 @@ async def bc_button_link(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "bc_send")
 async def bc_send(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     data = await state.get_data()
     await state.clear()
     users = await asyncio.to_thread(db.get_all_active_users)
@@ -9058,6 +9241,113 @@ async def ch_del_done(call: CallbackQuery):
     await call.answer("🗑 Ochirildi!", show_alert=True)
     await admin_channels(call)
 
+# ---- E'LON KANALI ----
+# Bu "📢 Kanallar" (majburiy obuna kanallari)dan FARQLI: bu yerda faqat BITTA
+# kanal — yangi anime/qism qo'shilganda avtomatik post qilinadigan ochiq
+# reklama kanali. Ilgari faqat Render Environment (ANNOUNCE_CHANNEL) orqali
+# sozlanardi, endi shu yerdan — kompyutersiz, to'g'ridan-to'g'ri telefondan —
+# ham o'rnatish/almashtirish/o'chirish mumkin.
+@dp.callback_query(F.data == "admin_announce_channel")
+async def admin_announce_channel(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    channel = await get_announce_channel()
+    current_line = f"<code>{channel}</code>" if channel else "sozlanmagan"
+    text = (
+        f"📣 <b>E'lon kanali</b>\n\n"
+        f"Joriy: {current_line}\n\n"
+        f"Yangi anime yoki qism qo'shilganda, shu kanalga animening rasmi + "
+        f"\"▶️ Tomosha qilish\" tugmasi bilan avtomatik post qilinadi — boshqa "
+        f"hech narsa qilish shart emas. Tugma foydalanuvchini to'g'ridan-to'g'ri "
+        f"o'sha anime/qismga olib boradi."
+    )
+    buttons = [[InlineKeyboardButton(text="✏️ O'rnatish / almashtirish", callback_data="announce_channel_set")]]
+    if channel:
+        buttons.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="announce_channel_remove")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_cat_settings")])
+    try:
+        await call.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            raise
+
+@dp.callback_query(F.data == "announce_channel_set")
+async def announce_channel_set(call: CallbackQuery, state: FSMContext):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    await state.set_state(AnnounceChannelState.channel)
+    try:
+        await call.message.edit_text(
+            "📣 Kanal ID yoki @username yuboring.\n"
+            "Masalan: <code>-1001234567890</code> yoki <code>@mychannel</code>\n\n"
+            "⚠️ Bot avval o'sha kanalga <b>ADMIN</b> qilib qo'shilgan bo'lishi "
+            "kerak (kamida post yuborish huquqi bilan), aks holda ulanish "
+            "muvaffaqiyatsiz tugaydi.",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            raise
+
+@dp.message(AnnounceChannelState.channel)
+async def announce_channel_save(message: Message, state: FSMContext):
+    if not await is_admin_user(message.from_user.id, min_role="super"):
+        return
+    await state.clear()
+    value = _parse_channel_value(message.text)
+    valid = value and (
+        (isinstance(value, int) and value < 0) or
+        (isinstance(value, str) and value.startswith("@"))
+    )
+    if not valid:
+        await message.answer(
+            "❌ Noto'g'ri format. Kanal ID manfiy raqam bilan boshlanishi "
+            "kerak (masalan: -1001234567890) yoki @ bilan boshlanishi kerak "
+            "(masalan: @mychannel). Admin panel → ⚙️ Sozlamalar → 📣 E'lon "
+            "kanali orqali qaytadan urinib ko'ring.",
+            reply_markup=admin_keyboard()
+        )
+        return
+    try:
+        await bot.send_message(
+            value,
+            "✅ AniFilm Bot ushbu kanalga ulandi — bundan buyon yangi anime "
+            "va qismlar shu yerga avtomatik post qilinadi."
+        )
+    except Exception as e:
+        logger.error(f"[announce_channel_save] test xabar yuborilmadi ({value}): {e}")
+        await message.answer(
+            "❌ Bu kanalga xabar yubora olmadim. Botni o'sha kanalga <b>ADMIN</b> "
+            "qilib qo'shganingizga ishonch hosil qiling (kamida \"Post yuborish\" "
+            "huquqi bilan), so'ng qaytadan urinib ko'ring.",
+            reply_markup=admin_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+    await asyncio.to_thread(db.set_setting, "announce_channel", str(value))
+    _invalidate_announce_channel_cache()
+    await message.answer(
+        "✅ E'lon kanali saqlandi! Endi yangi anime va qismlar shu kanalga "
+        "avtomatik post qilinadi.",
+        reply_markup=admin_keyboard()
+    )
+
+@dp.callback_query(F.data == "announce_channel_remove")
+async def announce_channel_remove(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    await asyncio.to_thread(db.delete_setting, "announce_channel")
+    _invalidate_announce_channel_cache()
+    await call.answer("🗑 O'chirildi!", show_alert=True)
+    await admin_announce_channel(call)
+
 # ---- BLOKLASH ----
 @dp.callback_query(F.data == "admin_block")
 async def admin_block_menu(call: CallbackQuery):
@@ -9174,6 +9464,9 @@ async def admin_maintenance(call: CallbackQuery):
 
 @dp.callback_query(F.data.in_(["maint_on", "maint_off"]))
 async def set_maintenance(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     value = "1" if call.data == "maint_on" else "0"
     await asyncio.to_thread(db.set_setting, "maintenance", value)
     status = "✅ Yoqildi" if value == "1" else "❌ Ochirildi"
@@ -9207,6 +9500,9 @@ async def admin_content(call: CallbackQuery):
 
 @dp.callback_query(F.data.in_(["cont_on", "cont_off"]))
 async def set_content(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     value = "1" if call.data == "cont_on" else "0"
     await asyncio.to_thread(db.set_setting, "content_protect", value)
     await call.answer("✅ Saqlandi!", show_alert=True)
@@ -9246,6 +9542,9 @@ async def admin_autoblock(call: CallbackQuery):
 
 @dp.callback_query(F.data.in_(["autoblk_on", "autoblk_off"]))
 async def set_autoblock(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
     value = "1" if call.data == "autoblk_on" else "0"
     await asyncio.to_thread(db.set_setting, "auto_block_on_leave", value)
     await call.answer("✅ Saqlandi!", show_alert=True)
@@ -9644,11 +9943,10 @@ async def admin_poll_start(call: CallbackQuery, state: FSMContext):
         await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
         return
     await state.clear()
-    if not ANNOUNCE_CHANNEL:
+    if not await get_announce_channel():
         await call.answer(
-            "⚠️ E'lon kanali sozlanmagan. Render'da Environment > "
-            "ANNOUNCE_CHANNEL qo'shing (kanal ID yoki @username), keyin "
-            "qayta urinib ko'ring.",
+            "⚠️ E'lon kanali sozlanmagan. Admin panel → ⚙️ Sozlamalar → "
+            "📣 E'lon kanali orqali o'rnating, keyin qayta urinib ko'ring.",
             show_alert=True
         )
         return
@@ -9765,7 +10063,7 @@ async def poll_photo_save(message: Message, state: FSMContext):
     await _poll_send(message.chat.id, state, photo_id=message.photo[-1].file_id)
 
 async def _poll_send(admin_chat_id, state: FSMContext, photo_id):
-    """So'rovnomani ANNOUNCE_CHANNEL'ga yuboradi va admin'ga natijani
+    """So'rovnomani joriy e'lon kanaliga yuboradi va admin'ga natijani
     xabar qiladi."""
     data = await state.get_data()
     await state.clear()
@@ -9773,14 +10071,15 @@ async def _poll_send(admin_chat_id, state: FSMContext, photo_id):
     options = data.get("poll_options") or []
     is_quiz = bool(data.get("poll_is_quiz"))
     correct = data.get("poll_correct")
+    channel = await get_announce_channel()
 
     if photo_id:
         try:
-            await bot.send_photo(ANNOUNCE_CHANNEL, photo_id)
+            await bot.send_photo(channel, photo_id)
         except Exception as e:
             logger.warning(f"[poll] rasm kanalga yuborilmadi: {e}")
 
-    poll_kwargs = dict(chat_id=ANNOUNCE_CHANNEL, question=question, options=options, is_anonymous=True)
+    poll_kwargs = dict(chat_id=channel, question=question, options=options, is_anonymous=True)
     if is_quiz:
         poll_kwargs["type"] = "quiz"
         poll_kwargs["correct_option_ids"] = [correct]
