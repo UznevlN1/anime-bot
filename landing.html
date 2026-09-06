@@ -13,19 +13,19 @@
 <style>
   :root{
     --bg:#000000;
-    --surface:#101013;
-    --surface-2:#18181d;
-    --border:#242429;
-    --red:#e0212b;
-    --red-2:#ff4048;
+    --surface:#0f0f18;
+    --surface-2:#17171f;
+    --border:#23232e;
+    --crimson:#e0202b;
+    --red:#fe3f47;
     --gold:#f5c542;
     --text:#ffffff;
     --text-dim:#a3a2ac;
-    --glow:rgba(224,33,43,.4);
+    --glow:rgba(225,33,44,.45);
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
   html{scroll-behavior:smooth;}
-  body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,-apple-system,sans-serif;overflow-x:hidden;padding-bottom:78px;}
+  body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,-apple-system,sans-serif;overflow-x:hidden;}
   .disp{font-family:'Manrope',sans-serif;font-weight:800;letter-spacing:-.01em;}
   .mono{font-family:'JetBrains Mono',monospace;}
   a{color:inherit;text-decoration:none;}
@@ -37,10 +37,16 @@
   .brand{display:flex;align-items:center;gap:9px;font-size:18px;font-weight:800;}
   .brand .mark{width:32px;height:32px;border-radius:10px;box-shadow:0 3px 12px var(--glow);overflow:hidden;}
   .brand .mark img{width:100%;height:100%;object-fit:contain;}
-  .brand .accent{color:var(--red);}
+  .brand .accent{color:var(--crimson);}
   .top-actions{display:flex;align-items:center;gap:8px;}
   .icon-btn{width:38px;height:38px;border-radius:12px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text);}
   .icon-btn svg{width:17px;height:17px;}
+  .search-bar-inline{display:flex;align-items:center;gap:8px;flex:1;min-width:0;max-width:460px;margin:0 12px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:10px 14px;color:var(--text-dim);font-size:13px;font-weight:500;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .search-bar-inline svg{width:17px;height:17px;flex:none;color:var(--text-dim);}
+  .search-bar-inline span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .icon-btn-avatar{width:38px;height:38px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-dim);flex:none;overflow:hidden;}
+  .icon-btn-avatar svg{width:17px;height:17px;}
+  .icon-btn-avatar img{width:100%;height:100%;object-fit:cover;}
 
 
   /* ---------- search overlay ---------- */
@@ -57,7 +63,7 @@
   .search-hint{color:var(--text-dim);font-size:13px;text-align:center;margin-top:30px;}
   .search-item{display:flex;align-items:center;gap:12px;padding:9px 6px;border-radius:12px;color:inherit;text-decoration:none;}
   .search-item:active{background:var(--surface);}
-  .search-item-art{width:44px;height:60px;border-radius:9px;background-image:linear-gradient(160deg,var(--art-a,var(--red)) 0%,var(--art-b,#1a0708) 100%);background-size:cover;background-position:center;flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:15px;}
+  .search-item-art{width:44px;height:60px;border-radius:9px;background-image:linear-gradient(160deg,var(--art-a,var(--crimson)) 0%,var(--art-b,#0f0a24) 100%);background-size:cover;background-position:center;flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:15px;}
   .search-item-title{font-size:13.5px;font-weight:700;}
   .search-item-meta{font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-top:2px;}
 
@@ -76,7 +82,7 @@
   .detail-sheet{width:100%;max-width:520px;max-height:92vh;overflow-y:auto;overflow-x:hidden;background:var(--surface);border-radius:22px 22px 0 0;border:1px solid var(--border);border-bottom:none;animation:sheetUp .25s ease;}
   @keyframes sheetUp{from{transform:translateY(24px);opacity:.4;}to{transform:translateY(0);opacity:1;}}
 
-  .detail-poster{position:relative;width:100%;min-height:320px;overflow:hidden;background-size:cover;background-position:center;background-image:linear-gradient(160deg,#3a0d10,#0a0203);border-radius:22px 22px 0 0;}
+  .detail-poster{position:relative;width:100%;min-height:320px;overflow:hidden;background-size:cover;background-position:center;background-image:linear-gradient(160deg,#241457,#05030f);border-radius:22px 22px 0 0;}
   #detailGlyph{position:absolute;right:-8px;bottom:-14px;font-family:'Manrope',sans-serif;font-weight:800;font-size:150px;line-height:.8;color:rgba(255,255,255,.06);pointer-events:none;user-select:none;}
 
   .detail-close,.detail-fav-btn{position:absolute;top:14px;z-index:3;width:40px;height:40px;border-radius:50%;background:rgba(22,22,28,.42);backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex:none;}
@@ -116,16 +122,16 @@
 
   .auth-tabs{display:flex;gap:8px;margin-bottom:16px;background:var(--surface-2);border-radius:12px;padding:4px;}
   .auth-tab-btn{flex:1;text-align:center;padding:9px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--text-dim);}
-  .auth-tab-btn.active{background:var(--red);color:#fff;}
+  .auth-tab-btn.active{background:var(--crimson);color:#fff;}
   .field-label{font-size:12.5px;color:var(--text-dim);margin:12px 0 6px;font-weight:600;}
   .field-input{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--text);font-size:14px;font-family:inherit;outline:none;}
-  .field-input:focus{border-color:var(--red-2);}
+  .field-input:focus{border-color:var(--red);}
   .auth-error{color:#f87171;font-size:12.5px;margin-top:10px;min-height:16px;}
-  .auth-submit{width:100%;margin-top:16px;padding:13px;border-radius:13px;background:linear-gradient(135deg,var(--red-2),var(--red));color:#fff;font-weight:800;text-align:center;font-size:14.5px;}
+  .auth-submit{width:100%;margin-top:16px;padding:13px;border-radius:13px;background:linear-gradient(135deg,var(--red),var(--crimson));color:#fff;font-weight:800;text-align:center;font-size:14.5px;}
   .auth-submit:disabled{opacity:.6;}
 
   .account-card{display:flex;align-items:center;gap:12px;padding:14px;border-radius:16px;background:var(--surface-2);border:1px solid var(--border);margin-bottom:14px;}
-  .account-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--red-2),var(--red));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none;}
+  .account-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--red),var(--crimson));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none;}
   .account-info b{display:block;font-size:15px;}
   .account-info span{font-size:12.5px;color:var(--text-dim);}
   .account-row{display:flex;justify-content:space-between;align-items:center;padding:13px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
@@ -135,7 +141,7 @@
   .fav-empty{text-align:center;color:var(--text-dim);font-size:13px;padding:40px 10px;}
   .fav-list{display:flex;flex-direction:column;gap:10px;}
   .fav-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:14px;background:var(--surface-2);border:1px solid var(--border);}
-  .fav-item-art{width:46px;height:62px;border-radius:9px;background-size:cover;background-position:center;background-image:linear-gradient(160deg,var(--art-a,var(--red)) 0%,var(--art-b,#1a0708) 100%);flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px;}
+  .fav-item-art{width:46px;height:62px;border-radius:9px;background-size:cover;background-position:center;background-image:linear-gradient(160deg,var(--art-a,var(--crimson)) 0%,var(--art-b,#0f0a24) 100%);flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px;}
   .fav-item-body{flex:1;min-width:0;}
   .fav-item-title{font-size:13.5px;font-weight:700;}
   .fav-item-meta{font-size:11px;color:var(--text-dim);margin-top:2px;}
@@ -143,25 +149,25 @@
 
   /* ---------- hero ---------- */
   .hero-wrap{padding:14px 16px 0;}
-  .hero{position:relative;border-radius:20px;overflow:hidden;min-height:300px;display:flex;flex-direction:column;justify-content:flex-end;padding:18px 20px;background:linear-gradient(160deg,#2c0c0f 0%,#160607 55%,#000 100%);border:1.5px solid rgba(224,33,43,.55);box-shadow:0 0 0 1px rgba(224,33,43,.15),0 0 34px rgba(224,33,43,.35),inset 0 0 60px rgba(224,33,43,.08);}
+  .hero{position:relative;border-radius:20px;overflow:hidden;min-height:248px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px 18px;background:linear-gradient(160deg,#1d090a 0%,#12070a 55%,#000 100%);border:1.5px solid rgba(225,33,44,.55);box-shadow:0 0 0 1px rgba(225,33,44,.15),0 0 34px rgba(225,33,44,.35),inset 0 0 60px rgba(225,33,44,.08);}
   .hero-aura{position:absolute;inset:0;pointer-events:none;}
   .hero-aura span{position:absolute;border-radius:50%;filter:blur(42px);opacity:.55;}
-  .hero-aura .a1{width:220px;height:220px;background:var(--red);right:-40px;top:-30px;}
-  .hero-aura .a2{width:170px;height:170px;background:#7a1218;right:70px;bottom:10px;}
+  .hero-aura .a1{width:220px;height:220px;background:var(--crimson);right:-40px;top:-30px;}
+  .hero-aura .a2{width:170px;height:170px;background:#4a0f14;right:70px;bottom:10px;}
   .hero-glyph{position:absolute;right:-10px;bottom:-18px;font-family:'Manrope',sans-serif;font-weight:800;font-size:160px;line-height:.8;color:rgba(255,255,255,.05);pointer-events:none;user-select:none;}
   .hero-halftone{position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.05) 1px,transparent 1.4px);background-size:12px 12px;mask-image:radial-gradient(ellipse 70% 55% at 75% 25%,#000 30%,transparent 85%);pointer-events:none;}
 
-  .hero-badge{position:relative;align-self:flex-start;background:transparent;border:1px solid rgba(224,33,43,.7);color:var(--red-2);font-size:10px;font-weight:800;letter-spacing:.08em;padding:5px 11px;border-radius:6px;margin-bottom:10px;text-transform:uppercase;}
+  .hero-badge{position:relative;align-self:flex-start;background:transparent;border:1px solid rgba(225,33,44,.7);color:var(--red);font-size:10px;font-weight:800;letter-spacing:.08em;padding:5px 11px;border-radius:6px;margin-bottom:6px;text-transform:uppercase;}
   .hero-title{position:relative;max-width:78%;font-size:clamp(24px,8vw,38px);line-height:1.05;text-shadow:0 4px 18px rgba(0,0,0,.6);text-transform:uppercase;font-weight:900;}
-  .hero-title .accent{color:var(--red-2);}
-  .hero-desc{position:relative;max-width:78%;color:var(--text-dim);font-size:12.5px;line-height:1.55;margin:10px 0 12px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
-  .hero-meta{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:0;margin-bottom:14px;font-size:12px;color:var(--text-dim);font-weight:600;}
+  .hero-title .accent{color:var(--red);}
+  .hero-desc{position:relative;max-width:78%;color:var(--text-dim);font-size:12.5px;line-height:1.5;margin:6px 0 8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .hero-meta{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:0;margin-bottom:8px;font-size:12px;color:var(--text-dim);font-weight:600;}
   .hero-meta span{display:inline-flex;align-items:center;}
   .hero-meta span:not(:last-child)::after{content:'•';margin:0 8px;color:var(--border);}
   .hero-meta span.rating{color:var(--text);font-weight:800;}
-  .hero-meta span.rating::before{content:'★';color:var(--red-2);margin-right:4px;}
+  .hero-meta span.rating::before{content:'★';color:var(--red);margin-right:4px;}
   .hero-actions{position:relative;display:flex;gap:9px;flex-wrap:wrap;}
-  .btn-primary{background:linear-gradient(135deg,var(--red-2),var(--red));color:#fff;border-radius:12px;padding:11px 18px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;gap:7px;box-shadow:0 6px 18px var(--glow);}
+  .btn-primary{background:linear-gradient(135deg,var(--red),var(--crimson));color:#fff;border-radius:12px;padding:11px 18px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;gap:7px;box-shadow:0 6px 18px var(--glow);}
   .btn-ghost{background:var(--surface-2);color:#fff;border:1px solid var(--border);border-radius:12px;padding:11px 16px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;gap:7px;}
   .btn-primary svg,.btn-ghost svg{width:14px;height:14px;flex:none;}
   .hero-dots{display:flex;justify-content:center;align-items:center;gap:6px;padding:12px 0 2px;}
@@ -172,23 +178,23 @@
   section.block{padding:26px 0 0;}
   .sec-head{display:flex;align-items:center;justify-content:space-between;padding:0 16px;margin-bottom:14px;}
   .sec-title{font-size:16.5px;font-weight:800;}
-  .sec-link{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--red-2);white-space:nowrap;display:flex;align-items:center;gap:3px;}
+  .sec-link{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--red);white-space:nowrap;display:flex;align-items:center;gap:3px;}
 
   /* ---------- catalog row / cards ---------- */
   .row-scroll{display:flex;gap:13px;overflow-x:auto;padding:0 16px 6px;scrollbar-width:none;}
   .row-scroll::-webkit-scrollbar{display:none;}
   .card{flex:none;width:130px;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease;}
   .card.revealed{opacity:1;transform:translateY(0);}
-  .card-art{position:relative;width:130px;height:178px;border-radius:14px;overflow:hidden;background-image:linear-gradient(160deg,var(--art-a,var(--red)) 0%,var(--art-b,#1a0708) 100%);box-shadow:0 6px 16px rgba(0,0,0,.4);}
+  .card-art{position:relative;width:130px;height:178px;border-radius:14px;overflow:hidden;background-image:linear-gradient(160deg,var(--art-a,var(--crimson)) 0%,var(--art-b,#0f0a24) 100%);box-shadow:0 6px 16px rgba(0,0,0,.4);}
   .card-art::before{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.16) 1px,transparent 1.3px);background-size:9px 9px;opacity:.5;}
   .card-art::after{content:"";position:absolute;left:0;right:0;bottom:0;height:52%;background:linear-gradient(0deg,rgba(0,0,0,.8) 0%,transparent 100%);pointer-events:none;}
   .card-glyph{position:absolute;right:6px;bottom:2px;font-family:'Manrope',sans-serif;font-weight:800;font-size:52px;color:rgba(255,255,255,.16);line-height:1;}
   .card-tag{position:absolute;top:8px;left:8px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:6px;color:#fff;z-index:1;}
-  .card-tag.new{background:linear-gradient(135deg,var(--red-2),var(--red));box-shadow:0 3px 10px var(--glow);}
+  .card-tag.new{background:linear-gradient(135deg,var(--red),var(--crimson));box-shadow:0 3px 10px var(--glow);}
   .card-tag.uzb{background:var(--surface-2);border:1px solid rgba(255,255,255,.16);}
-  .card-tag.rank{background:rgba(0,0,0,.8);border:1px solid rgba(224,33,43,.45);color:var(--red-2);top:8px;left:8px;width:20px;height:20px;padding:0;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;}
+  .card-tag.rank{background:rgba(0,0,0,.8);border:1px solid rgba(225,33,44,.45);color:var(--red);top:8px;left:8px;width:20px;height:20px;padding:0;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;}
   .card-rating{position:absolute;bottom:8px;left:8px;display:flex;align-items:center;color:#fff;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;z-index:1;}
-  .card-rating::before{content:'★';color:var(--red-2);font-size:9px;margin-right:3px;}
+  .card-rating::before{content:'★';color:var(--red);font-size:9px;margin-right:3px;}
   .card-ep{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);color:#fff;font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:3px 7px;border-radius:16px;border:1px solid rgba(255,255,255,.12);z-index:1;}
   .card-body{padding:10px 2px 0;}
   .card-title{font-size:13px;font-weight:700;line-height:1.32;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
@@ -209,19 +215,19 @@
 
   /* ---------- bosh sahifadagi yagona "Barcha animelar" grid ---------- */
   .home-grid{grid-template-columns:repeat(2,1fr);gap:14px;padding:0 16px;}
-  .btn-loadmore{display:block;margin:22px 16px 4px;padding:13px 20px;border-radius:14px;background:linear-gradient(135deg,var(--red-2),var(--red));color:#fff;font-size:13.5px;font-weight:800;text-align:center;box-shadow:0 6px 18px var(--glow);border:none;width:calc(100% - 32px);cursor:pointer;font-family:'Manrope',sans-serif;}
+  .btn-loadmore{display:block;margin:22px 16px 4px;padding:13px 20px;border-radius:14px;background:linear-gradient(135deg,var(--red),var(--crimson));color:#fff;font-size:13.5px;font-weight:800;text-align:center;box-shadow:0 6px 18px var(--glow);border:none;width:calc(100% - 32px);cursor:pointer;font-family:'Manrope',sans-serif;}
   .btn-loadmore:active{transform:scale(.98);}
 
   /* ---------- comic panels (kept for compatibility, currently unused) ---------- */
   .panels{display:flex;flex-direction:column;gap:16px;padding:0 16px;max-width:420px;margin:0 auto;}
   .panel{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease;}
   .panel.revealed{opacity:1;transform:translateY(0);}
-  .panel .num{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--red-2);letter-spacing:.1em;}
+  .panel .num{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--red);letter-spacing:.1em;}
   .panel h3{font-size:16.5px;font-weight:800;margin:8px 0 6px;}
   .panel p{color:var(--text-dim);font-size:13px;line-height:1.6;}
 
   /* ---------- footer ---------- */
-  .footer-cta{margin:44px 16px 0;padding:30px 20px 28px;text-align:center;background:linear-gradient(155deg,#230a0c,#0c0304);border:1px solid var(--border);border-radius:18px;}
+  .footer-cta{margin:44px 16px 0;padding:30px 20px 28px;text-align:center;background:linear-gradient(155deg,#1d090a,#150506);border:1px solid var(--border);border-radius:18px;}
   .footer-cta h2{font-size:clamp(21px,6.4vw,26px);font-weight:800;margin-bottom:8px;}
   .footer-cta p{color:var(--text-dim);font-size:13px;margin-bottom:20px;}
 
@@ -248,33 +254,35 @@
   .brand-mini .mark{width:20px;height:20px;border-radius:6px;overflow:hidden;}
   .brand-mini .mark img{width:100%;height:100%;object-fit:contain;}
   .brand-mini span{font-size:14px;font-weight:800;}
-  .brand-mini .accent{color:var(--red);}
+  .brand-mini .accent{color:var(--crimson);}
   footer .copy{text-align:center;font-size:11.5px;color:var(--text-dim);}
 
-  /* ---------- bottom nav (decorative, links to bot) ---------- */
-  .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;background:rgba(0,0,0,.92);backdrop-filter:blur(14px);border-top:1px solid var(--border);padding:8px 6px calc(8px + env(safe-area-inset-bottom));}
-  .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:rgba(255,255,255,.42);font-size:9.5px;font-weight:700;padding:6px 0;}
-  .tab-icon{width:26px;height:26px;display:flex;align-items:center;justify-content:center;}
-  .tab.active{color:var(--red-2);}
-  .tab svg{width:18px;height:18px;}
+  /* ---------- katalog paneli (hamburger menyu) ---------- */
+  .cat-group{margin-bottom:20px;}
+  .cat-group:last-child{margin-bottom:0;}
+  .cat-group-title{font-size:12.5px;font-weight:800;color:var(--text-dim);margin-bottom:6px;}
+  .cat-link{display:block;padding:9px 2px;font-size:13.5px;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);}
+  .cat-link:last-child{border-bottom:none;}
+  .cat-genres{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;}
+  .cat-genres .cat-link:nth-last-child(-n+2){border-bottom:none;}
 
   @media (prefers-reduced-motion: reduce){
     html{scroll-behavior:auto;}
     .panel,.card{transition:none;opacity:1;transform:none;}
     .detail-sheet,.sheet-panel{animation:none;}
   }
-  a:focus-visible,button:focus-visible{outline:2px solid var(--red-2);outline-offset:3px;}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--red);outline-offset:3px;}
 
   /* ---------- responsive: large phones ---------- */
   @media (min-width:640px){
     body{max-width:600px;margin:0 auto;}
-    .topbar,.tabbar{max-width:600px;margin:0 auto;}
+    .topbar{max-width:600px;margin:0 auto;}
   }
 
   /* ---------- responsive: tablets ---------- */
   @media (min-width:768px){
     body{max-width:740px;}
-    .topbar,.tabbar{max-width:740px;}
+    .topbar{max-width:740px;}
     .hero{min-height:340px;}
     .hero-title{font-size:clamp(28px,5.6vw,44px);}
     .hero-wrap{padding:18px 22px 0;}
@@ -292,9 +300,7 @@
   /* ---------- responsive: desktop ---------- */
   @media (min-width:1024px){
     body{max-width:1080px;}
-    .topbar,.tabbar{max-width:1080px;}
-    .topbar{padding:18px 30px;}
-    .tabbar{background:var(--surface);border:1px solid var(--border);border-bottom:none;border-radius:20px 20px 0 0;box-shadow:0 -10px 28px rgba(0,0,0,.55);}
+    .topbar{max-width:1080px;padding:18px 30px;}
 
     .hero-wrap{padding:24px 30px 0;}
     .hero{min-height:400px;padding:36px;border-radius:24px;}
@@ -336,7 +342,7 @@
   /* ---------- responsive: large desktop ---------- */
   @media (min-width:1440px){
     body{max-width:1200px;}
-    .topbar,.tabbar{max-width:1200px;}
+    .topbar{max-width:1200px;}
     .hero{min-height:440px;}
     .card,.card-art{width:172px;}
     .card-art{height:235px;}
@@ -349,23 +355,26 @@
     .card-art{transition:transform .25s ease,box-shadow .25s ease;}
     .card:hover .card-art,.all-card:hover .card-art{box-shadow:0 14px 30px rgba(0,0,0,.5);}
     .tag-chip{transition:border-color .2s ease,transform .2s ease;}
-    .tag-chip:hover{border-color:var(--red-2);}
+    .tag-chip:hover{border-color:var(--red);}
     .btn-primary{transition:transform .2s ease,box-shadow .2s ease;}
     .btn-primary:hover{box-shadow:0 10px 26px var(--glow);}
     .btn-ghost{transition:border-color .2s ease;}
-    .btn-ghost:hover{border-color:var(--red-2);}
+    .btn-ghost:hover{border-color:var(--red);}
     .icon-btn{transition:border-color .2s ease;}
-    .icon-btn:hover{border-color:var(--red-2);}
-    .tab{transition:color .2s ease;}
-    .tab:hover{color:rgba(255,255,255,.75);}
-    .tab.active:hover{color:var(--red-2);}
+    .icon-btn:hover{border-color:var(--red);}
+    .icon-btn-avatar{transition:border-color .2s ease;}
+    .icon-btn-avatar:hover{border-color:var(--red);}
+    .search-bar-inline{transition:border-color .2s ease;}
+    .search-bar-inline:hover{border-color:var(--red);}
+    .cat-link{transition:color .2s ease;}
+    .cat-link:hover{color:var(--red);}
     .soc{transition:border-color .2s ease,transform .2s ease;}
-    .soc:hover{border-color:var(--red-2);}
+    .soc:hover{border-color:var(--red);}
 
     .row-scroll{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
     .row-scroll::-webkit-scrollbar{display:block;height:6px;}
     .row-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
-    .row-scroll::-webkit-scrollbar-thumb:hover{background:var(--red);}
+    .row-scroll::-webkit-scrollbar-thumb:hover{background:var(--crimson);}
   }
   @media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
     .card:hover .card-art,.all-card:hover .card-art{transform:translateY(-5px);}
@@ -380,12 +389,16 @@
 
 <div id="top"></div>
 <header class="topbar">
-  <div class="brand"><div class="mark"><img src="logo.png" alt="AniFilm logo"></div>Ani<span class="accent">Film</span></div>
+  <div class="brand"><div class="mark"><svg viewBox="0 0 32 32" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="mkA" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:var(--red)"/><stop offset="100%" style="stop-color:var(--crimson)"/></linearGradient></defs><rect width="32" height="32" fill="#0d0a1f"/><path d="M16 6L25 25H19.2L16 17.5L12.8 25H7L16 6Z" fill="url(#mkA)"/></svg></div>Ani<span class="accent">Film</span></div>
+  <div class="search-bar-inline" onclick="openSearch()" role="button" tabindex="0" aria-label="Qidiruv" onkeydown="if(event.key==='Enter')openSearch()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <span>Qidirish...</span>
+  </div>
   <div class="top-actions">
-    <button class="icon-btn" onclick="openSearch()" aria-label="Qidiruv">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <button class="icon-btn" onclick="openCatalog()" aria-label="Katalog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
-    <button class="icon-btn" onclick="openAccount()" aria-label="Profil">
+    <button class="icon-btn-avatar" onclick="openAccount()" aria-label="Profil">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.4-3.6 4.4-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/></svg>
     </button>
   </div>
@@ -502,7 +515,7 @@
 </div>
 
 <div class="hero-wrap">
-  <a class="hero" id="heroCard" href="https://t.me/ANIFILM_BOT" style="--art-a:#2c0c0f;--art-b:#0a0203;">
+  <a class="hero" id="heroCard" href="https://t.me/ANIFILM_BOT" style="--art-a:#1b1033;--art-b:#05030f;">
     <div class="hero-aura"><span class="a1"></span><span class="a2"></span></div>
     <div class="hero-halftone"></div>
     <span class="hero-glyph">S</span>
@@ -567,17 +580,40 @@
     <a class="legal-card contact" href="https://t.me/uznevl_bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5l8.5 6 8.5-6"/></svg>Qayta aloqa</a>
   </div>
   <a class="age-pill" href="https://t.me/ANIFILM_BOT">Yosh toifasi: <b>16+</b></a>
-  <div class="brand-mini"><div class="mark"><img src="logo.png" alt="AniFilm logo"></div><span>Ani<span class="accent">Film</span></span></div>
+  <div class="brand-mini"><div class="mark"><svg viewBox="0 0 32 32" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="mkB" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:var(--red)"/><stop offset="100%" style="stop-color:var(--crimson)"/></linearGradient></defs><rect width="32" height="32" fill="#0d0a1f"/><path d="M16 6L25 25H19.2L16 17.5L12.8 25H7L16 6Z" fill="url(#mkB)"/></svg></div><span>Ani<span class="accent">Film</span></span></div>
   <p class="copy">© 2026 — anifilm.uz. Barcha huquqlar himoyalangan.</p>
 </footer>
 
-<nav class="tabbar" id="tabbar">
-  <a class="tab active" href="#top" data-tab="home" onclick="setActiveTab('home')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5L12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H9a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1h2.5a1 1 0 0 0 1-1v-9"/></svg></span>Bosh sahifa</a>
-  <a class="tab" href="#animeSection" data-tab="anime" onclick="setActiveTab('anime')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>Anime</a>
-  <a class="tab" href="#genresSection" data-tab="genres" onclick="setActiveTab('genres')"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h6"/></svg></span>Janrlar</a>
-  <a class="tab" href="javascript:void(0)" data-tab="favorites" onclick="setActiveTab('favorites');openFavorites()"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg></span>Sevimlilar</a>
-  <a class="tab" href="javascript:void(0)" data-tab="profile" onclick="setActiveTab('profile');openAccount()"><span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.4-3.6 4.4-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/></svg></span>Profil</a>
-</nav>
+<div class="sheet-overlay" id="catalogOverlay" onclick="if(event.target===this)closeCatalog()">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <div class="sheet-title">Katalog</div>
+      <button class="sheet-close" onclick="closeCatalog()" aria-label="Yopish">×</button>
+    </div>
+    <div class="cat-group">
+      <div class="cat-group-title">Bo'limlar</div>
+      <a class="cat-link" href="#top" onclick="closeCatalog()">Bosh sahifa</a>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('all')">Barcha animelar</a>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openFavorites()">Sevimlilar</a>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAccount()">Profil</a>
+    </div>
+    <div class="cat-group">
+      <div class="cat-group-title">Tavsiya</div>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('new')">Yangi qo'shilganlar</a>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('popular')">Mashhur animelar</a>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('dub')">O'zbek tilida dublyaj</a>
+    </div>
+    <div class="cat-group">
+      <div class="cat-group-title">Turi</div>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('serial')">Seriallar</a>
+      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('film')">Filmlar</a>
+    </div>
+    <div class="cat-group">
+      <div class="cat-group-title">Janrlar</div>
+      <div class="cat-genres" id="catalogGenres"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 const BOT_URL='https://t.me/ANIFILM_BOT';
@@ -605,8 +641,14 @@ async function apiFetch(url,opts){
   return res;
 }
 
-function setActiveTab(name){
-  document.querySelectorAll('#tabbar .tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+// ---------- Katalog paneli (hamburger menyu) ----------
+function openCatalog(){
+  document.getElementById('catalogOverlay').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeCatalog(){
+  document.getElementById('catalogOverlay').classList.remove('open');
+  document.body.style.overflow='';
 }
 
 // ---------- Profil paneli ----------
@@ -618,7 +660,6 @@ function openAccount(){
 function closeAccount(){
   document.getElementById('accountOverlay').classList.remove('open');
   document.body.style.overflow='';
-  setActiveTab('home');
 }
 function switchAuthTab(tab){
   document.getElementById('authTabLogin').classList.toggle('active',tab==='login');
@@ -789,7 +830,6 @@ function openFavorites(){
 function closeFavorites(){
   document.getElementById('favoritesOverlay').classList.remove('open');
   document.body.style.overflow='';
-  setActiveTab('home');
 }
 
 async function renderFavoritesPanel(){
@@ -851,28 +891,28 @@ function chipIcon(cat,idx){
   return ['🎬',CHIP_FALLBACK[idx%CHIP_FALLBACK.length]];
 }
 
-const ART_PALETTE=[['#8a1f2b','#26080a'],['#a8283a','#33101a'],['#7a1420','#200608'],['#9c3a2e','#2b0f0a'],['#6b1420','#1a0508'],['#b34a2a','#2e140a']];
+const ART_PALETTE=[['#5b21b6','#1e1147'],['#7c3aed','#241457'],['#4338ca','#14103a'],['#4f46e5','#1a1650'],['#3730a3','#120c38'],['#2563eb','#0f1f45']];
 
 // ---------- zaxira namuna (server javob bermasa yoki hali yangi endpoint
 // joylanmagan bo'lsa, sahifa baribir chiroyli ko'rinishi uchun) ----------
 const FALLBACK_CATEGORIES=['Aksiya','Sarguzasht','Komediya','Drama','Fantastika'];
 const FALLBACK_NEW=[
-  {title:"Titanlar hujumi 3-fasl", meta:"SERIAL · 2018–2019", ep:"22/22", tag:'new', a:'#a8283a', b:'#33101a', glyph:'T'},
-  {title:"Jujutsu Kaisen 2-fasl", meta:"SERIAL · 2023", ep:"23/23", tag:'new', a:'#8a1f2b', b:'#26080a', glyph:'J'},
-  {title:"Oshi no Ko", meta:"SERIAL · 2023", ep:"11/11", tag:'new', a:'#9c3a2e', b:'#2b0f0a', glyph:'O'},
+  {title:"Titanlar hujumi 3-fasl", meta:"SERIAL · 2018–2019", ep:"22/22", tag:'new', a:'#7c3aed', b:'#241457', glyph:'T'},
+  {title:"Jujutsu Kaisen 2-fasl", meta:"SERIAL · 2023", ep:"23/23", tag:'new', a:'#5b21b6', b:'#1e1147', glyph:'J'},
+  {title:"Oshi no Ko", meta:"SERIAL · 2023", ep:"11/11", tag:'new', a:'#4f46e5', b:'#1a1650', glyph:'O'},
   {title:"Tokyo Revengers", meta:"SERIAL · 2021", ep:"24/24", tag:'new', a:'#1f2020', b:'#0d0d0d', glyph:'T'},
 ];
 const FALLBACK_POPULAR=[
-  {title:"Titanlar hujumi", meta:"SERIAL · 2013–2023", a:'#3a2318', b:'#160d08', glyph:'T'},
+  {title:"Titanlar hujumi", meta:"SERIAL · 2013–2023", a:'#6d28d9', b:'#1e1147', glyph:'T'},
   {title:"Death Note", meta:"SERIAL · 2006", a:'#1c1c1c', b:'#0a0a0a', glyph:'D'},
-  {title:"Naruto: Shippuuden", meta:"SERIAL · 2007", a:'#7a4a1a', b:'#2a1806', glyph:'N'},
-  {title:"One Piece", meta:"SERIAL · 1999", a:'#b34a2a', b:'#2e140a', glyph:'O'},
+  {title:"Naruto: Shippuuden", meta:"SERIAL · 2007", a:'#3b82f6', b:'#0c1730', glyph:'N'},
+  {title:"One Piece", meta:"SERIAL · 1999", a:'#2563eb', b:'#0f1f45', glyph:'O'},
 ].map((a,i)=>({...a,rank:i+1}));
 const FALLBACK_DUB=[
-  {title:"Naruto: Shippuuden", meta:"UZB DUBLYAJ", tag:'uzb', a:'#7a4a1a', b:'#2a1806', glyph:'N'},
-  {title:"Dragon Ball Super", meta:"UZB DUBLYAJ", tag:'uzb', a:'#6b1420', b:'#1a0508', glyph:'D'},
-  {title:"Demon Slayer", meta:"UZB DUBLYAJ", tag:'uzb', a:'#8a2f42', b:'#2b0f16', glyph:'D'},
-  {title:"Hunter x Hunter", meta:"UZB DUBLYAJ", tag:'uzb', a:'#7a1420', b:'#200608', glyph:'H'},
+  {title:"Naruto: Shippuuden", meta:"UZB DUBLYAJ", tag:'uzb', a:'#3b82f6', b:'#0c1730', glyph:'N'},
+  {title:"Dragon Ball Super", meta:"UZB DUBLYAJ", tag:'uzb', a:'#3730a3', b:'#120c38', glyph:'D'},
+  {title:"Demon Slayer", meta:"UZB DUBLYAJ", tag:'uzb', a:'#8b5cf6', b:'#1e1147', glyph:'D'},
+  {title:"Hunter x Hunter", meta:"UZB DUBLYAJ", tag:'uzb', a:'#4338ca', b:'#14103a', glyph:'H'},
 ];
 
 function animeLink(a){return a&&a.id?`${BOT_URL}?start=anime_${a.id}`:BOT_URL;}
@@ -927,7 +967,7 @@ function openDetail(key){
     poster.style.backgroundImage=`linear-gradient(0deg,rgba(0,0,0,.88) 0%,rgba(0,0,0,.05) 60%),url('/api/photo/${a.photo_id}')`;
     glyphEl.textContent='';
   }else{
-    poster.style.backgroundImage=`linear-gradient(160deg,${a.a||'#8a1f2b'},${a.b||'#26080a'})`;
+    poster.style.backgroundImage=`linear-gradient(160deg,${a.a||'#5b21b6'},${a.b||'#1e1147'})`;
     glyphEl.textContent=a.glyph||(a.title||'?').charAt(0).toUpperCase();
   }
   document.getElementById('detailTitle').textContent=a.title||'';
@@ -1086,15 +1126,25 @@ function showMoreHome(){renderHomeGrid(false);}
 
 function openAllAnime(mode){
   let list=ALL_ANIMES;
-  let title='Barchasi';
+  let title="Yangi qo'shilganlar";
   if(mode==='popular'){
     list=[...ALL_ANIMES].sort((x,y)=>(y.views||0)-(x.views||0));
     title='Mashhur animelar';
   }else if(mode==='dub'){
     list=ALL_ANIMES.filter(a=>/dublyaj|dub|uzb/i.test(`${a.category||''} ${a.genre||''}`));
     title="O'zbek tilida dublyaj";
-  }else{
-    title="Yangi qo'shilganlar";
+  }else if(mode==='serial'){
+    list=ALL_ANIMES.filter(a=>a.media_type!=='film');
+    title='Seriallar';
+  }else if(mode==='film'){
+    list=ALL_ANIMES.filter(a=>a.media_type==='film');
+    title='Filmlar';
+  }else if(mode==='all'){
+    title='Barcha animelar';
+  }else if(mode&&mode!=='new'){
+    const q=mode.toLowerCase();
+    list=ALL_ANIMES.filter(a=>`${a.genre||''} ${a.category||''}`.toLowerCase().includes(q));
+    title=mode;
   }
   document.getElementById('allTitle').textContent=title;
   renderAllGrid(list);
@@ -1116,6 +1166,21 @@ function renderTagCloud(tags){
     chip.href=BOT_URL;
     chip.innerHTML=`<span class="tci" style="background:${color}">${emoji}</span>${t}`;
     el.appendChild(chip);
+  });
+  renderCatalogGenres(tags);
+}
+
+function renderCatalogGenres(tags){
+  const el=document.getElementById('catalogGenres');
+  if(!el)return;
+  el.innerHTML='';
+  tags.forEach(t=>{
+    const link=document.createElement('a');
+    link.className='cat-link';
+    link.href='javascript:void(0)';
+    link.textContent=t;
+    link.onclick=()=>{closeCatalog();openAllAnime(t);};
+    el.appendChild(link);
   });
 }
 
@@ -1163,7 +1228,7 @@ function showHeroSlide(idx){
   const aura=hero.querySelector('.hero-aura');
   const halftone=hero.querySelector('.hero-halftone');
   if(a.photo_id){
-    hero.style.setProperty('--art-a','#2c0c0f');
+    hero.style.setProperty('--art-a','#1b1033');
     hero.style.backgroundImage=`linear-gradient(100deg,rgba(0,0,0,.95) 0%,rgba(0,0,0,.75) 30%,rgba(0,0,0,.25) 60%,rgba(0,0,0,.08) 100%),linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.05) 55%),url('/api/photo/${a.photo_id}')`;
     hero.style.backgroundSize='cover';
     hero.style.backgroundPosition='center';
@@ -1172,8 +1237,8 @@ function showHeroSlide(idx){
     if(halftone)halftone.style.display='none';
   }else{
     hero.style.backgroundImage='';
-    hero.style.setProperty('--art-a',a.a||'#2c0c0f');
-    hero.style.setProperty('--art-b',a.b||'#0a0203');
+    hero.style.setProperty('--art-a',a.a||'#1b1033');
+    hero.style.setProperty('--art-b',a.b||'#05030f');
     if(glyph){glyph.style.display='';glyph.textContent=a.glyph||(a.title||'?').charAt(0).toUpperCase();}
     if(aura)aura.style.display='';
     if(halftone)halftone.style.display='';
