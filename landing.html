@@ -207,6 +207,11 @@
   .all-card .card-body{padding:8px 1px 0;}
   .all-empty{grid-column:1/-1;text-align:center;color:var(--text-dim);font-size:13px;padding:60px 10px;}
 
+  /* ---------- bosh sahifadagi yagona "Barcha animelar" grid ---------- */
+  .home-grid{grid-template-columns:repeat(2,1fr);gap:14px;padding:0 16px;}
+  .btn-loadmore{display:block;margin:22px 16px 4px;padding:13px 20px;border-radius:14px;background:linear-gradient(135deg,var(--red-2),var(--red));color:#fff;font-size:13.5px;font-weight:800;text-align:center;box-shadow:0 6px 18px var(--glow);border:none;width:calc(100% - 32px);cursor:pointer;font-family:'Manrope',sans-serif;}
+  .btn-loadmore:active{transform:scale(.98);}
+
   /* ---------- comic panels (kept for compatibility, currently unused) ---------- */
   .panels{display:flex;flex-direction:column;gap:16px;padding:0 16px;max-width:420px;margin:0 auto;}
   .panel{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease;}
@@ -280,6 +285,8 @@
     .all-top{padding:16px 22px;}
     .all-body{padding:20px 22px;}
     .all-grid{grid-template-columns:repeat(4,1fr);gap:16px;}
+    .home-grid{padding:0 22px;}
+    .btn-loadmore{margin:24px 22px 4px;width:calc(100% - 44px);}
   }
 
   /* ---------- responsive: desktop ---------- */
@@ -317,6 +324,8 @@
     .all-top{padding:20px 30px;}
     .all-body{padding:28px 30px;}
     .all-grid{grid-template-columns:repeat(5,1fr);gap:18px;max-width:1400px;margin:0 auto;}
+    .home-grid{padding:0 30px;}
+    .btn-loadmore{margin:28px auto 4px;max-width:340px;width:calc(100% - 60px);}
 
     .footer-cta{margin:64px 30px 0;padding:44px 36px 40px;}
     .footer-cta h2{font-size:clamp(24px,3vw,30px);}
@@ -528,26 +537,11 @@
 
 <section class="block" id="animeSection">
   <div class="sec-head">
-    <div class="sec-title">Yangi qo'shilganlar</div>
-    <a class="sec-link mono" href="javascript:void(0)" onclick="openAllAnime('new')">BARCHASI →</a>
+    <div class="sec-title">Barcha animelar</div>
   </div>
-  <div class="row-scroll" id="rowNew"></div>
-</section>
-
-<section class="block">
-  <div class="sec-head">
-    <div class="sec-title">Mashhur animelar</div>
-    <a class="sec-link mono" href="javascript:void(0)" onclick="openAllAnime('popular')">BARCHASI →</a>
-  </div>
-  <div class="row-scroll" id="rowPopular"></div>
-</section>
-
-<section class="block">
-  <div class="sec-head">
-    <div class="sec-title">O'zbek tilida dublyaj</div>
-    <a class="sec-link mono" href="javascript:void(0)" onclick="openAllAnime('dub')">BARCHASI →</a>
-  </div>
-  <div class="row-scroll" id="rowDub"></div>
+  <div class="all-grid home-grid" id="homeGrid"></div>
+  <div class="all-empty" id="homeEmpty" style="display:none;">Hozircha anime topilmadi</div>
+  <button class="btn-loadmore" id="loadMoreBtn" onclick="showMoreHome()" style="display:none;">Ko'proq ko'rsatish</button>
 </section>
 
 <div class="footer-cta">
@@ -951,7 +945,6 @@ function openDetail(key){
   const rows=[];
   if(!isFilm&&(a.ep||a.episode_count))rows.push(['Qismlar',a.ep||`${a.episode_count||0} qism`]);
   if(a.language)rows.push(['Tili',a.language]);
-  if(a.views)rows.push(['Ko\'rishlar',a.views]);
   document.getElementById('detailRows').innerHTML=rows.map(([k,v])=>`<div class="detail-row"><span>${k}</span><b>${v}</b></div>`).join('');
   const descEl=document.getElementById('detailDesc');
   descEl.textContent=a.description||'';
@@ -1039,6 +1032,57 @@ function renderAllGrid(list){
     grid.appendChild(card);
   });
 }
+
+// ---------- Bosh sahifadagi yagona "Barcha animelar" grid ----------
+// Avvalgi 3 ta alohida qator ("Yangi qo'shilganlar", "Mashhur animelar",
+// "O'zbek tilida dublyaj") o'rniga — bitta grid, "Ko'proq ko'rsatish"
+// tugmasi bilan bosqichma-bosqich ko'rsatiladi. Ma'lumot bir marta
+// (ALL_ANIMES) yuklanadi, tugma esa shu ro'yxatdan navbatdagi qismini ochadi.
+const HOME_PAGE_SIZE=12;
+let homeShownCount=0;
+function renderHomeGrid(reset){
+  const grid=document.getElementById('homeGrid');
+  const btn=document.getElementById('loadMoreBtn');
+  const emptyEl=document.getElementById('homeEmpty');
+  if(reset){grid.innerHTML='';homeShownCount=0;}
+  if(!ALL_ANIMES.length){
+    if(emptyEl)emptyEl.style.display='block';
+    if(btn)btn.style.display='none';
+    return;
+  }
+  if(emptyEl)emptyEl.style.display='none';
+  const next=ALL_ANIMES.slice(homeShownCount,homeShownCount+HOME_PAGE_SIZE);
+  next.forEach(a=>{
+    const key=registerDetail(a);
+    const card=document.createElement('a');
+    card.className='all-card';
+    card.href=animeLink(a);
+    card.onclick=(e)=>{e.preventDefault();openDetail(key);};
+    const ratingHtml=a.rating?`<span class="card-rating">${a.rating}</span>`:'';
+    const epHtml=a.ep?`<span class="card-ep">${a.ep}</span>`:'';
+    const artStyle=a.photo_id
+      ?`background-image:url('/api/photo/${a.photo_id}');background-size:cover;background-position:center;`
+      :`--art-a:${a.a};--art-b:${a.b};`;
+    const glyphHtml=a.photo_id?'':`<span class="card-glyph">${a.glyph}</span>`;
+    const favHtml=a.id!=null?`<span class="fav-btn${FAVORITE_IDS.has(Number(a.id))?' active':''}" data-anime-id="${a.id}" role="button" tabindex="0" onclick="onFavBtnClick(event,${a.id})" onkeydown="if(event.key==='Enter'||event.key===' '){onFavBtnClick(event,${a.id})}" aria-label="Sevimlilarga qo'shish">
+        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
+      </span>`:'';
+    card.innerHTML=`
+      <div class="card-art" style="${artStyle}">
+        ${favHtml}${ratingHtml}
+        ${glyphHtml}
+        ${epHtml}
+      </div>
+      <div class="card-body">
+        <div class="card-title">${a.title}</div>
+        <div class="card-meta mono">${a.meta}</div>
+      </div>`;
+    grid.appendChild(card);
+  });
+  homeShownCount+=next.length;
+  if(btn)btn.style.display=homeShownCount<ALL_ANIMES.length?'':'none';
+}
+function showMoreHome(){renderHomeGrid(false);}
 
 function openAllAnime(mode){
   let list=ALL_ANIMES;
@@ -1224,26 +1268,15 @@ async function loadRealData(){
     }catch(e){/* banner ixtiyoriy — anime asosidagi hero bilan davom etiladi */}
     renderHero(heroList);
 
-    const newestRaw=animes.slice(0,8);
-    const newest=newestRaw.map((a,i)=>toCard(a,i,{tag:'new'}));
-    renderRow('rowNew',newest);
     ALL_ANIMES=animes.map((a,i)=>toCard(a,i,{}));
-
-    const popular=[...animes].sort((x,y)=>(y.views||0)-(x.views||0)).slice(0,8).map((a,i)=>toCard(a,i,{rank:i+1}));
-    renderRow('rowPopular',popular);
-
-    const dub=animes.filter(a=>/dublyaj|dub|uzb/i.test(`${a.category||''} ${a.genre||''}`)).slice(0,8).map((a,i)=>toCard(a,i,{tag:'uzb'}));
-    const dubSection=document.getElementById('rowDub').closest('section');
-    if(dub.length){renderRow('rowDub',dub);}else{dubSection.style.display='none';}
+    renderHomeGrid(true);
   }catch(e){
     // Server hali yangi endpoint bilan joylanmagan yoki vaqtinchalik ishlamayapti —
     // sahifa baribir chiroyli ko'rinishi uchun namunaviy ma'lumotga qaytamiz.
     renderTagCloud(FALLBACK_CATEGORIES);
     renderHero(FALLBACK_NEW);
-    renderRow('rowNew',FALLBACK_NEW);
-    renderRow('rowPopular',FALLBACK_POPULAR);
-    renderRow('rowDub',FALLBACK_DUB);
     ALL_ANIMES=[...FALLBACK_NEW,...FALLBACK_POPULAR,...FALLBACK_DUB];
+    renderHomeGrid(true);
   }
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
     const io = new IntersectionObserver((entries) => {
