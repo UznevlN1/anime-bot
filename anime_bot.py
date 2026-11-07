@@ -11883,6 +11883,22 @@ async def webapp_public_categories(request):
         return web.json_response({"error": "unavailable"}, status=503)
     return web.json_response(cats, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300"})
 
+async def webapp_public_count_view(request):
+    """POST /api/public/animes/{id}/view — sayt pleyerida video boshlanganda koʻrishni sanaydi.
+    Avval faqat bot koʻrishlari sanalardi, sayt koʻrishlari hisobga olinmasdi.
+    Bir IP bir animeni 30 daqiqada faqat bir marta sanaydi (sunʼiy oshirishdan himoya)."""
+    try:
+        anime_id = int(request.match_info["anime_id"])
+    except Exception:
+        return web.json_response({"error": "notogri sorov"}, status=400)
+    if _rate_limited(f"site_view:{_client_ip(request)}:{anime_id}", 1, 1800):
+        return web.json_response({"ok": True, "counted": False})
+    try:
+        await asyncio.to_thread(db.increment_views, anime_id)
+    except Exception:
+        return web.json_response({"error": "unavailable"}, status=503)
+    return web.json_response({"ok": True, "counted": True})
+
 # landing.html bosh sahifasidagi hero-karusel uchun: bannerlar (admin tomonidan
 # maxsus tayyorlangan keng reklama suratlari) + ular bog'langan animening ochiq
 # ma'lumotlari (yil, janr, tavsif, qism soni). Obuna talab qilmaydi — /api/banners
@@ -12465,7 +12481,7 @@ async def start_web_server():
 
     app = web.Application(middlewares=[compress_middleware])
     app.router.add_get("/", health_check)
-    for _p in ("/catalog", "/favorites", "/reset-password", "/anime/{tail:.*}", "/watch/{tail:.*}"):
+    for _p in ("/catalog", "/favorites", "/watched", "/reset-password", "/anime/{tail:.*}", "/watch/{tail:.*}"):
         app.router.add_get(_p, serve_site_page)
     app.router.add_get("/favicon.ico", serve_favicon)
     app.router.add_get("/logo.png", serve_logo)
@@ -12495,6 +12511,7 @@ async def start_web_server():
     app.router.add_post("/api/notifications/dismiss", webapp_notifications_dismiss)
     app.router.add_get("/api/public/animes", webapp_public_animes)
     app.router.add_get("/api/public/animes/{anime_id}", webapp_public_anime)
+    app.router.add_post("/api/public/animes/{anime_id}/view", webapp_public_count_view)
     app.router.add_get("/api/public/categories", webapp_public_categories)
     app.router.add_get("/api/public/banners", webapp_public_banners)
     app.router.add_post("/api/site/register", webapp_site_register)
