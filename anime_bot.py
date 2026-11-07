@@ -19,7 +19,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ChatMemberUpdated, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     WebAppInfo, FSInputFile, BufferedInputFile,
-    InlineQuery, InlineQueryResultPhoto, InlineQueryResultArticle, InputTextMessageContent
+    InlineQuery, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
 )
 import json
 import gzip
@@ -4123,7 +4123,7 @@ async def inline_search(inline_query: InlineQuery):
             ]) if deep_link else None
             photo_id = a.get("photo_id")
             if photo_id:
-                results.append(InlineQueryResultPhoto(
+                results.append(InlineQueryResultCachedPhoto(
                     id=str(a["id"]),
                     photo_file_id=photo_id,
                     title=title,
@@ -10875,6 +10875,14 @@ async def serve_logo(request):
 
 async def serve_sitemap(request):
     import os
+    try:
+        animes = await asyncio.to_thread(db.get_animes_for_webapp)
+        base = "https://www.anifilm.uz"
+        urls = [base + "/", base + "/catalog"] + [f"{base}/anime/{a['id']}" for a in animes]
+        xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f"<url><loc>{u}</loc></url>" for u in urls) + "</urlset>"
+        return web.Response(text=xml, content_type="application/xml", charset="utf-8")
+    except Exception:
+        pass
     base_dir = os.path.dirname(os.path.abspath(__file__))
     try:
         with open(os.path.join(base_dir, "sitemap.xml"), "r", encoding="utf-8") as f:
@@ -10892,6 +10900,32 @@ async def serve_robots(request):
         return web.Response(text=content, content_type="text/plain", charset="utf-8")
     except Exception:
         return web.Response(status=404)
+
+async def serve_site_page(request):
+    """/anime/{id}, /watch/{id}/..., /catalog, /favorites — bitta sahifali sayt (landing.html).
+    Anime sahifalarida sarlavha va ijtimoiy tarmoq (Open Graph) teglari bazadan qo'shiladi,
+    shunda havola Telegram/WhatsApp'da poster va nom bilan ko'rinadi."""
+    import os, html as _html
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(base_dir, "landing.html"), "r", encoding="utf-8") as f:
+            page = f.read()
+    except Exception:
+        return web.Response(text="AniFilm Bot ishlayapti!")
+    parts = [x for x in request.path.split("/") if x]
+    if len(parts) >= 2 and parts[0] in ("anime", "watch"):
+        try:
+            a = await asyncio.to_thread(db.get_anime, int(parts[1]))
+        except Exception:
+            a = None
+        if a and a.get("title"):
+            t = _html.escape(f'{a["title"]} — AniFilm.uz')
+            d = _html.escape((a.get("description") or "")[:200])
+            tags = f'<meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:type" content="video.tv_show">'
+            if a.get("photo_id"):
+                tags += f'<meta property="og:image" content="https://www.anifilm.uz/api/photo/{_html.escape(str(a["photo_id"]))}">'
+            page = re.sub(r"<title>.*?</title>", lambda m: f"<title>{t}</title>{tags}", page, count=1)
+    return web.Response(text=page, content_type="text/html", charset="utf-8")
 
 def verify_init_data(init_data: str, max_age_seconds: int = 86400):
     """Telegram WebApp initData imzosini tekshiradi (rasmiy Telegram algoritmi:
@@ -11762,8 +11796,27 @@ async def webapp_public_animes(request):
         "views": a.get("views"),
         "total_episodes": a.get("total_episodes"),
         "episode_count": a.get("episode_count"),
+        "last_activity_at": str(a.get("last_activity_at") or ""),
     } for a in animes]
     return web.json_response(safe, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=120"})
+
+async def webapp_public_anime(request):
+    """GET /api/public/animes/{id} — sayt uchun: anime ma'lumoti + qismlar ro'yxati
+    (channel_message_id'siz). `locked` mehmon (Premium emas) nuqtai nazaridan hisoblanadi."""
+    try:
+        anime_id = int(request.match_info["anime_id"])
+        data = await asyncio.to_thread(db.get_anime_detail_for_webapp, anime_id)
+        prices = await premium_settings()
+    except Exception:
+        return web.json_response({"error": "unavailable"}, status=503)
+    if not data:
+        return web.json_response({"error": "topilmadi"}, status=404)
+    out = {k: data.get(k) for k in ("id", "title", "year", "country", "genre", "category", "description",
+                                     "language", "photo_id", "media_type", "views", "total_episodes", "status")}
+    out["episodes"] = [{"id": e["id"], "n": e["episode_number"],
+                        "locked": bool(_episode_locked(e, 0, prices, False, anime=data))}
+                       for e in data.get("episodes", [])]
+    return web.json_response(out, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30"})
 
 async def webapp_public_categories(request):
     try:
@@ -12119,9 +12172,17 @@ async def start_web_server():
             return web.Response(text="Onlayn ko'rish hozircha sozlanmagan", status=503)
 
         user_id = _webapp_user_id(request)
-        status = await webapp_access_status(user_id)
-        if status["maintenance"] or not status["subscribed"]:
-            return web.Response(text="Ruxsat yo'q", status=403)
+        if not user_id and request.query.get("site") == "1":
+            # anifilm.uz sayti mehmoni: Telegram ID yo'q, shuning uchun kanalga obuna
+            # tekshirilmaydi. Texnik ishlar rejimi, Premium qulf (pastda) va IP limiti saqlanadi.
+            if await asyncio.to_thread(db.get_setting, "maintenance") == "1":
+                return web.Response(text="Texnik ishlar olib borilmoqda", status=503)
+            if _rate_limited(f"site_stream:{_client_ip(request)}", 900, 300):
+                return web.Response(text="Juda ko'p so'rov, birozdan so'ng urinib ko'ring", status=429)
+        else:
+            status = await webapp_access_status(user_id)
+            if status["maintenance"] or not status["subscribed"]:
+                return web.Response(text="Ruxsat yo'q", status=403)
 
         try:
             episode_id = int(request.match_info["episode_id"])
@@ -12308,6 +12369,8 @@ async def start_web_server():
 
     app = web.Application(middlewares=[compress_middleware])
     app.router.add_get("/", health_check)
+    for _p in ("/catalog", "/favorites", "/reset-password", "/anime/{tail:.*}", "/watch/{tail:.*}"):
+        app.router.add_get(_p, serve_site_page)
     app.router.add_get("/favicon.ico", serve_favicon)
     app.router.add_get("/logo.png", serve_logo)
     app.router.add_get("/sitemap.xml", serve_sitemap)
@@ -12335,6 +12398,7 @@ async def start_web_server():
     app.router.add_post("/api/notifications/seen", webapp_notifications_seen)
     app.router.add_post("/api/notifications/dismiss", webapp_notifications_dismiss)
     app.router.add_get("/api/public/animes", webapp_public_animes)
+    app.router.add_get("/api/public/animes/{anime_id}", webapp_public_anime)
     app.router.add_get("/api/public/categories", webapp_public_categories)
     app.router.add_get("/api/public/banners", webapp_public_banners)
     app.router.add_post("/api/site/register", webapp_site_register)

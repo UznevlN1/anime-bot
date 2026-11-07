@@ -2,1362 +2,345 @@
 <html lang="uz">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AniFilm.uz — Tarjima animelar</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1330">
+<title>AniFilm.uz — Oʻzbek tilidagi animelar</title>
 <link rel="canonical" href="https://www.anifilm.uz/">
-<meta name="description" content="Eng yangi animelar — o'zbek tilida tarjima va dublyaj qilingan qismlar har kuni yangilanadi. Sevimli animengni bir tugma bosishda tomosha qil!">
-<link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+<meta name="description" content="Eng yangi animelar oʻzbek tilida: tarjima va dublyaj qismlar har kuni yangilanadi. Saytning oʻzida onlayn koʻring.">
+<link rel="icon" href="/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#000000;
-    --surface:#0f0f18;
-    --surface-2:#17171f;
-    --border:#23232e;
-    --crimson:#e0202b;
-    --red:#fe3f47;
-    --gold:#f5c542;
-    --text:#ffffff;
-    --text-dim:#a3a2ac;
-    --glow:rgba(225,33,44,.45);
-  }
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-  html{scroll-behavior:smooth;}
-  body{background:var(--bg);color:var(--text);font-family:'Manrope',system-ui,-apple-system,sans-serif;overflow-x:hidden;}
-  .disp{font-family:'Manrope',sans-serif;font-weight:800;letter-spacing:-.01em;}
-  .mono{font-family:'JetBrains Mono',monospace;}
-  a{color:inherit;text-decoration:none;}
-  img{max-width:100%;display:block;}
-  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
-
-  /* ---------- topbar ---------- */
-  .topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:rgba(0,0,0,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
-  .brand{display:flex;align-items:center;gap:9px;font-size:18px;font-weight:800;}
-  .brand .mark{width:32px;height:32px;border-radius:10px;box-shadow:0 3px 12px var(--glow);overflow:hidden;}
-  .brand .mark img{width:100%;height:100%;object-fit:contain;}
-  .brand .accent{color:var(--crimson);}
-  .top-actions{display:flex;align-items:center;gap:8px;}
-  .icon-btn{width:38px;height:38px;border-radius:12px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text);}
-  .icon-btn svg{width:17px;height:17px;}
-  .search-bar-inline{display:flex;align-items:center;gap:8px;flex:1;min-width:0;max-width:460px;margin:0 12px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:10px 14px;color:var(--text-dim);font-size:13px;font-weight:500;cursor:pointer;-webkit-tap-highlight-color:transparent;}
-  .search-bar-inline svg{width:17px;height:17px;flex:none;color:var(--text-dim);}
-  .search-bar-inline span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .icon-btn-avatar{width:38px;height:38px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-dim);flex:none;overflow:hidden;}
-  .icon-btn-avatar svg{width:17px;height:17px;}
-  .icon-btn-avatar img{width:100%;height:100%;object-fit:cover;}
-
-
-  /* ---------- search overlay ---------- */
-  .search-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.97);backdrop-filter:blur(6px);display:none;flex-direction:column;padding:14px 16px;}
-  .search-overlay.open{display:flex;}
-  .search-top{display:flex;align-items:center;gap:10px;}
-  .search-box{flex:1;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:11px 14px;}
-  .search-box svg{width:17px;height:17px;color:var(--text-dim);flex:none;}
-  .search-box input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:14px;font-family:inherit;}
-  .search-box input::placeholder{color:var(--text-dim);}
-  .search-close{width:38px;height:38px;border-radius:12px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text);flex:none;}
-  .search-close svg{width:17px;height:17px;}
-  .search-results{margin-top:16px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
-  .search-hint{color:var(--text-dim);font-size:13px;text-align:center;margin-top:30px;}
-  .search-item{display:flex;align-items:center;gap:12px;padding:9px 6px;border-radius:12px;color:inherit;text-decoration:none;}
-  .search-item:active{background:var(--surface);}
-  .search-item-art{width:44px;height:60px;border-radius:9px;background-image:linear-gradient(160deg,var(--art-a,var(--crimson)) 0%,var(--art-b,#0f0a24) 100%);background-size:cover;background-position:center;flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:15px;}
-  .search-item-title{font-size:13.5px;font-weight:700;}
-  .search-item-meta{font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-top:2px;}
-
-  /* ---------- tag cloud (genres teaser) ---------- */
-  .tag-cloud{display:flex;flex-wrap:wrap;gap:9px;padding:0 16px;}
-  .tag-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 6px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12.5px;font-weight:700;text-decoration:none;}
-  .tag-chip .tci{flex:none;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;}
-
-  /* ---------- footer legal links ---------- */
-  .foot-legal{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:14px 0;}
-  .foot-legal a{font-size:11.5px;color:var(--text-dim);border:1px solid var(--border);border-radius:9px;padding:6px 11px;text-decoration:none;}
-
-  /* ---------- anime detail sheet (glassmorphism) ---------- */
-  .detail-overlay{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.84);backdrop-filter:blur(4px);display:none;align-items:flex-end;justify-content:center;}
-  .detail-overlay.open{display:flex;}
-  .detail-sheet{width:100%;max-width:520px;max-height:92vh;overflow-y:auto;overflow-x:hidden;background:var(--surface);border-radius:22px 22px 0 0;border:1px solid var(--border);border-bottom:none;animation:sheetUp .25s ease;}
-  @keyframes sheetUp{from{transform:translateY(24px);opacity:.4;}to{transform:translateY(0);opacity:1;}}
-
-  .detail-poster{position:relative;width:100%;min-height:320px;overflow:hidden;background-size:cover;background-position:center;background-image:linear-gradient(160deg,#241457,#05030f);border-radius:22px 22px 0 0;}
-  #detailGlyph{position:absolute;right:-8px;bottom:-14px;font-family:'Manrope',sans-serif;font-weight:800;font-size:150px;line-height:.8;color:rgba(255,255,255,.06);pointer-events:none;user-select:none;}
-
-  .detail-close,.detail-fav-btn{position:absolute;top:14px;z-index:3;width:40px;height:40px;border-radius:50%;background:rgba(22,22,28,.42);backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex:none;}
-  .detail-close{left:14px;color:#fff;}
-  .detail-close svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.3;}
-  .detail-fav-btn{right:14px;}
-  .detail-fav-btn svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2;}
-  .detail-fav-btn.active svg{fill:var(--gold);stroke:var(--gold);}
-
-  .detail-body{position:relative;z-index:2;margin-top:-64px;padding:22px 18px 22px;background:rgba(16,16,21,.55);backdrop-filter:blur(22px) saturate(170%);-webkit-backdrop-filter:blur(22px) saturate(170%);border-top:1px solid rgba(255,255,255,.14);border-radius:26px 26px 0 0;box-shadow:0 -16px 34px rgba(0,0,0,.4);}
-  .detail-title{font-size:20px;font-weight:800;line-height:1.2;}
-  .detail-meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:9px;font-size:12.5px;color:var(--text-dim);font-weight:600;}
-  .detail-meta i{font-style:normal;color:rgba(255,255,255,.2);margin:0 1px;}
-  .detail-meta-rating{color:var(--text);font-weight:800;}
-  .detail-meta-rating::before{content:'★';color:var(--gold);margin-right:4px;}
-  .detail-genres{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px;}
-  .detail-genre-pill{font-size:11.5px;font-weight:700;color:var(--text);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:9px;padding:5px 11px;}
-  .detail-rows{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 14px;margin:16px 0;padding:14px 15px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:16px;backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);}
-  .detail-row{display:flex;flex-direction:column;gap:3px;font-size:13px;}
-  .detail-row span{color:var(--text-dim);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;}
-  .detail-row b{font-weight:800;color:var(--text);font-size:14px;}
-  .detail-desc{color:var(--text-dim);font-size:13px;line-height:1.6;margin-bottom:18px;}
-  .detail-cta{width:100%;justify-content:center;}
-
-  /* ---------- card favorite (heart) button ---------- */
-  .fav-btn{position:absolute;top:7px;right:7px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:2;}
-  .fav-btn svg{width:15px;height:15px;stroke:#fff;fill:none;stroke-width:2;}
-  .fav-btn.active svg{fill:var(--gold);stroke:var(--gold);}
-
-  /* ---------- account / favorites bottom sheets ---------- */
-  .sheet-overlay{position:fixed;inset:0;z-index:75;background:rgba(0,0,0,.84);backdrop-filter:blur(4px);display:none;align-items:flex-end;justify-content:center;}
-  .sheet-overlay.open{display:flex;}
-  .sheet-panel{width:100%;max-width:520px;max-height:90vh;overflow-y:auto;background:var(--surface);border-radius:22px 22px 0 0;border:1px solid var(--border);border-bottom:none;animation:sheetUp .25s ease;padding:18px 18px 26px;}
-  .sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
-  .sheet-title{font-size:18px;font-weight:800;}
-  .sheet-close{width:40px;height:40px;border-radius:10px;background:var(--surface-2);border:1px solid var(--border);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;}
-
-  .auth-tabs{display:flex;gap:8px;margin-bottom:16px;background:var(--surface-2);border-radius:12px;padding:4px;}
-  .auth-tab-btn{flex:1;text-align:center;padding:9px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--text-dim);}
-  .auth-tab-btn.active{background:var(--crimson);color:#fff;}
-  .field-label{font-size:12.5px;color:var(--text-dim);margin:12px 0 6px;font-weight:600;}
-  .field-input{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--text);font-size:14px;font-family:inherit;outline:none;}
-  .field-input:focus{border-color:var(--red);}
-  .auth-error{color:#f87171;font-size:12.5px;margin-top:10px;min-height:16px;}
-  .auth-submit{width:100%;margin-top:16px;padding:13px;border-radius:13px;background:linear-gradient(135deg,var(--red),var(--crimson));color:#fff;font-weight:800;text-align:center;font-size:14.5px;}
-  .auth-submit:disabled{opacity:.6;}
-
-  .account-card{display:flex;align-items:center;gap:12px;padding:14px;border-radius:16px;background:var(--surface-2);border:1px solid var(--border);margin-bottom:14px;}
-  .account-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--red),var(--crimson));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none;}
-  .account-info b{display:block;font-size:15px;}
-  .account-info span{font-size:12.5px;color:var(--text-dim);}
-  .account-row{display:flex;justify-content:space-between;align-items:center;padding:13px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
-  .account-row:last-child{border-bottom:none;}
-  .logout-btn{width:100%;margin-top:16px;padding:12px;border-radius:13px;background:var(--surface-2);border:1px solid var(--border);color:#f87171;font-weight:700;text-align:center;font-size:13.5px;}
-
-  .fav-empty{text-align:center;color:var(--text-dim);font-size:13px;padding:40px 10px;}
-  .fav-list{display:flex;flex-direction:column;gap:10px;}
-  .fav-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:14px;background:var(--surface-2);border:1px solid var(--border);}
-  .fav-item-art{width:46px;height:62px;border-radius:9px;background-size:cover;background-position:center;background-image:linear-gradient(160deg,var(--art-a,var(--crimson)) 0%,var(--art-b,#0f0a24) 100%);flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:16px;}
-  .fav-item-body{flex:1;min-width:0;}
-  .fav-item-title{font-size:13.5px;font-weight:700;}
-  .fav-item-meta{font-size:11px;color:var(--text-dim);margin-top:2px;}
-  .fav-item-remove{width:40px;height:40px;border-radius:10px;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex:none;color:var(--text-dim);}
-
-  /* ---------- hero ---------- */
-  .hero-wrap{padding:14px 16px 0;}
-  .hero{position:relative;border-radius:20px;overflow:hidden;height:260px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px 18px;background:linear-gradient(160deg,#1d090a 0%,#12070a 55%,#000 100%);border:1.5px solid rgba(225,33,44,.55);box-shadow:0 0 0 1px rgba(225,33,44,.15),0 0 34px rgba(225,33,44,.35),inset 0 0 60px rgba(225,33,44,.08);}
-  .hero-aura{position:absolute;inset:0;pointer-events:none;}
-  .hero-aura span{position:absolute;border-radius:50%;filter:blur(42px);opacity:.55;}
-  .hero-aura .a1{width:220px;height:220px;background:var(--crimson);right:-40px;top:-30px;}
-  .hero-aura .a2{width:170px;height:170px;background:#4a0f14;right:70px;bottom:10px;}
-  .hero-glyph{position:absolute;right:-10px;bottom:-18px;font-family:'Manrope',sans-serif;font-weight:800;font-size:160px;line-height:.8;color:rgba(255,255,255,.05);pointer-events:none;user-select:none;}
-  .hero-halftone{position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.05) 1px,transparent 1.4px);background-size:12px 12px;mask-image:radial-gradient(ellipse 70% 55% at 75% 25%,#000 30%,transparent 85%);pointer-events:none;}
-
-  .hero-badge{position:relative;align-self:flex-start;background:transparent;border:1px solid rgba(225,33,44,.7);color:var(--red);font-size:10px;font-weight:800;letter-spacing:.08em;padding:5px 11px;border-radius:6px;margin-bottom:6px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
-  .hero-title{position:relative;max-width:78%;font-size:clamp(24px,8vw,38px);line-height:1.05;text-shadow:0 4px 18px rgba(0,0,0,.6);text-transform:uppercase;font-weight:900;}
-  .hero-title .accent{color:var(--red);}
-  .hero-title-lead{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
-  .hero-desc{position:relative;max-width:78%;color:var(--text-dim);font-size:12.5px;line-height:1.5;margin:6px 0 8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-  .hero-meta{position:relative;display:flex;flex-wrap:nowrap;overflow:hidden;align-items:center;gap:0;margin-bottom:8px;font-size:12px;color:var(--text-dim);font-weight:600;}
-  .hero-meta span{display:inline-flex;align-items:center;}
-  .hero-meta span:not(:last-child)::after{content:'•';margin:0 8px;color:var(--border);}
-  .hero-meta span.rating{color:var(--text);font-weight:800;}
-  .hero-meta span.rating::before{content:'★';color:var(--red);margin-right:4px;}
-  .hero-actions{position:relative;display:flex;gap:9px;flex-wrap:wrap;}
-  .btn-primary{background:linear-gradient(135deg,var(--red),var(--crimson));color:#fff;border-radius:12px;padding:11px 18px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;gap:7px;box-shadow:0 6px 18px var(--glow);}
-  .btn-ghost{background:var(--surface-2);color:#fff;border:1px solid var(--border);border-radius:12px;padding:11px 16px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;gap:7px;}
-  .btn-primary svg,.btn-ghost svg{width:14px;height:14px;flex:none;}
-  .hero-dots{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;align-items:center;gap:5px;}
-  .hero-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.55);transition:width .25s ease,background .25s ease;}
-  .hero-dot.active{width:20px;border-radius:4px;background:linear-gradient(135deg,var(--red),var(--crimson));}
-
-  /* ---------- section shell ---------- */
-  section.block{padding:26px 0 0;}
-  .sec-head{display:flex;align-items:center;justify-content:space-between;padding:0 16px;margin-bottom:14px;}
-  .sec-title{font-size:16.5px;font-weight:800;}
-  .sec-link{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--red);white-space:nowrap;display:flex;align-items:center;gap:3px;}
-
-  /* ---------- catalog row / cards ---------- */
-  .row-scroll{display:flex;gap:13px;overflow-x:auto;padding:0 16px 6px;scrollbar-width:none;}
-  .row-scroll::-webkit-scrollbar{display:none;}
-  .card{flex:none;width:130px;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease;}
-  .card.revealed{opacity:1;transform:translateY(0);}
-  .card-art{position:relative;width:130px;height:178px;border-radius:14px;overflow:hidden;background-image:linear-gradient(160deg,var(--art-a,var(--crimson)) 0%,var(--art-b,#0f0a24) 100%);box-shadow:0 6px 16px rgba(0,0,0,.4);}
-  .card-art::before{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.16) 1px,transparent 1.3px);background-size:9px 9px;opacity:.5;}
-  .card-art::after{content:"";position:absolute;left:0;right:0;bottom:0;height:52%;background:linear-gradient(0deg,rgba(0,0,0,.8) 0%,transparent 100%);pointer-events:none;}
-  .card-glyph{position:absolute;right:6px;bottom:2px;font-family:'Manrope',sans-serif;font-weight:800;font-size:52px;color:rgba(255,255,255,.16);line-height:1;}
-  .card-tag{position:absolute;top:8px;left:8px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:6px;color:#fff;z-index:1;}
-  .card-tag.new{background:linear-gradient(135deg,var(--red),var(--crimson));box-shadow:0 3px 10px var(--glow);}
-  .card-tag.uzb{background:var(--surface-2);border:1px solid rgba(255,255,255,.16);}
-  .card-tag.rank{background:rgba(0,0,0,.8);border:1px solid rgba(225,33,44,.45);color:var(--red);top:8px;left:8px;width:20px;height:20px;padding:0;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;}
-  .card-rating{position:absolute;bottom:8px;left:8px;display:flex;align-items:center;color:#fff;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;z-index:1;}
-  .card-rating::before{content:'★';color:var(--red);font-size:9px;margin-right:3px;}
-  .card-ep{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.72);backdrop-filter:blur(4px);color:#fff;font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:3px 7px;border-radius:16px;border:1px solid rgba(255,255,255,.12);z-index:1;}
-  .card-body{padding:10px 2px 0;}
-  .card-title{font-size:13px;font-weight:700;line-height:1.32;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
-  .card-meta{margin-top:5px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-dim);}
-
-  /* ---------- barchasi (to'liq ro'yxat) overlay ---------- */
-  .all-overlay{position:fixed;inset:0;z-index:63;background:var(--bg);display:none;flex-direction:column;}
-  .all-overlay.open{display:flex;}
-  .all-top{flex:none;display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);background:rgba(0,0,0,.88);backdrop-filter:blur(10px);}
-  .all-title{flex:1;font-size:17px;font-weight:800;}
-  .all-count{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);}
-  .all-body{flex:1;overflow-y:auto;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom));}
-  .all-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
-  .all-card{display:block;color:inherit;text-decoration:none;}
-  .all-card .card-art{width:100%;height:auto;aspect-ratio:130/178;}
-  .all-card .card-body{padding:8px 1px 0;}
-  .all-empty{grid-column:1/-1;text-align:center;color:var(--text-dim);font-size:13px;padding:60px 10px;}
-
-  /* ---------- bosh sahifadagi yagona "Barcha animelar" grid ---------- */
-  .home-grid{grid-template-columns:repeat(2,1fr);gap:14px;padding:0 16px;}
-  .btn-loadmore{display:block;margin:22px 16px 4px;padding:13px 20px;border-radius:14px;background:linear-gradient(135deg,var(--red),var(--crimson));color:#fff;font-size:13.5px;font-weight:800;text-align:center;box-shadow:0 6px 18px var(--glow);border:none;width:calc(100% - 32px);cursor:pointer;font-family:'Manrope',sans-serif;}
-  .btn-loadmore:active{transform:scale(.98);}
-
-  /* ---------- comic panels (kept for compatibility, currently unused) ---------- */
-  .panels{display:flex;flex-direction:column;gap:16px;padding:0 16px;max-width:420px;margin:0 auto;}
-  .panel{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease;}
-  .panel.revealed{opacity:1;transform:translateY(0);}
-  .panel .num{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--red);letter-spacing:.1em;}
-  .panel h3{font-size:16.5px;font-weight:800;margin:8px 0 6px;}
-  .panel p{color:var(--text-dim);font-size:13px;line-height:1.6;}
-
-  /* ---------- footer ---------- */
-  .footer-cta{margin:44px 16px 0;padding:30px 20px 28px;text-align:center;background:linear-gradient(155deg,#1d090a,#150506);border:1px solid var(--border);border-radius:18px;}
-  .footer-cta h2{font-size:clamp(21px,6.4vw,26px);font-weight:800;margin-bottom:8px;}
-  .footer-cta p{color:var(--text-dim);font-size:13px;margin-bottom:20px;}
-
-  footer{padding:36px 20px 24px;}
-  .foot-social{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;}
-  .soc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:18px 6px;border-radius:16px;background:var(--surface);border:1px solid var(--border);color:var(--text);}
-  .soc svg{width:22px;height:22px;}
-  .soc span{font-size:11px;font-weight:700;color:var(--text-dim);}
-  .soc.tg{color:#29b6f6;}
-  .soc.ig{color:#e1306c;}
-  .soc.yt{color:#ff3b30;}
-  .soc.tt{color:#ffffff;}
-  .foot-links{display:none;}
-  .legal-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
-  .legal-card{display:flex;align-items:center;gap:10px;padding:13px 14px;border-radius:14px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;}
-  .legal-card svg{width:18px;height:18px;flex:none;}
-  .legal-card.reklama svg{color:#a855f7;}
-  .legal-card.rules svg{color:#3b82f6;}
-  .legal-card.dmca svg{color:#a855f7;}
-  .legal-card.contact svg{color:#3b82f6;}
-  .age-pill{display:block;width:fit-content;margin:0 auto 22px;padding:8px 18px;border-radius:20px;background:var(--surface);border:1px solid var(--border);font-size:12.5px;color:var(--text-dim);}
-  .age-pill b{color:#ef4444;font-weight:800;}
-  .brand-mini{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;}
-  .brand-mini .mark{width:20px;height:20px;border-radius:6px;overflow:hidden;}
-  .brand-mini .mark img{width:100%;height:100%;object-fit:contain;}
-  .brand-mini span{font-size:14px;font-weight:800;}
-  .brand-mini .accent{color:var(--crimson);}
-  footer .copy{text-align:center;font-size:11.5px;color:var(--text-dim);}
-
-  /* ---------- katalog paneli (hamburger menyu) ---------- */
-  .cat-group{margin-bottom:20px;}
-  .cat-group:last-child{margin-bottom:0;}
-  .cat-group-title{font-size:12.5px;font-weight:800;color:var(--text-dim);margin-bottom:6px;}
-  .cat-link{display:block;padding:9px 2px;font-size:13.5px;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);}
-  .cat-link:last-child{border-bottom:none;}
-  .cat-genres{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;}
-  .cat-genres .cat-link:nth-last-child(-n+2){border-bottom:none;}
-
-  @media (prefers-reduced-motion: reduce){
-    html{scroll-behavior:auto;}
-    .panel,.card{transition:none;opacity:1;transform:none;}
-    .detail-sheet,.sheet-panel{animation:none;}
-  }
-  a:focus-visible,button:focus-visible{outline:2px solid var(--red);outline-offset:3px;}
-
-  /* ---------- responsive: large phones ---------- */
-  @media (min-width:640px){
-    body{max-width:600px;margin:0 auto;}
-    .topbar{max-width:600px;margin:0 auto;}
-  }
-
-  /* ---------- responsive: tablets ---------- */
-  @media (min-width:768px){
-    body{max-width:740px;}
-    .topbar{max-width:740px;}
-    .hero{height:340px;}
-    .hero-title{font-size:clamp(28px,5.6vw,44px);}
-    .hero-wrap{padding:18px 22px 0;}
-
-    .sec-head{padding:0 22px;}
-    .row-scroll{padding:0 22px 6px;}
-    .tag-cloud{padding:0 22px;}
-    .all-top{padding:16px 22px;}
-    .all-body{padding:20px 22px;}
-    .all-grid{grid-template-columns:repeat(4,1fr);gap:16px;}
-    .home-grid{padding:0 22px;}
-    .btn-loadmore{margin:24px 22px 4px;width:calc(100% - 44px);}
-  }
-
-  /* ---------- responsive: desktop ---------- */
-  @media (min-width:1024px){
-    body{max-width:1080px;}
-    .topbar{max-width:1080px;padding:18px 30px;}
-
-    .hero-wrap{padding:24px 30px 0;}
-    .hero{height:400px;padding:36px;border-radius:24px;}
-    .hero-dots{right:28px;bottom:26px;}
-    .hero-badge{font-size:11.5px;padding:7px 14px;margin-bottom:18px;}
-    .hero-title{font-size:clamp(34px,3.4vw,54px);max-width:600px;}
-    .hero-desc{font-size:15px;max-width:560px;margin:16px 0 22px;-webkit-line-clamp:2;}
-    .hero-glyph{font-size:260px;}
-    .btn-primary,.btn-ghost{padding:15px 24px;font-size:14.5px;}
-
-
-    .tag-cloud{padding:0 30px;gap:11px;}
-    .sec-head{padding:0 30px;margin-bottom:18px;}
-    .sec-title{font-size:19px;}
-    .row-scroll{padding:0 30px 10px;gap:16px;}
-
-    .card,.card-art{width:158px;}
-    .card-art{height:216px;}
-    .card-glyph{font-size:64px;}
-    .card-title{font-size:13.5px;}
-
-    .detail-poster{min-height:360px;}
-    .detail-overlay,.sheet-overlay{align-items:center;}
-    .detail-sheet,.sheet-panel{border-radius:22px;border-bottom:1px solid var(--border);}
-
-    .search-top,.search-results{max-width:640px;margin-left:auto;margin-right:auto;width:100%;}
-
-    .all-top{padding:20px 30px;}
-    .all-body{padding:28px 30px;}
-    .all-grid{grid-template-columns:repeat(5,1fr);gap:18px;max-width:1400px;margin:0 auto;}
-    .home-grid{padding:0 30px;}
-    .btn-loadmore{margin:28px auto 4px;max-width:340px;width:calc(100% - 60px);}
-
-    .footer-cta{margin:64px 30px 0;padding:44px 36px 40px;}
-    .footer-cta h2{font-size:clamp(24px,3vw,30px);}
-    .footer-cta p{max-width:480px;margin:0 auto 24px;}
-    footer{padding:52px 30px 32px;}
-  }
-
-  /* ---------- responsive: large desktop ---------- */
-  @media (min-width:1440px){
-    body{max-width:1200px;}
-    .topbar{max-width:1200px;}
-    .hero{height:440px;}
-    .card,.card-art{width:172px;}
-    .card-art{height:235px;}
-    .card-glyph{font-size:70px;}
-    .all-grid{grid-template-columns:repeat(6,1fr);}
-  }
-
-  /* ---------- desktop hover affordances (mouse/trackpad only, not touch) ---------- */
-  @media (hover:hover) and (pointer:fine){
-    .card-art{transition:transform .25s ease,box-shadow .25s ease;}
-    .card:hover .card-art,.all-card:hover .card-art{box-shadow:0 14px 30px rgba(0,0,0,.5);}
-    .tag-chip{transition:border-color .2s ease,transform .2s ease;}
-    .tag-chip:hover{border-color:var(--red);}
-    .btn-primary{transition:transform .2s ease,box-shadow .2s ease;}
-    .btn-primary:hover{box-shadow:0 10px 26px var(--glow);}
-    .btn-ghost{transition:border-color .2s ease;}
-    .btn-ghost:hover{border-color:var(--red);}
-    .icon-btn{transition:border-color .2s ease;}
-    .icon-btn:hover{border-color:var(--red);}
-    .icon-btn-avatar{transition:border-color .2s ease;}
-    .icon-btn-avatar:hover{border-color:var(--red);}
-    .search-bar-inline{transition:border-color .2s ease;}
-    .search-bar-inline:hover{border-color:var(--red);}
-    .cat-link{transition:color .2s ease;}
-    .cat-link:hover{color:var(--red);}
-    .soc{transition:border-color .2s ease,transform .2s ease;}
-    .soc:hover{border-color:var(--red);}
-
-    .row-scroll{scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
-    .row-scroll::-webkit-scrollbar{display:block;height:6px;}
-    .row-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
-    .row-scroll::-webkit-scrollbar-thumb:hover{background:var(--crimson);}
-  }
-  @media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
-    .card:hover .card-art,.all-card:hover .card-art{transform:translateY(-5px);}
-    .tag-chip:hover{transform:translateY(-2px);}
-    .btn-primary:hover{transform:translateY(-2px);}
-    .soc:hover{transform:translateY(-2px);}
-  }
+:root{--bg:#0e1330;--p1:#161c45;--p2:#1f2759;--ln:#2c3572;--tq:#2dd4bf;--sf:#ffb938;--pg:#f0476c;--tx:#f3f5ff;--dm:#9aa3d6;--r:14px}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--tx);font:15px/1.5 Onest,system-ui,sans-serif;padding-bottom:70px;overflow-x:hidden}
+a{color:inherit;text-decoration:none}button,input,select{font:inherit;color:inherit}button{cursor:pointer;border:0;background:none}
+img{display:block;max-width:100%}
+.disp{font-family:'Dela Gothic One',Onest,sans-serif;font-weight:400}
+.dm{color:var(--dm)}.pad{padding:40px 16px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 16px}
+header{position:sticky;top:0;z-index:30;background:rgba(14,19,48,.93);backdrop-filter:blur(12px)}
+header .wrap{display:flex;align-items:center;gap:10px;height:58px}
+.stripe{height:4px;background:repeating-linear-gradient(90deg,var(--tq) 0 22px,var(--sf) 22px 34px,var(--pg) 34px 44px,var(--p2) 44px 60px)}
+.logo{font-size:21px}
+nav.top{display:none;gap:4px;margin-left:10px}
+nav.top a{padding:8px 14px;border-radius:10px;color:var(--dm);font-weight:600}
+nav.top a.on,nav.top a:hover{color:var(--tx);background:var(--p1)}
+.sp{flex:1}
+.ib{width:40px;height:40px;border-radius:12px;background:var(--p1);display:grid;place-items:center}
+svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tabs{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;background:var(--p1);border-top:1px solid var(--ln);padding-bottom:env(safe-area-inset-bottom)}
+.tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:9px 0 7px;font-size:11px;color:var(--dm)}
+.tabs a.on{color:var(--tq)}
+@media(min-width:900px){body{padding-bottom:0}.tabs{display:none}nav.top{display:flex}}
+.hero{position:relative;height:min(62vh,450px);min-height:350px;overflow:hidden;background:var(--p1)}
+.hero .bg{position:absolute;inset:0;background-size:cover;background-position:center top}
+.hero:after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 3%,rgba(14,19,48,.05) 62%),linear-gradient(90deg,rgba(14,19,48,.9),transparent 72%)}
+.hero .tx{position:absolute;z-index:2;left:0;right:0;bottom:28px}
+.hero h1{font-size:clamp(26px,5vw,48px);line-height:1.1;max-width:680px;text-wrap:balance}
+.hero p{color:#cdd3f5;max-width:520px;margin:6px 0 16px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dots{position:absolute;z-index:3;right:16px;bottom:34px;display:flex;gap:6px}
+.dots i{width:22px;height:4px;border-radius:2px;background:rgba(255,255,255,.3)}.dots i.on{background:var(--sf)}
+.meta{display:flex;flex-wrap:wrap;gap:6px 14px;color:#b9c1ee;font-size:13px;margin:8px 0}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;font-weight:700;background:var(--tq);color:#06231f;margin:0 6px 8px 0}
+.btn.g{background:var(--p2);color:var(--tx)}.btn.on svg{fill:var(--pg);stroke:var(--pg)}
+.btn svg{width:16px;height:16px}
+section{margin-top:28px}
+.sh{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.sh h2{font-size:18px}.sh a{color:var(--tq);font-size:13px;font-weight:600}
+.row{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none}.row::-webkit-scrollbar{display:none}
+.row .c{flex:none;width:132px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px 12px}
+.c{position:relative;display:block}
+.po{position:relative;aspect-ratio:3/4.1;border-radius:var(--r);overflow:hidden;background:hsl(var(--h) 45% 30%)}
+.po img{width:100%;height:100%;object-fit:cover}
+.ph{position:absolute;inset:0;display:grid;place-items:center;font-size:44px;opacity:.5}
+.bd{position:absolute;left:6px;top:6px;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;background:var(--sf);color:#2b1c00}
+.bd.r{left:auto;right:6px;background:rgba(14,19,48,.88);color:var(--tx)}
+.c h3{font-size:13.5px;font-weight:600;margin-top:8px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.c small{color:var(--dm);font-size:12px}
+.row.top10 .c{width:166px;padding-left:38px}
+.n{position:absolute;left:0;top:34%;font-size:66px;line-height:1;color:transparent;-webkit-text-stroke:2px var(--sf)}
+.pg{height:3px;background:var(--p2);border-radius:2px;margin-top:6px}.pg i{display:block;height:100%;background:var(--sf);border-radius:2px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:7px 14px;border-radius:99px;background:var(--p2);font-size:13px;font-weight:600}
+.chip:hover{background:var(--ln)}
+.ttl{font-size:clamp(22px,4vw,34px);line-height:1.15;margin:22px 0 12px}
+.fl{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:10px}
+.ad{position:relative;overflow:hidden}
+.bgb{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(28px) brightness(.4)}
+.ad .wrap{position:relative;display:grid;gap:18px;padding-top:22px;padding-bottom:14px}
+.ad .po{width:150px}
+.desc{color:#cdd3f5;margin:12px 0;max-width:70ch}
+@media(min-width:700px){.ad .wrap{grid-template-columns:230px 1fr;gap:30px}.ad .po{width:230px}}
+.eps{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
+.ep{position:relative;padding:12px 0;text-align:center;border-radius:12px;background:var(--p1);border:1px solid var(--ln);font-weight:700}
+.ep.on{background:var(--tq);color:#06231f;border-color:var(--tq)}.ep.seen{color:var(--dm)}
+.ep.lk:after{content:"🔒";position:absolute;top:1px;right:4px;font-size:10px}
+.pl{position:relative;margin-top:12px;background:#000;aspect-ratio:16/9;max-height:76vh;border-radius:var(--r);overflow:hidden}
+.pl video{width:100%;height:100%;background:#000}
+.ov{position:absolute;inset:0;z-index:2;display:grid;place-items:center;text-align:center;padding:20px;background:rgba(14,19,48,.95)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;margin:12px 0}
+.bar select{background:var(--p2);border-radius:12px;padding:12px;border:0;margin:0 6px 8px 0}
+.md{position:fixed;inset:0;z-index:60;background:rgba(6,9,28,.9);display:none;justify-content:center;align-items:flex-start;padding:16px;overflow:auto}
+.md.on{display:flex}
+.box{width:100%;max-width:520px;background:var(--p1);border:1px solid var(--ln);border-radius:18px;padding:16px}
+input.f,select.f{width:100%;background:var(--p2);border:1px solid var(--ln);border-radius:12px;padding:12px 14px;outline:0;margin:8px 0 0}
+input.f:focus{border-color:var(--tq)}
+.sres a{display:flex;gap:12px;align-items:center;padding:8px;border-radius:12px}.sres a:hover{background:var(--p2)}.sres .po{width:44px;flex:none}
+.er{color:var(--pg);min-height:22px;margin:8px 0}
+.note{background:var(--p1);border:1px solid var(--ln);padding:10px 14px;border-radius:12px;margin-top:16px;color:var(--dm);font-size:13px}
+footer{margin-top:44px;padding:26px 16px 40px;border-top:1px solid var(--ln);color:var(--dm);font-size:13px;text-align:center}
+footer a{margin:0 8px;color:var(--tx)}footer p{margin-top:12px}
+.soc{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:460px;margin:0 auto 18px}
+footer .soc a{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 4px 11px;border-radius:16px;background:var(--p1);border:1px solid var(--ln);font-size:12px;font-weight:600}
+footer .soc a:hover{background:var(--p2)}
+.soc svg{width:30px;height:30px}
+:focus-visible{outline:2px solid var(--sf);outline-offset:2px}
+.hm{display:block}.side{margin-top:28px}
+.side .tb{display:flex;gap:6px;margin-bottom:12px}
+.side .tb button{flex:1;padding:9px 0;border-radius:10px;background:var(--p1);font-weight:700;font-size:13px;color:var(--dm)}
+.side .tb button.on{background:var(--tq);color:#06231f}
+.tp{display:flex;align-items:center;gap:12px;padding:8px;border-radius:12px}.tp:hover{background:var(--p1)}
+.tp .po{width:46px;flex:none;border-radius:10px}
+.tp b{font-size:19px;width:26px;text-align:center;color:var(--sf);flex:none}
+.tp h3{font-size:14px;font-weight:600;line-height:1.3}.tp small{color:var(--dm);font-size:12px}
+@media(min-width:1000px){.hm{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:32px}}
+@media(hover:hover){.c .po:after{content:"";position:absolute;inset:0;background:rgba(14,19,48,.55) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l12 7-12 7z' fill='%232dd4bf'/%3E%3C/svg%3E") center/42px no-repeat;opacity:0;transition:opacity .2s}.c:hover .po:after{opacity:1}}
+.wg{display:grid;gap:16px}.wm{min-width:0}
+@media(min-width:1000px){.wg{grid-template-columns:230px minmax(0,1fr);align-items:start}.wg .eps{grid-template-columns:repeat(auto-fill,minmax(52px,1fr));max-height:72vh;overflow:auto;order:-1;margin-top:12px}}
+.tg{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin:4px 0 10px}
+.tg label{display:flex;align-items:center;gap:8px;color:var(--dm);font-size:13px;cursor:pointer}.tg input{accent-color:var(--tq);width:16px;height:16px}
+body.lo:before{content:"";position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.93)}body.lo .pl{z-index:41}
+.hs{display:none;flex:1;max-width:440px;align-items:center;gap:8px;background:var(--p1);border:1px solid var(--ln);border-radius:12px;padding:10px 14px;color:var(--dm)}
+.az{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px}.az a{margin:0;padding:4px 7px;color:var(--dm)}
+@media(min-width:900px){.hs{display:flex}header .ib[data-i=search]{display:none}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+/* ===== Barcha qurilmalar uchun moslashuvchan dizayn ===== */
+:root{color-scheme:dark;--gx:clamp(16px,3.2vw,36px);--r:clamp(12px,1.2vw,18px)}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:76px}
+body{font-size:clamp(15px,.3vw + 14px,17px)}
+.wrap{max-width:1360px;padding-left:max(var(--gx),env(safe-area-inset-left));padding-right:max(var(--gx),env(safe-area-inset-right))}
+.wrap.pad{padding-top:clamp(28px,6vw,72px);padding-bottom:clamp(28px,6vw,72px)}
+@media(min-width:1700px){.wrap{max-width:1560px}}
+header{padding-top:env(safe-area-inset-top)}
+header .wrap{height:clamp(56px,6vw,70px);gap:clamp(8px,1.6vw,16px)}
+.logo{font-size:clamp(20px,2vw + 8px,28px)}
+.ib{width:44px;height:44px}
+nav.top a{padding:10px clamp(12px,1.4vw,18px)}
+@media(min-width:768px){body{padding-bottom:0}.tabs{display:none}nav.top{display:flex}}
+@media(max-width:767.98px){body{padding-bottom:calc(72px + env(safe-area-inset-bottom))}.tabs a{padding:10px 0 8px;font-size:11.5px}}
+@media(min-width:1200px){.hs{max-width:540px}}
+.hero{height:clamp(340px,62vh,660px);height:clamp(340px,62svh,660px);min-height:0}
+@media(orientation:landscape) and (max-height:480px){.hero{height:max(260px,86vh)}}
+.hero .tx{bottom:clamp(22px,4vw,60px)}
+.hero h1{font-size:clamp(26px,4.2vw + 6px,60px);max-width:min(780px,100%)}
+.hero p{font-size:clamp(14px,1vw + 10px,19px);max-width:min(640px,100%);-webkit-line-clamp:3}
+.dots{right:max(var(--gx),env(safe-area-inset-right));bottom:clamp(28px,4vw,64px)}
+section{margin-top:clamp(28px,4vw,52px)}
+.sh h2{font-size:clamp(18px,1.4vw + 12px,28px)}
+.row{gap:clamp(10px,1.6vw,20px);scroll-snap-type:x proximity;scroll-padding-left:var(--gx);-webkit-overflow-scrolling:touch}
+.row .c{width:clamp(130px,30vw,200px);scroll-snap-align:start}
+.row.top10 .c{width:clamp(166px,40vw,262px);padding-left:clamp(38px,5.6vw,56px)}
+.n{font-size:clamp(66px,9.6vw,96px)}
+.grid{grid-template-columns:repeat(auto-fill,minmax(clamp(130px,26vw,200px),1fr));gap:clamp(14px,2vw,28px) clamp(10px,1.6vw,18px)}
+.c .po{box-shadow:0 10px 24px -14px rgba(0,0,0,.75)}
+.c h3{font-size:clamp(13.5px,.3vw + 12.6px,15.5px);overflow-wrap:anywhere}
+.c small{font-size:clamp(12px,.2vw + 11px,13.5px)}
+.ttl{font-size:clamp(24px,3.2vw + 8px,44px)}
+.btn{min-height:44px;padding:12px clamp(18px,2.4vw,28px)}
+.chip{padding:10px 16px}
+.az a{padding:9px}
+.md{padding:max(16px,env(safe-area-inset-top)) 16px 16px}
+@media(min-width:1280px){.hm{grid-template-columns:minmax(0,1fr) 360px}}
+@media(hover:hover) and (pointer:fine){.row{scrollbar-width:thin;scrollbar-color:var(--ln) transparent}.row::-webkit-scrollbar{display:block;height:8px}.row::-webkit-scrollbar-thumb{background:var(--ln);border-radius:4px}}
+footer{padding:clamp(28px,5vw,56px) var(--gx) calc(40px + env(safe-area-inset-bottom))}
+.soc{max-width:560px}
+@media(max-width:339px){.soc{grid-template-columns:repeat(2,1fr)}}
+/* ===== Dizayner jilosi: tipografiya, chuqurlik, yagona "chiziq" belgisi ===== */
+::selection{background:var(--tq);color:#06231f}
+html{scrollbar-color:var(--ln) var(--bg)}
+.disp{letter-spacing:-.012em}
+.logo{letter-spacing:-.02em}.logo span{color:var(--tq)}
+nav.top a.on{box-shadow:inset 0 -2px 0 var(--tq)}
+.tabs{background:rgba(22,28,69,.92);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.tabs a{position:relative}
+.tabs a.on:before{content:"";position:absolute;top:0;left:50%;width:28px;height:3px;margin-left:-14px;border-radius:0 0 3px 3px;background:var(--tq)}
+.hero h1{line-height:1.04;letter-spacing:-.018em;text-shadow:0 2px 28px rgba(6,9,28,.6);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+@media(max-width:767.98px){.hero:after{background:linear-gradient(0deg,var(--bg) 6%,rgba(14,19,48,.74) 40%,rgba(14,19,48,.04) 80%)}}
+.meta{gap:6px 10px;align-items:center}
+.meta span+span:before{content:"";display:inline-block;width:3px;height:3px;margin-right:10px;border-radius:50%;background:currentColor;opacity:.55;vertical-align:middle}
+.btn{box-shadow:0 12px 24px -14px rgba(45,212,191,.8);transition:transform .15s,filter .15s}
+.btn:hover{filter:brightness(1.08)}.btn:active{transform:scale(.97)}
+.btn.g{background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.sh a{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border-radius:99px;background:rgba(45,212,191,.1)}
+.chip{background:var(--p1);border:1px solid var(--ln)}.chip:hover{background:var(--p2);border-color:var(--tq)}
+.po:before{content:"";position:absolute;inset:0;z-index:1;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);pointer-events:none}
+.po img{opacity:0;transition:opacity .45s ease}.po img.ld{opacity:1}
+.bd{padding:3px 9px;border-radius:99px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+@media(hover:hover){.c:hover h3{color:var(--tq)}}
+footer{border-top:0;position:relative}
+footer:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:repeating-linear-gradient(90deg,var(--tq) 0 22px,var(--sf) 22px 34px,var(--pg) 34px 44px,var(--p2) 44px 60px)}
+@media(prefers-reduced-motion:no-preference){
+.hero .bg{animation:settle 1.4s cubic-bezier(.2,.7,.2,1) backwards}
+.hero .tx .wrap>*{animation:rise .7s cubic-bezier(.2,.7,.2,1) backwards}
+.hero .tx .wrap>:nth-child(2){animation-delay:.08s}.hero .tx .wrap>:nth-child(3){animation-delay:.16s}.hero .tx .wrap>:nth-child(n+4){animation-delay:.24s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes settle{from{transform:scale(1.06)}}}
+/* ===== Botga kirish kartasi ===== */
+.bot{display:grid;gap:20px;justify-items:center;max-width:960px;margin:0 auto clamp(28px,5vw,48px);padding:clamp(24px,4.5vw,44px) clamp(18px,4vw,48px);border-radius:clamp(20px,2.4vw,28px);border:1px solid rgba(45,212,191,.3);background:linear-gradient(135deg,rgba(45,212,191,.13),rgba(45,212,191,0) 58%),var(--p1)}
+.bot h2{font-size:clamp(22px,2.6vw + 10px,40px);line-height:1.1;color:var(--tx);text-wrap:balance}
+.bot p{max-width:46ch;margin:10px auto 0;color:#cdd3f5;font-size:clamp(14px,.5vw + 13px,17px);line-height:1.55;text-wrap:balance}
+footer .bot .btn{margin:0;min-height:52px;padding:0 clamp(22px,3vw,34px);font-size:16px;white-space:nowrap}
+.bot .btn svg{width:20px;height:20px}
+@media(min-width:900px){.bot{grid-template-columns:minmax(0,1fr) auto;justify-items:start;align-items:center;gap:clamp(24px,4vw,56px);text-align:left}.bot p{margin-left:0}}
+/* ===== Yuklanish holati: sahifa hech qachon boʻsh koʻrinmasin ===== */
+.sk{background:var(--p1)}
+.skr{display:flex;gap:clamp(10px,1.6vw,20px);overflow:hidden;margin-top:clamp(28px,4vw,52px)}
+.skr i{flex:none;width:clamp(130px,30vw,200px);aspect-ratio:3/4.1;border-radius:var(--r);background:var(--p1)}
+@media(prefers-reduced-motion:no-preference){.sk,.skr i{background:linear-gradient(100deg,var(--p1) 30%,var(--p2) 50%,var(--p1) 70%) 0 0/300% 100%;animation:shim 1.6s linear infinite}@keyframes shim{to{background-position:-300% 0}}}
 </style>
-
 </head>
 <body>
-
-<div id="top"></div>
-<header class="topbar">
-  <div class="brand"><div class="mark"><svg viewBox="0 0 32 32" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="mkA" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:var(--red)"/><stop offset="100%" style="stop-color:var(--crimson)"/></linearGradient></defs><rect width="32" height="32" fill="#0d0a1f"/><path d="M16 6L25 25H19.2L16 17.5L12.8 25H7L16 6Z" fill="url(#mkA)"/></svg></div>Ani<span class="accent">Film</span></div>
-  <div class="search-bar-inline" onclick="openSearch()" role="button" tabindex="0" aria-label="Qidiruv" onkeydown="if(event.key==='Enter')openSearch()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-    <span>Qidirish...</span>
-  </div>
-  <div class="top-actions">
-    <button class="icon-btn" onclick="openCatalog()" aria-label="Katalog">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-    </button>
-    <button class="icon-btn-avatar" onclick="openAccount()" aria-label="Profil">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.4-3.6 4.4-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/></svg>
-    </button>
-  </div>
-</header>
-
-<div class="search-overlay" id="searchOverlay">
-  <div class="search-top">
-    <div class="search-box">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input id="searchInput" type="text" placeholder="Anime nomini qidiring..." autocomplete="off" oninput="doSearch(this.value)">
-    </div>
-    <button class="search-close" onclick="closeSearch()" aria-label="Yopish">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-    </button>
-  </div>
-  <div class="search-results" id="searchResults">
-    <div class="search-hint">Anime nomini yozishni boshlang</div>
-  </div>
-</div>
-
-<div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
-  <div class="detail-sheet">
-    <div class="detail-poster" id="detailPoster">
-      <button class="detail-close" onclick="closeDetail()" aria-label="Orqaga">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="detail-fav-btn" id="detailFavBtn" onclick="onDetailFavClick()" aria-label="Sevimlilarga qo'shish">
-        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
-      </button>
-      <span id="detailGlyph"></span>
-    </div>
-    <div class="detail-body">
-      <h2 class="detail-title" id="detailTitle"></h2>
-      <div class="detail-meta" id="detailMeta"></div>
-      <div class="detail-genres" id="detailGenres"></div>
-      <div class="detail-rows" id="detailRows"></div>
-      <p class="detail-desc" id="detailDesc"></p>
-      <a class="btn-primary detail-cta" id="detailCta" href="https://t.me/ANIFILM_BOT">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-        Botda tomosha qilish
-      </a>
-    </div>
-  </div>
-</div>
-
-<div class="sheet-overlay" id="accountOverlay" onclick="if(event.target===this)closeAccount()">
-  <div class="sheet-panel">
-    <div class="sheet-head">
-      <div class="sheet-title">Profil</div>
-      <button class="sheet-close" onclick="closeAccount()" aria-label="Yopish">×</button>
-    </div>
-    <div id="accountLoggedOut">
-      <div class="auth-tabs">
-        <div class="auth-tab-btn active" id="authTabLogin" onclick="switchAuthTab('login')">Kirish</div>
-        <div class="auth-tab-btn" id="authTabRegister" onclick="switchAuthTab('register')">Ro'yxatdan o'tish</div>
-      </div>
-      <div id="authFormLogin">
-        <div class="field-label">Email yoki telefon</div>
-        <input class="field-input" id="loginIdentifier" type="text" placeholder="email@misol.com yoki +998901234567" autocomplete="username">
-        <div class="field-label">Parol</div>
-        <input class="field-input" id="loginPassword" type="password" placeholder="Parolingiz" autocomplete="current-password">
-        <div class="auth-error" id="loginError"></div>
-        <button class="auth-submit" id="loginSubmitBtn" onclick="submitLogin()">Kirish</button>
-      </div>
-      <div id="authFormRegister" style="display:none;">
-        <div class="field-label">Email</div>
-        <input class="field-input" id="regEmail" type="email" placeholder="email@misol.com" autocomplete="email">
-        <div class="field-label">Telefon (ixtiyoriy)</div>
-        <input class="field-input" id="regPhone" type="text" placeholder="+998901234567" autocomplete="tel">
-        <div class="field-label">Ismingiz</div>
-        <input class="field-input" id="regName" type="text" placeholder="Ismingiz" autocomplete="name">
-        <div class="field-label">Parol</div>
-        <input class="field-input" id="regPassword" type="password" placeholder="Kamida 6 ta belgi" autocomplete="new-password">
-        <div class="auth-error" id="regError"></div>
-        <button class="auth-submit" id="regSubmitBtn" onclick="submitRegister()">Ro'yxatdan o'tish</button>
-      </div>
-    </div>
-    <div id="accountLoggedIn" style="display:none;">
-      <div class="account-card">
-        <div class="account-avatar" id="accountAvatar">?</div>
-        <div class="account-info">
-          <b id="accountName">—</b>
-          <span id="accountContact">—</span>
-        </div>
-      </div>
-      <div class="account-row"><span>Sevimlilar</span><b id="accountFavCount">0</b></div>
-      <div class="account-row"><span>Ko'rilganlar</span><b id="accountHistCount">0</b></div>
-      <button class="logout-btn" onclick="logout()">Chiqish</button>
-    </div>
-  </div>
-</div>
-
-<div class="sheet-overlay" id="favoritesOverlay" onclick="if(event.target===this)closeFavorites()">
-  <div class="sheet-panel">
-    <div class="sheet-head">
-      <div class="sheet-title">Sevimlilar</div>
-      <button class="sheet-close" onclick="closeFavorites()" aria-label="Yopish">×</button>
-    </div>
-    <div id="favoritesBody">
-      <div class="fav-empty">Yuklanmoqda...</div>
-    </div>
-  </div>
-</div>
-
-<div class="all-overlay" id="allOverlay">
-  <div class="all-top">
-    <button class="sheet-close" onclick="closeAllAnime()" aria-label="Yopish">×</button>
-    <div class="all-title" id="allTitle">Barchasi</div>
-    <span class="all-count" id="allCount"></span>
-  </div>
-  <div class="all-body">
-    <div class="all-grid" id="allGrid"></div>
-  </div>
-</div>
-
-<div class="hero-wrap">
-  <a class="hero" id="heroCard" href="https://t.me/ANIFILM_BOT" style="--art-a:#1b1033;--art-b:#05030f;">
-    <div class="hero-aura"><span class="a1"></span><span class="a2"></span></div>
-    <div class="hero-halftone"></div>
-    <span class="hero-glyph">S</span>
-    <span class="hero-badge">Yangi mavsum</span>
-    <h1 class="hero-title disp"><span class="hero-title-lead">Sulh</span><br><span class="accent">Ovchisi</span></h1>
-    <p class="hero-desc">Eng kuchsiz ovchi sirli kuchga ega bo'lib, dunyodagi eng kuchli ovchiga aylanadi. Yangi mavsum ANIFILM'da endi mavjud.</p>
-    <div class="hero-meta">
-      <span>2026</span>
-      <span>24 qism</span>
-      <span>HD</span>
-      <span class="rating">★ 9.7</span>
-    </div>
-    <div class="hero-actions">
-      <span class="btn-primary">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-        Tomosha qilish
-      </span>
-      <span class="btn-ghost">Batafsil</span>
-    </div>
-    <div class="hero-dots">
-      <div class="hero-dot active"></div><div class="hero-dot"></div><div class="hero-dot"></div><div class="hero-dot"></div>
-    </div>
-  </a>
-</div>
-
-<section class="block" id="genresSection">
-  <div class="sec-head">
-    <div class="sec-title">Janrlar bo'yicha</div>
-  </div>
-  <div class="tag-cloud" id="tagCloud"></div>
-</section>
-
-<section class="block" id="animeSection">
-  <div class="sec-head">
-    <div class="sec-title">Barcha animelar</div>
-  </div>
-  <div class="all-grid home-grid" id="homeGrid"></div>
-  <div class="all-empty" id="homeEmpty" style="display:none;">Hozircha anime topilmadi</div>
-  <button class="btn-loadmore" id="loadMoreBtn" onclick="showMoreHome()" style="display:none;">Ko'proq ko'rsatish</button>
-</section>
-
-<div class="footer-cta">
-  <h2 class="disp">Birinchi bo'lib ko'ring</h2>
-  <p>Yangi qismlar chiqqanda birinchilardan bo'lib xabardor bo'lish uchun botga qo'shiling.</p>
-  <a class="btn-primary" href="https://t.me/ANIFILM_BOT">
-    <svg viewBox="0 0 24 24" fill="none"><path d="M21 4L3 11.5L10 13.5M21 4L15 20L10 13.5M21 4L10 13.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-    @ANIFILM_BOT
-  </a>
-</div>
-
-<footer>
-  <div class="foot-social">
-    <a class="soc tg" href="https://t.me/anifilm_uz" aria-label="Telegram kanal" title="Telegram kanal"><svg viewBox="0 0 24 24" fill="none"><path d="M21 4L3 11.5L10 13.5M21 4L15 20L10 13.5M21 4L10 13.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Telegram</span></a>
-    <a class="soc ig" href="https://www.instagram.com/anifilm_bot" aria-label="Instagram" title="Instagram"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg><span>Instagram</span></a>
-    <a class="soc yt" href="https://www.youtube.com/@ANIFILM_UZ" aria-label="YouTube" title="YouTube"><svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5.5" width="19" height="13" rx="4" stroke="currentColor" stroke-width="2"/><path d="M10.5 9.5L15 12L10.5 14.5V9.5Z" fill="currentColor"/></svg><span>YouTube</span></a>
-    <a class="soc tt" href="https://www.tiktok.com/@anifilm_uz" aria-label="TikTok" title="TikTok"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 5.82c-.83-.9-1.29-2.07-1.29-3.28h-3.03v13.66c0 1.5-1.22 2.72-2.72 2.72a2.72 2.72 0 0 1 0-5.44c.28 0 .55.04.8.12V10.5a5.75 5.75 0 0 0-.8-.06 5.75 5.75 0 1 0 5.75 5.75V8.7a8.44 8.44 0 0 0 4.94 1.58V7.25a5.28 5.28 0 0 1-3.65-1.43Z"/></svg><span>TikTok</span></a>
-  </div>
-  <div class="legal-grid">
-    <a class="legal-card reklama" href="https://t.me/uznevl_bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l3.5 4V6L6 10H4a1 1 0 0 0-1 1Z"/><path d="M14 8a4 4 0 0 1 0 8M17.5 5.5a8 8 0 0 1 0 13"/></svg>Reklama</a>
-    <a class="legal-card rules" href="https://t.me/ANIFILM_BOT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M15 3v4a1 1 0 0 0 1 1h4M9 12h6M9 16h6"/></svg>Sayt qoidalari</a>
-    <a class="legal-card dmca" href="https://t.me/ANIFILM_BOT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg>DMCA</a>
-    <a class="legal-card contact" href="https://t.me/uznevl_bot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5l8.5 6 8.5-6"/></svg>Qayta aloqa</a>
-  </div>
-  <a class="age-pill" href="https://t.me/ANIFILM_BOT">Yosh toifasi: <b>16+</b></a>
-  <div class="brand-mini"><div class="mark"><svg viewBox="0 0 32 32" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="mkB" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:var(--red)"/><stop offset="100%" style="stop-color:var(--crimson)"/></linearGradient></defs><rect width="32" height="32" fill="#0d0a1f"/><path d="M16 6L25 25H19.2L16 17.5L12.8 25H7L16 6Z" fill="url(#mkB)"/></svg></div><span>Ani<span class="accent">Film</span></span></div>
-  <p class="copy">© 2026 — anifilm.uz. Barcha huquqlar himoyalangan.</p>
-</footer>
-
-<div class="sheet-overlay" id="catalogOverlay" onclick="if(event.target===this)closeCatalog()">
-  <div class="sheet-panel">
-    <div class="sheet-head">
-      <div class="sheet-title">Katalog</div>
-      <button class="sheet-close" onclick="closeCatalog()" aria-label="Yopish">×</button>
-    </div>
-    <div class="cat-group">
-      <div class="cat-group-title">Bo'limlar</div>
-      <a class="cat-link" href="#top" onclick="closeCatalog()">Bosh sahifa</a>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('all')">Barcha animelar</a>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openFavorites()">Sevimlilar</a>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAccount()">Profil</a>
-    </div>
-    <div class="cat-group">
-      <div class="cat-group-title">Tavsiya</div>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('new')">Yangi qo'shilganlar</a>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('popular')">Mashhur animelar</a>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('dub')">O'zbek tilida dublyaj</a>
-    </div>
-    <div class="cat-group">
-      <div class="cat-group-title">Turi</div>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('serial')">Seriallar</a>
-      <a class="cat-link" href="javascript:void(0)" onclick="closeCatalog();openAllAnime('film')">Filmlar</a>
-    </div>
-    <div class="cat-group">
-      <div class="cat-group-title">Janrlar</div>
-      <div class="cat-genres" id="catalogGenres"></div>
-    </div>
-  </div>
-</div>
-
+<header><div class="wrap"><a class="logo disp" href="/">Ani<span>Film</span></a>
+<nav class="top"><a data-t="home" href="/">Bosh sahifa</a><a data-t="catalog" href="/catalog">Katalog</a><a data-t="favorites" href="/favorites">Sevimlilar</a><a href="#" onclick="rnd();return false">Tasodifiy</a></nav>
+<span class="sp"></span></div><div class="stripe"></div></header>
+<main id="app"><div id="sk" aria-hidden="true"><div class="hero sk"></div><div class="wrap"><div class="skr"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="skr"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></main><script>location.pathname==='/'||document.getElementById('sk').remove()</script>
+<footer><div class="bot"><div><h2 class="disp">Birinchi boʻlib koʻring</h2><p>Yangi qismlar chiqqanda birinchilardan boʻlib xabardor boʻlish uchun botga qoʻshiling.</p></div><a class="btn" href="https://t.me/ANIFILM_BOT" target="_blank" rel="noopener"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>@ANIFILM_BOT</a></div><div class="soc"><a href="https://t.me/anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gtg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#229ed9"/></linearGradient></defs><circle cx="12" cy="12" r="10.4" fill="#fff"/><path fill="url(#gtg)" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>Telegram</a><a href="https://www.instagram.com/anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><radialGradient id="gig" cx=".3" cy="1.07" r="1.28"><stop offset="0" stop-color="#fdf497"/><stop offset=".05" stop-color="#fdf497"/><stop offset=".45" stop-color="#fd5949"/><stop offset=".6" stop-color="#d6249f"/><stop offset=".9" stop-color="#285aeb"/></radialGradient></defs><rect width="24" height="24" rx="6.2" fill="url(#gig)"/><rect x="5" y="5" width="14" height="14" rx="4.2" fill="none" stroke="#fff" stroke-width="1.7"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="#fff" stroke-width="1.7"/><circle cx="16.3" cy="7.7" r="1" fill="#fff"/></svg>Instagram</a><a href="https://www.youtube.com/@anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect y="3.6" width="24" height="16.8" rx="5" fill="#f00"/><path fill="#fff" d="M9.5 8.4v7.2l6.3-3.6z"/></svg>YouTube</a><a href="https://www.tiktok.com/@anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><path id="gtk" d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></defs><rect width="24" height="24" rx="6.2"/><g transform="translate(4.8 4.8) scale(.6)"><use href="#gtk" fill="#25f4ee" transform="translate(-1 -1)"/><use href="#gtk" fill="#fe2c55" transform="translate(1 1)"/><use href="#gtk" fill="#fff"/></g></svg>TikTok</a></div>
+<div class="az" id="az"></div>
+<p>Yosh toifasi: 16+ · <a href="https://t.me/Uznevl" target="_blank" rel="noopener">Reklama va aloqa</a> · <a href="https://t.me/ANIFILM_BOT">DMCA</a></p><p>© 2026 anifilm.uz</p></footer>
+<nav class="tabs"><a data-t="home" href="/" data-i="home" data-l="Bosh"></a><a data-t="catalog" href="/catalog" data-i="grid" data-l="Katalog"></a><a href="#" onclick="S(1);return false" data-i="search" data-l="Qidiruv"></a><a data-t="favorites" href="/favorites" data-i="heart" data-l="Sevimli"></a><a href="#" onclick="auth();return false" data-i="user" data-l="Profil"></a></nav>
+<div class="md" id="srch" onclick="if(event.target===this)S(0)"><div class="box"><input class="f" id="si" placeholder="Anime nomini yozing…" autocomplete="off" oninput="sr(this.value)" onkeydown="if(event.key==='Enter'){S(0);nav('/catalog?q='+encodeURIComponent(this.value))}"><div class="sres" id="sres" style="margin-top:12px"></div></div></div>
+<div class="md" id="au" onclick="if(event.target===this)authClose()"><div class="box" id="aub"></div></div>
 <script>
-const BOT_URL='https://t.me/ANIFILM_BOT';
-const API_ANIMES='/api/public/animes';
-const API_CATEGORIES='/api/public/categories';
-const API_BANNERS='/api/public/banners';
-
-// ================= SAYT HISOBI (email/telefon + parol) =================
-let AUTH_TOKEN=localStorage.getItem('af_token')||null;
-let CURRENT_USER=null;
-let FAVORITE_IDS=new Set(JSON.parse(localStorage.getItem('af_fav_cache')||'[]'));
-
-function authHeaders(extra){
-  const h=Object.assign({'Content-Type':'application/json'},extra||{});
-  if(AUTH_TOKEN)h['Authorization']='Bearer '+AUTH_TOKEN;
-  return h;
-}
-function saveFavCache(){localStorage.setItem('af_fav_cache',JSON.stringify([...FAVORITE_IDS]));}
-
-async function apiFetch(url,opts){
-  opts=opts||{};
-  opts.headers=authHeaders(opts.headers);
-  const res=await fetch(url,opts);
-  if(res.status===401){logout(true);}
-  return res;
-}
-
-// ---------- Katalog paneli (hamburger menyu) ----------
-function openCatalog(){
-  document.getElementById('catalogOverlay').classList.add('open');
-  document.body.style.overflow='hidden';
-}
-function closeCatalog(){
-  document.getElementById('catalogOverlay').classList.remove('open');
-  document.body.style.overflow='';
-}
-
-// ---------- Profil paneli ----------
-function openAccount(){
-  document.getElementById('accountOverlay').classList.add('open');
-  document.body.style.overflow='hidden';
-  refreshAccountView();
-}
-function closeAccount(){
-  document.getElementById('accountOverlay').classList.remove('open');
-  document.body.style.overflow='';
-}
-function switchAuthTab(tab){
-  document.getElementById('authTabLogin').classList.toggle('active',tab==='login');
-  document.getElementById('authTabRegister').classList.toggle('active',tab==='register');
-  document.getElementById('authFormLogin').style.display=tab==='login'?'':'none';
-  document.getElementById('authFormRegister').style.display=tab==='register'?'':'none';
-}
-
-async function refreshAccountView(){
-  const loggedOut=document.getElementById('accountLoggedOut');
-  const loggedIn=document.getElementById('accountLoggedIn');
-  if(!AUTH_TOKEN){
-    loggedOut.style.display='';
-    loggedIn.style.display='none';
-    return;
-  }
-  try{
-    const res=await apiFetch('/api/site/me');
-    if(!res.ok)throw new Error('unauth');
-    const data=await res.json();
-    CURRENT_USER=data.user;
-    loggedOut.style.display='none';
-    loggedIn.style.display='';
-    const name=CURRENT_USER.display_name||CURRENT_USER.email||CURRENT_USER.phone||'Foydalanuvchi';
-    document.getElementById('accountName').textContent=name;
-    document.getElementById('accountContact').textContent=CURRENT_USER.email||CURRENT_USER.phone||'';
-    document.getElementById('accountAvatar').textContent=name.charAt(0).toUpperCase();
-    document.getElementById('accountFavCount').textContent=FAVORITE_IDS.size;
-    try{
-      const histRes=await apiFetch('/api/site/history');
-      const hist=histRes.ok?await histRes.json():[];
-      document.getElementById('accountHistCount').textContent=hist.length;
-    }catch(e){}
-  }catch(e){
-    loggedOut.style.display='';
-    loggedIn.style.display='none';
-  }
-}
-
-async function submitLogin(){
-  const identifier=document.getElementById('loginIdentifier').value.trim();
-  const password=document.getElementById('loginPassword').value;
-  const errEl=document.getElementById('loginError');
-  const btn=document.getElementById('loginSubmitBtn');
-  errEl.textContent='';
-  if(!identifier||!password){errEl.textContent="Barcha maydonlarni to'ldiring";return;}
-  btn.disabled=true;btn.textContent='Kirilmoqda...';
-  try{
-    const res=await fetch('/api/site/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier,password})});
-    const data=await res.json();
-    if(!res.ok){errEl.textContent=data.error||'Xatolik yuz berdi';return;}
-    AUTH_TOKEN=data.token;
-    localStorage.setItem('af_token',AUTH_TOKEN);
-    CURRENT_USER=data.user;
-    await loadFavoriteIds();
-    refreshAccountView();
-  }catch(e){
-    errEl.textContent="Tarmoq xatoligi, qayta urinib ko'ring";
-  }finally{
-    btn.disabled=false;btn.textContent='Kirish';
-  }
-}
-
-async function submitRegister(){
-  const email=document.getElementById('regEmail').value.trim();
-  const phone=document.getElementById('regPhone').value.trim();
-  const display_name=document.getElementById('regName').value.trim();
-  const password=document.getElementById('regPassword').value;
-  const errEl=document.getElementById('regError');
-  const btn=document.getElementById('regSubmitBtn');
-  errEl.textContent='';
-  if(!email&&!phone){errEl.textContent="Email yoki telefon kiriting";return;}
-  if(password.length<6){errEl.textContent="Parol kamida 6 ta belgidan iborat bo'lishi kerak";return;}
-  btn.disabled=true;btn.textContent="Yuborilmoqda...";
-  try{
-    const res=await fetch('/api/site/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,phone,display_name,password})});
-    const data=await res.json();
-    if(!res.ok){errEl.textContent=data.error||'Xatolik yuz berdi';return;}
-    AUTH_TOKEN=data.token;
-    localStorage.setItem('af_token',AUTH_TOKEN);
-    CURRENT_USER=data.user;
-    await loadFavoriteIds();
-    refreshAccountView();
-  }catch(e){
-    errEl.textContent="Tarmoq xatoligi, qayta urinib ko'ring";
-  }finally{
-    btn.disabled=false;btn.textContent="Ro'yxatdan o'tish";
-  }
-}
-
-function logout(silent){
-  AUTH_TOKEN=null;
-  CURRENT_USER=null;
-  localStorage.removeItem('af_token');
-  FAVORITE_IDS=new Set();
-  saveFavCache();
-  updateAllFavButtons();
-  if(!silent){
-    refreshAccountView();
-    switchAuthTab('login');
-  }
-}
-
-// ---------- Sevimlilar ----------
-async function loadFavoriteIds(){
-  if(!AUTH_TOKEN){FAVORITE_IDS=new Set();saveFavCache();return;}
-  try{
-    const res=await apiFetch('/api/site/favorites');
-    if(!res.ok)throw new Error('bad');
-    const list=await res.json();
-    FAVORITE_IDS=new Set(list.map(a=>a.id));
-    saveFavCache();
-    updateAllFavButtons();
-  }catch(e){}
-}
-
-function updateAllFavButtons(){
-  document.querySelectorAll('.fav-btn').forEach(btn=>{
-    const id=Number(btn.dataset.animeId);
-    btn.classList.toggle('active',FAVORITE_IDS.has(id));
-  });
-  const detailBtn=document.getElementById('detailFavBtn');
-  if(detailBtn&&CURRENT_DETAIL_ID!=null){
-    detailBtn.classList.toggle('active',FAVORITE_IDS.has(CURRENT_DETAIL_ID));
-  }
-}
-
-async function toggleFavoriteId(animeId){
-  if(!animeId)return;
-  if(!AUTH_TOKEN){
-    openAccount();
-    return;
-  }
-  const wasActive=FAVORITE_IDS.has(animeId);
-  if(wasActive)FAVORITE_IDS.delete(animeId);else FAVORITE_IDS.add(animeId);
-  saveFavCache();
-  updateAllFavButtons();
-  try{
-    const res=await apiFetch('/api/site/favorite',{method:'POST',body:JSON.stringify({anime_id:animeId})});
-    if(!res.ok)throw new Error('bad');
-    const data=await res.json();
-    if(data.active)FAVORITE_IDS.add(animeId);else FAVORITE_IDS.delete(animeId);
-    saveFavCache();
-    updateAllFavButtons();
-  }catch(e){
-    // muvaffaqiyatsiz bo'lsa — holatni qaytarib qo'yamiz
-    if(wasActive)FAVORITE_IDS.add(animeId);else FAVORITE_IDS.delete(animeId);
-    saveFavCache();
-    updateAllFavButtons();
-  }
-}
-
-function onFavBtnClick(e,animeId){
-  e.preventDefault();
-  e.stopPropagation();
-  toggleFavoriteId(animeId);
-}
-
-function onDetailFavClick(){
-  if(CURRENT_DETAIL_ID!=null)toggleFavoriteId(CURRENT_DETAIL_ID);
-}
-
-function openFavorites(){
-  document.getElementById('favoritesOverlay').classList.add('open');
-  document.body.style.overflow='hidden';
-  renderFavoritesPanel();
-}
-function closeFavorites(){
-  document.getElementById('favoritesOverlay').classList.remove('open');
-  document.body.style.overflow='';
-}
-
-async function renderFavoritesPanel(){
-  const body=document.getElementById('favoritesBody');
-  if(!AUTH_TOKEN){
-    body.innerHTML=`<div class="fav-empty">Sevimlilarni saqlash uchun avval hisobingizga kiring.</div>
-      <button class="auth-submit" onclick="closeFavorites();openAccount();">Kirish / Ro'yxatdan o'tish</button>`;
-    return;
-  }
-  body.innerHTML='<div class="fav-empty">Yuklanmoqda...</div>';
-  try{
-    const res=await apiFetch('/api/site/favorites');
-    if(!res.ok)throw new Error('bad');
-    const list=await res.json();
-    FAVORITE_IDS=new Set(list.map(a=>a.id));
-    saveFavCache();
-    if(!list.length){
-      body.innerHTML='<div class="fav-empty">Hali sevimlilar yoʻq. Anime ustidagi yurakcha belgisini bosib qoʻshing.</div>';
-      return;
-    }
-    body.innerHTML=`<div class="fav-list">${list.map((a,i)=>{
-      const [pa,pb]=ART_PALETTE[i%ART_PALETTE.length];
-      const artStyle=a.photo_id?`background-image:url('/api/photo/${a.photo_id}');`:`--art-a:${pa};--art-b:${pb};`;
-      const glyph=a.photo_id?'':(a.title||'?').trim().charAt(0).toUpperCase();
-      const meta=`${a.media_type==='film'?'FILM':'SERIAL'} · ${a.year||''}`;
-      return `<div class="fav-item">
-        <div class="fav-item-art" style="${artStyle}">${glyph}</div>
-        <div class="fav-item-body"><div class="fav-item-title">${a.title}</div><div class="fav-item-meta">${meta}</div></div>
-        <button class="fav-item-remove" onclick="removeFavoriteFromList(${a.id})" aria-label="Olib tashlash">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
-      </div>`;
-    }).join('')}</div>`;
-  }catch(e){
-    body.innerHTML='<div class="fav-empty">Yuklab boʻlmadi, birozdan soʻng qayta urinib koʻring.</div>';
-  }
-}
-
-async function removeFavoriteFromList(animeId){
-  await toggleFavoriteId(animeId);
-  renderFavoritesPanel();
-}
-
-const CHIP_ICON_MAP={
-  'aksiya':['⚡','#8b5cf6'],'action':['⚡','#8b5cf6'],
-  'sarguzasht':['🛡️','#d7a23c'],'adventure':['🛡️','#d7a23c'],
-  'komediya':['😄','#22c55e'],'comedy':['😄','#22c55e'],
-  'drama':['🎭','#ef4444'],
-  'fantastika':['✨','#6366f1'],'fantasy':['✨','#6366f1'],
-  'romantika':['💗','#ec4899'],'romance':['💗','#ec4899'],
-  'sport':['🏆','#f59e0b'],
-  'dahshat':['👻','#7c3aed'],'horror':['👻','#7c3aed'],
-  'jangari':['🥋','#dc2626'],
-};
-const CHIP_FALLBACK=['#8b5cf6','#22c55e','#d7a23c','#ec4899','#6366f1','#ef4444'];
-function chipIcon(cat,idx){
-  const key=(cat||'').trim().toLowerCase();
-  if(CHIP_ICON_MAP[key])return CHIP_ICON_MAP[key];
-  return ['🎬',CHIP_FALLBACK[idx%CHIP_FALLBACK.length]];
-}
-
-const ART_PALETTE=[['#5b21b6','#1e1147'],['#7c3aed','#241457'],['#4338ca','#14103a'],['#4f46e5','#1a1650'],['#3730a3','#120c38'],['#2563eb','#0f1f45']];
-
-// ---------- zaxira namuna (server javob bermasa yoki hali yangi endpoint
-// joylanmagan bo'lsa, sahifa baribir chiroyli ko'rinishi uchun) ----------
-const FALLBACK_CATEGORIES=['Aksiya','Sarguzasht','Komediya','Drama','Fantastika'];
-const FALLBACK_NEW=[
-  {title:"Titanlar hujumi 3-fasl", meta:"SERIAL · 2018–2019", ep:"22/22", tag:'new', a:'#7c3aed', b:'#241457', glyph:'T'},
-  {title:"Jujutsu Kaisen 2-fasl", meta:"SERIAL · 2023", ep:"23/23", tag:'new', a:'#5b21b6', b:'#1e1147', glyph:'J'},
-  {title:"Oshi no Ko", meta:"SERIAL · 2023", ep:"11/11", tag:'new', a:'#4f46e5', b:'#1a1650', glyph:'O'},
-  {title:"Tokyo Revengers", meta:"SERIAL · 2021", ep:"24/24", tag:'new', a:'#1f2020', b:'#0d0d0d', glyph:'T'},
-];
-const FALLBACK_POPULAR=[
-  {title:"Titanlar hujumi", meta:"SERIAL · 2013–2023", a:'#6d28d9', b:'#1e1147', glyph:'T'},
-  {title:"Death Note", meta:"SERIAL · 2006", a:'#1c1c1c', b:'#0a0a0a', glyph:'D'},
-  {title:"Naruto: Shippuuden", meta:"SERIAL · 2007", a:'#3b82f6', b:'#0c1730', glyph:'N'},
-  {title:"One Piece", meta:"SERIAL · 1999", a:'#2563eb', b:'#0f1f45', glyph:'O'},
-].map((a,i)=>({...a,rank:i+1}));
-const FALLBACK_DUB=[
-  {title:"Naruto: Shippuuden", meta:"UZB DUBLYAJ", tag:'uzb', a:'#3b82f6', b:'#0c1730', glyph:'N'},
-  {title:"Dragon Ball Super", meta:"UZB DUBLYAJ", tag:'uzb', a:'#3730a3', b:'#120c38', glyph:'D'},
-  {title:"Demon Slayer", meta:"UZB DUBLYAJ", tag:'uzb', a:'#8b5cf6', b:'#1e1147', glyph:'D'},
-  {title:"Hunter x Hunter", meta:"UZB DUBLYAJ", tag:'uzb', a:'#4338ca', b:'#14103a', glyph:'H'},
-];
-
-function animeLink(a){return a&&a.id?`${BOT_URL}?start=anime_${a.id}`:BOT_URL;}
-function toCard(a,idx,extra){
-  const [pa,pb]=ART_PALETTE[idx%ART_PALETTE.length];
-  const isFilm=a.media_type==='film';
-  return {
-    id:a.id,
-    title:a.title,
-    meta:`${isFilm?'FILM':'SERIAL'} · ${a.year||''}`,
-    ep:!isFilm?`${a.episode_count||0}/${a.total_episodes||a.episode_count||0}`:null,
-    photo_id:a.photo_id,
-    media_type:a.media_type,
-    year:a.year,
-    country:a.country,
-    genre:a.genre,
-    category:a.category,
-    language:a.language,
-    description:a.description,
-    episode_count:a.episode_count,
-    rating:a.rating,
-    views:a.views,
-    a:pa,b:pb,
-    glyph:(a.title||'?').trim().charAt(0).toUpperCase(),
-    ...extra
-  };
-}
-
-let DETAIL_MAP={};
-let DETAIL_COUNTER=0;
-let CURRENT_DETAIL_ID=null;
-function registerDetail(a){
-  const key='d'+(DETAIL_COUNTER++);
-  DETAIL_MAP[key]=a;
-  return key;
-}
-function openDetail(key){
-  const a=DETAIL_MAP[key];
-  if(!a)return;
-  CURRENT_DETAIL_ID=a.id!=null?Number(a.id):null;
-  const favBtn=document.getElementById('detailFavBtn');
-  if(favBtn){
-    favBtn.style.display=CURRENT_DETAIL_ID!=null?'':'none';
-    favBtn.classList.toggle('active',CURRENT_DETAIL_ID!=null&&FAVORITE_IDS.has(CURRENT_DETAIL_ID));
-  }
-  if(CURRENT_DETAIL_ID!=null&&AUTH_TOKEN){
-    apiFetch('/api/site/history',{method:'POST',body:JSON.stringify({anime_id:CURRENT_DETAIL_ID})}).catch(()=>{});
-  }
-  const poster=document.getElementById('detailPoster');
-  const glyphEl=document.getElementById('detailGlyph');
-  if(a.photo_id){
-    poster.style.backgroundImage=`linear-gradient(0deg,rgba(0,0,0,.88) 0%,rgba(0,0,0,.05) 60%),url('/api/photo/${a.photo_id}')`;
-    glyphEl.textContent='';
-  }else{
-    poster.style.backgroundImage=`linear-gradient(160deg,${a.a||'#5b21b6'},${a.b||'#1e1147'})`;
-    glyphEl.textContent=a.glyph||(a.title||'?').charAt(0).toUpperCase();
-  }
-  document.getElementById('detailTitle').textContent=a.title||'';
-  const isFilm=a.media_type==='film';
-  const metaParts=[];
-  if(a.rating)metaParts.push(`<span class="detail-meta-rating">${a.rating}</span>`);
-  if(a.year)metaParts.push(`<span>${a.year}</span>`);
-  metaParts.push(`<span>${isFilm?'Film':'Serial'}</span>`);
-  if(a.country)metaParts.push(`<span>${a.country}</span>`);
-  document.getElementById('detailMeta').innerHTML=metaParts.map((p,i)=>i?'<i>•</i>'+p:p).join('');
-  const genreWrap=document.getElementById('detailGenres');
-  const genreList=(a.genre||'').split(',').map(g=>g.trim()).filter(Boolean);
-  genreWrap.innerHTML=genreList.map(g=>`<span class="detail-genre-pill">${g}</span>`).join('');
-  genreWrap.style.display=genreList.length?'flex':'none';
-  const rows=[];
-  if(!isFilm&&(a.ep||a.episode_count))rows.push(['Qismlar',a.ep||`${a.episode_count||0} qism`]);
-  if(a.language)rows.push(['Tili',a.language]);
-  document.getElementById('detailRows').innerHTML=rows.map(([k,v])=>`<div class="detail-row"><span>${k}</span><b>${v}</b></div>`).join('');
-  const descEl=document.getElementById('detailDesc');
-  descEl.textContent=a.description||'';
-  descEl.style.display=a.description?'block':'none';
-  document.getElementById('detailCta').href=animeLink(a);
-  document.getElementById('detailOverlay').classList.add('open');
-  document.body.style.overflow='hidden';
-}
-function closeDetail(){
-  document.getElementById('detailOverlay').classList.remove('open');
-  document.body.style.overflow='';
-}
-
-function renderRow(elId,list){
-  const el=document.getElementById(elId);
-  el.innerHTML='';
-  list.forEach(a=>{
-    const key=registerDetail(a);
-    const card=document.createElement('a');
-    card.className='card';
-    card.href=animeLink(a);
-    card.onclick=(e)=>{e.preventDefault();openDetail(key);};
-    let tagHtml='';
-    if(a.tag==='new')tagHtml=`<span class="card-tag new">YANGI</span>`;
-    if(a.tag==='uzb')tagHtml=`<span class="card-tag uzb">UZB</span>`;
-    if(a.rank)tagHtml=`<span class="card-tag rank">${a.rank}</span>`;
-    const ratingHtml=a.rating?`<span class="card-rating">${a.rating}</span>`:'';
-    const epHtml=a.ep?`<span class="card-ep">${a.ep}</span>`:'';
-    const artStyle=a.photo_id
-      ?`background-image:url('/api/photo/${a.photo_id}');background-size:cover;background-position:center;`
-      :`--art-a:${a.a};--art-b:${a.b};`;
-    const glyphHtml=a.photo_id?'':`<span class="card-glyph">${a.glyph}</span>`;
-    const favHtml=a.id!=null?`<span class="fav-btn${FAVORITE_IDS.has(Number(a.id))?' active':''}" data-anime-id="${a.id}" role="button" tabindex="0" onclick="onFavBtnClick(event,${a.id})" onkeydown="if(event.key==='Enter'||event.key===' '){onFavBtnClick(event,${a.id})}" aria-label="Sevimlilarga qo'shish">
-        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
-      </span>`:'';
-    card.innerHTML=`
-      <div class="card-art" style="${artStyle}">
-        ${favHtml}
-        ${tagHtml}${ratingHtml}
-        ${glyphHtml}
-        ${epHtml}
-      </div>
-      <div class="card-body">
-        <div class="card-title">${a.title}</div>
-        <div class="card-meta mono">${a.meta}</div>
-      </div>`;
-    el.appendChild(card);
-  });
-}
-
-function renderAllGrid(list){
-  const grid=document.getElementById('allGrid');
-  const countEl=document.getElementById('allCount');
-  if(countEl)countEl.textContent=list.length?`${list.length} ta`:'';
-  if(!list.length){
-    grid.innerHTML='<div class="all-empty">Hozircha anime topilmadi</div>';
-    return;
-  }
-  grid.innerHTML='';
-  list.forEach(a=>{
-    const key=registerDetail(a);
-    const card=document.createElement('a');
-    card.className='all-card';
-    card.href=animeLink(a);
-    card.onclick=(e)=>{e.preventDefault();openDetail(key);};
-    const ratingHtml=a.rating?`<span class="card-rating">${a.rating}</span>`:'';
-    const epHtml=a.ep?`<span class="card-ep">${a.ep}</span>`:'';
-    const artStyle=a.photo_id
-      ?`background-image:url('/api/photo/${a.photo_id}');background-size:cover;background-position:center;`
-      :`--art-a:${a.a};--art-b:${a.b};`;
-    const glyphHtml=a.photo_id?'':`<span class="card-glyph">${a.glyph}</span>`;
-    const favHtml=a.id!=null?`<span class="fav-btn${FAVORITE_IDS.has(Number(a.id))?' active':''}" data-anime-id="${a.id}" role="button" tabindex="0" onclick="onFavBtnClick(event,${a.id})" onkeydown="if(event.key==='Enter'||event.key===' '){onFavBtnClick(event,${a.id})}" aria-label="Sevimlilarga qo'shish">
-        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
-      </span>`:'';
-    card.innerHTML=`
-      <div class="card-art" style="${artStyle}">
-        ${favHtml}${ratingHtml}
-        ${glyphHtml}
-        ${epHtml}
-      </div>
-      <div class="card-body">
-        <div class="card-title">${a.title}</div>
-        <div class="card-meta mono">${a.meta}</div>
-      </div>`;
-    grid.appendChild(card);
-  });
-}
-
-// ---------- Bosh sahifadagi yagona "Barcha animelar" grid ----------
-// Avvalgi 3 ta alohida qator ("Yangi qo'shilganlar", "Mashhur animelar",
-// "O'zbek tilida dublyaj") o'rniga — bitta grid, "Ko'proq ko'rsatish"
-// tugmasi bilan bosqichma-bosqich ko'rsatiladi. Ma'lumot bir marta
-// (ALL_ANIMES) yuklanadi, tugma esa shu ro'yxatdan navbatdagi qismini ochadi.
-const HOME_PAGE_SIZE=12;
-let homeShownCount=0;
-function renderHomeGrid(reset){
-  const grid=document.getElementById('homeGrid');
-  const btn=document.getElementById('loadMoreBtn');
-  const emptyEl=document.getElementById('homeEmpty');
-  if(reset){grid.innerHTML='';homeShownCount=0;}
-  if(!ALL_ANIMES.length){
-    if(emptyEl)emptyEl.style.display='block';
-    if(btn)btn.style.display='none';
-    return;
-  }
-  if(emptyEl)emptyEl.style.display='none';
-  const next=ALL_ANIMES.slice(homeShownCount,homeShownCount+HOME_PAGE_SIZE);
-  next.forEach(a=>{
-    const key=registerDetail(a);
-    const card=document.createElement('a');
-    card.className='all-card';
-    card.href=animeLink(a);
-    card.onclick=(e)=>{e.preventDefault();openDetail(key);};
-    const ratingHtml=a.rating?`<span class="card-rating">${a.rating}</span>`:'';
-    const epHtml=a.ep?`<span class="card-ep">${a.ep}</span>`:'';
-    const artStyle=a.photo_id
-      ?`background-image:url('/api/photo/${a.photo_id}');background-size:cover;background-position:center;`
-      :`--art-a:${a.a};--art-b:${a.b};`;
-    const glyphHtml=a.photo_id?'':`<span class="card-glyph">${a.glyph}</span>`;
-    const favHtml=a.id!=null?`<span class="fav-btn${FAVORITE_IDS.has(Number(a.id))?' active':''}" data-anime-id="${a.id}" role="button" tabindex="0" onclick="onFavBtnClick(event,${a.id})" onkeydown="if(event.key==='Enter'||event.key===' '){onFavBtnClick(event,${a.id})}" aria-label="Sevimlilarga qo'shish">
-        <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-10-9.3C.5 8 2 4.5 5.3 4A5 5 0 0 1 12 7a5 5 0 0 1 6.7-3c3.3.5 4.8 4 3.3 7.2-2.5 4.7-10 9.3-10 9.3z"/></svg>
-      </span>`:'';
-    card.innerHTML=`
-      <div class="card-art" style="${artStyle}">
-        ${favHtml}${ratingHtml}
-        ${glyphHtml}
-        ${epHtml}
-      </div>
-      <div class="card-body">
-        <div class="card-title">${a.title}</div>
-        <div class="card-meta mono">${a.meta}</div>
-      </div>`;
-    grid.appendChild(card);
-  });
-  homeShownCount+=next.length;
-  if(btn)btn.style.display=homeShownCount<ALL_ANIMES.length?'':'none';
-}
-function showMoreHome(){renderHomeGrid(false);}
-
-function openAllAnime(mode){
-  let list=ALL_ANIMES;
-  let title="Yangi qo'shilganlar";
-  if(mode==='popular'){
-    list=[...ALL_ANIMES].sort((x,y)=>(y.views||0)-(x.views||0));
-    title='Mashhur animelar';
-  }else if(mode==='dub'){
-    list=ALL_ANIMES.filter(a=>/dublyaj|dub|uzb/i.test(`${a.category||''} ${a.genre||''}`));
-    title="O'zbek tilida dublyaj";
-  }else if(mode==='serial'){
-    list=ALL_ANIMES.filter(a=>a.media_type!=='film');
-    title='Seriallar';
-  }else if(mode==='film'){
-    list=ALL_ANIMES.filter(a=>a.media_type==='film');
-    title='Filmlar';
-  }else if(mode==='all'){
-    title='Barcha animelar';
-  }else if(mode&&mode!=='new'){
-    const q=mode.toLowerCase();
-    list=ALL_ANIMES.filter(a=>`${a.genre||''} ${a.category||''}`.toLowerCase().includes(q));
-    title=mode;
-  }
-  document.getElementById('allTitle').textContent=title;
-  renderAllGrid(list);
-  document.getElementById('allOverlay').classList.add('open');
-  document.body.style.overflow='hidden';
-}
-function closeAllAnime(){
-  document.getElementById('allOverlay').classList.remove('open');
-  document.body.style.overflow='';
-}
-
-function renderTagCloud(tags){
-  const el=document.getElementById('tagCloud');
-  el.innerHTML='';
-  tags.forEach((t,i)=>{
-    const [emoji,color]=chipIcon(t,i);
-    const chip=document.createElement('a');
-    chip.className='tag-chip';
-    chip.href=BOT_URL;
-    chip.innerHTML=`<span class="tci" style="background:${color}">${emoji}</span>${t}`;
-    el.appendChild(chip);
-  });
-  renderCatalogGenres(tags);
-}
-
-function renderCatalogGenres(tags){
-  const el=document.getElementById('catalogGenres');
-  if(!el)return;
-  el.innerHTML='';
-  tags.forEach(t=>{
-    const link=document.createElement('a');
-    link.className='cat-link';
-    link.href='javascript:void(0)';
-    link.textContent=t;
-    link.onclick=()=>{closeCatalog();openAllAnime(t);};
-    el.appendChild(link);
-  });
-}
-
-let ALL_ANIMES=[];
-function openSearch(){
-  document.getElementById('searchOverlay').classList.add('open');
-  document.getElementById('searchInput').focus();
-}
-function closeSearch(){
-  document.getElementById('searchOverlay').classList.remove('open');
-  document.getElementById('searchInput').value='';
-  doSearch('');
-}
-function doSearch(query){
-  const box=document.getElementById('searchResults');
-  const q=query.trim().toLowerCase();
-  if(!q){box.innerHTML='<div class="search-hint">Anime nomini yozishni boshlang</div>';return;}
-  const results=ALL_ANIMES.filter(a=>(a.title||'').toLowerCase().includes(q)).slice(0,20);
-  if(!results.length){box.innerHTML='<div class="search-hint">Hech narsa topilmadi</div>';return;}
-  box.innerHTML=results.map(a=>{
-    const key=registerDetail(a);
-    const artStyle=a.photo_id?`background-image:url('/api/photo/${a.photo_id}');background-size:cover;background-position:center;`:`--art-a:${a.a};--art-b:${a.b};`;
-    const glyph=a.photo_id?'':(a.glyph||(a.title||'?').charAt(0).toUpperCase());
-    return `<a class="search-item" href="${animeLink(a)}" onclick="event.preventDefault();closeSearch();openDetail('${key}');">
-      <div class="search-item-art" style="${artStyle}">${glyph}</div>
-      <div><div class="search-item-title">${a.title}</div><div class="search-item-meta">${a.meta||''}</div></div>
-    </a>`;
-  }).join('');
-}
-
-let HERO_LIST=[];
-let HERO_INDEX=0;
-let HERO_TIMER=null;
-
-function showHeroSlide(idx){
-  const list=HERO_LIST;
-  if(!list.length)return;
-  HERO_INDEX=(idx+list.length)%list.length;
-  const a=list[HERO_INDEX];
-  const hero=document.getElementById('heroCard');
-  const key=registerDetail(a);
-  hero.href=animeLink(a);
-  hero.onclick=(e)=>{e.preventDefault();openDetail(key);};
-  const glyph=hero.querySelector('.hero-glyph');
-  const aura=hero.querySelector('.hero-aura');
-  const halftone=hero.querySelector('.hero-halftone');
-  if(a.photo_id){
-    hero.style.setProperty('--art-a','#1b1033');
-    hero.style.backgroundImage=`linear-gradient(100deg,rgba(0,0,0,.95) 0%,rgba(0,0,0,.75) 30%,rgba(0,0,0,.25) 60%,rgba(0,0,0,.08) 100%),linear-gradient(0deg,rgba(0,0,0,.9) 0%,rgba(0,0,0,.05) 55%),url('/api/photo/${a.photo_id}')`;
-    hero.style.backgroundSize='cover';
-    hero.style.backgroundPosition='center';
-    if(glyph)glyph.style.display='none';
-    if(aura)aura.style.display='none';
-    if(halftone)halftone.style.display='none';
-  }else{
-    hero.style.backgroundImage='';
-    hero.style.setProperty('--art-a',a.a||'#1b1033');
-    hero.style.setProperty('--art-b',a.b||'#05030f');
-    if(glyph){glyph.style.display='';glyph.textContent=a.glyph||(a.title||'?').charAt(0).toUpperCase();}
-    if(aura)aura.style.display='';
-    if(halftone)halftone.style.display='';
-  }
-  {
-    const titleEl=document.querySelector('.hero-title');
-    const raw=(a.title||'');
-    const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-    const words=raw.trim().split(/\s+/);
-    if(words.length>1){
-      const last=words.pop();
-      titleEl.innerHTML='<span class="hero-title-lead">'+esc(words.join(' '))+'</span><br><span class="accent">'+esc(last)+'</span>';
-    }else{
-      titleEl.textContent=raw;
-    }
-  }
-  document.querySelector('.hero-desc').textContent=(a.description||a.genre||'').slice(0,140);
-  const isFilm=a.media_type==='film';
-  const metaEl=document.querySelector('.hero-meta');
-  const pills=[];
-  if(a.rating)pills.push(`<span class="rating">${a.rating}</span>`);
-  if(a.year)pills.push(`<span>${a.year}</span>`);
-  pills.push(isFilm?'<span>Film</span>':`<span>${a.episode_count||0} qism</span>`);
-  pills.push('<span>HD</span>');
-  metaEl.innerHTML=pills.join('');
-  document.querySelectorAll('.hero-dot').forEach((d,i)=>d.classList.toggle('active',i===HERO_INDEX));
-}
-
-function goToHeroSlide(i){
-  showHeroSlide(i);
-  restartHeroAutoplay();
-}
-
-function restartHeroAutoplay(){
-  if(HERO_TIMER)clearInterval(HERO_TIMER);
-  if(HERO_LIST.length>1){
-    HERO_TIMER=setInterval(()=>showHeroSlide(HERO_INDEX+1),5000);
-  }
-}
-
-function renderHero(list){
-  if(!list||!list.length)return;
-  HERO_LIST=list;
-  const dotsWrap=document.querySelector('.hero-dots');
-  dotsWrap.innerHTML=list.map((_,i)=>`<div class="hero-dot${i===0?' active':''}" onclick="event.stopPropagation();goToHeroSlide(${i})"></div>`).join('');
-  showHeroSlide(0);
-  restartHeroAutoplay();
-
-  const hero=document.getElementById('heroCard');
-  let touchStartX=null;
-  hero.addEventListener('touchstart',(e)=>{touchStartX=e.touches[0].clientX;},{passive:true});
-  hero.addEventListener('touchend',(e)=>{
-    if(touchStartX===null)return;
-    const dx=e.changedTouches[0].clientX-touchStartX;
-    if(Math.abs(dx)>40){
-      goToHeroSlide(HERO_INDEX+(dx<0?1:-1));
-    }
-    touchStartX=null;
-  },{passive:true});
-}
-
-async function loadRealData(){
-  try{
-    const [animesRes,catsRes]=await Promise.all([fetch(API_ANIMES),fetch(API_CATEGORIES)]);
-    if(!animesRes.ok||!catsRes.ok)throw new Error('bad response');
-    const animes=await animesRes.json();
-    const cats=await catsRes.json();
-    if(!Array.isArray(animes)||!animes.length)throw new Error('empty');
-
-    const categories=Array.isArray(cats)&&cats.length?cats:FALLBACK_CATEGORIES;
-    renderTagCloud(categories);
-
-    let heroList=animes.slice(0,5).map((a,i)=>toCard(a,i,{}));
-    try{
-      const bannersRes=await fetch(API_BANNERS);
-      if(bannersRes.ok){
-        const banners=await bannersRes.json();
-        if(Array.isArray(banners)&&banners.length){
-          const animeById={};
-          animes.forEach(a=>{animeById[a.id]=a;});
-          const bannerCards=banners.map((b,i)=>{
-            const a=animeById[b.anime_id]||{};
-            return toCard({...a,id:b.anime_id??a.id},i,{
-              title:b.title||a.title,
-              description:b.subtitle||a.description,
-              photo_id:b.photo_id||a.photo_id
-            });
-          }).filter(c=>c.id!=null);
-          if(bannerCards.length)heroList=bannerCards;
-        }
-      }
-    }catch(e){/* banner ixtiyoriy — anime asosidagi hero bilan davom etiladi */}
-    renderHero(heroList);
-
-    ALL_ANIMES=animes.map((a,i)=>toCard(a,i,{}));
-    renderHomeGrid(true);
-  }catch(e){
-    // Server hali yangi endpoint bilan joylanmagan yoki vaqtinchalik ishlamayapti —
-    // sahifa baribir chiroyli ko'rinishi uchun namunaviy ma'lumotga qaytamiz.
-    renderTagCloud(FALLBACK_CATEGORIES);
-    renderHero(FALLBACK_NEW);
-    ALL_ANIMES=[...FALLBACK_NEW,...FALLBACK_POPULAR,...FALLBACK_DUB];
-    renderHomeGrid(true);
-  }
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('revealed'); io.unobserve(e.target); } });
-    }, { threshold: .1 });
-    document.querySelectorAll('.panel,.card').forEach(el => io.observe(el));
-  } else {
-    document.querySelectorAll('.panel,.card').forEach(el => el.classList.add('revealed'));
-  }
-}
-
-loadRealData();
-loadFavoriteIds();
+const $=s=>document.querySelector(s),BOT='https://t.me/ANIFILM_BOT';
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ls=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
+const sv=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let TOKEN=ls('af_token',null),FAV=new Set(ls('af_fav_cache',[])),PROG=ls('af_prog',{}),A=[],CATS=[],BAN=[],demo=false,HT,HI=0,HL=[],IO=null,AM='login',FPM='',BUSY=0;
+const I={home:'<path d="M3 11l9-8 9 8v10H3z"/>',grid:'<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',heart:'<path d="M12 20s-8-5-9.5-10A5 5 0 0 1 12 6a5 5 0 0 1 9.5 4C20 15 12 20 12 20z"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-5.500 8-5.500s6.500 1.500 8 5.500"/>',play:'<path d="M7 4l13 8-13 8z" fill="currentColor"/>'};
+const ic=n=>`<svg class="i" viewBox="0 0 24 24">${I[n]}</svg>`;
+const hue=id=>(Number(id)*47)%360,pic=a=>`/api/photo/${a.photo_id}`;
+const po=(a,x='')=>`<div class="po" style="--h:${hue(a.id)}">${a.photo_id?`<img loading="lazy" onload="this.classList.add('ld')" src="${pic(a)}" alt="${esc(a.title)}">`:`<span class="ph disp">${esc((a.title||'?')[0])}</span>`}${x}</div>`;
+const isNew=a=>a.last_activity_at&&Date.now()-Date.parse(String(a.last_activity_at).replace(' ','T'))<3*864e5;
+const card=(a,x='')=>`<a class="c" href="/anime/${a.id}">${po(a,(isNew(a)?'<span class="bd">Yangi</span>':'')+(a.media_type==='film'?'<span class="bd r">Film</span>':a.episode_count?`<span class="bd r">${a.episode_count} qism</span>`:''))}${x}<h3>${esc(a.title)}</h3><small>${esc(a.year||'')}</small></a>`;
+const row=(t,L,cls='',more='')=>L.length?`<section><div class="sh"><h2 class="disp">${t}</h2>${more}</div><div class="row ${cls}">${L.map((a,i)=>card(a,cls==='top10'?`<span class="n disp">${i+1}</span>`:'')).join('')}</div></section>`:'';
+const empty=(t,x='')=>`<div class="wrap pad" style="text-align:center"><p>${t}</p><br><p>${x}</p></div>`;
+const DEMO=[['Sulh Ovchisi',2026,'Aksiya',24],['Qora Daftar',2006,'Drama',37],['Samuray Yoʻli',2021,'Sarguzasht',12],['Maktab Kunlari',2023,'Komediya',11],['Yulduz Tunlari',2022,'Fantastika',13],['Ikki Dunyo',2024,'Romantika',12]].map((x,i)=>({id:i+1,title:x[0],year:x[1],category:x[2],genre:x[2],media_type:'serial',episode_count:x[3],views:900-i*100,description:'Namuna tavsif: server bilan aloqa oʻrnatilgach, haqiqiy animelar shu yerda koʻrinadi.'}));
+async function api(u,o={}){o.headers=Object.assign({'Content-Type':'application/json'},TOKEN?{Authorization:'Bearer '+TOKEN}:{});const r=await fetch(u,o);if(r.status===401&&TOKEN)logout();return r}
+async function getJ(u){try{const r=await fetch(u);return r.ok?await r.json():null}catch(e){return null}}
+function stop(){clearInterval(HT);clearTimeout(HT);document.onkeydown=null;document.body.classList.remove('lo');if(IO){IO.disconnect();IO=null}document.title='AniFilm.uz — Oʻzbek tilidagi animelar'}
+function nav(u){history.pushState(null,'',u);go()}
+function rnd(){if(A.length)nav('/anime/'+A[Math.floor(Math.random()*A.length)].id)}
+function go(){const p=location.pathname,s=p.split('/').filter(Boolean),P=new URLSearchParams(location.search),k=s[0]==='anime'||s[0]==='watch'?'catalog':(s[0]||'home');
+document.querySelectorAll('[data-t]').forEach(e=>e.classList.toggle('on',e.dataset.t===k));stop();scrollTo(0,0);$('link[rel=canonical]').href='https://www.anifilm.uz'+p;
+({catalog:()=>catalog(P),anime:()=>animePage(parseInt(s[1])),watch:()=>watch(parseInt(s[1]),parseInt(s[2])),favorites:favs,'reset-password':resetPage}[s[0]]||home)()}
+/* ---------- bosh sahifa ---------- */
+function heroList(){let L=Array.isArray(BAN)?BAN.map(b=>{const a=A.find(x=>x.id==b.anime_id)||{};return Object.assign({},a,{id:b.anime_id,title:b.title||a.title,description:b.subtitle||a.description,img:b.photo_id||a.photo_id})}).filter(x=>x.id&&x.title):[];if(!L.length)L=A.slice(0,5).map(a=>Object.assign({},a,{img:a.photo_id}));return L}
+function heroShow(i){HI=(i+HL.length)%HL.length;const a=HL[HI],f=a.media_type==='film';
+$('#hero').innerHTML=`<div class="bg" style="${a.img?`background-image:url(/api/photo/${a.img})`:`background:hsl(${hue(a.id)} 45% 28%)`}"></div><div class="tx"><div class="wrap"><h1 class="disp">${esc(a.title)}</h1><div class="meta">${[a.year,f?'Film':a.episode_count?a.episode_count+' qism':'',a.category].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join('')}</div><p>${esc((a.description||'').slice(0,160))}</p><a class="btn" href="/watch/${a.id}">${ic('play')} Koʻrish</a><a class="btn g" href="/anime/${a.id}">Batafsil</a></div></div><div class="dots">${HL.map((_,k)=>`<i class="${k===HI?'on':''}"></i>`).join('')}</div>`}
+function heroStart(){HL=heroList();if(!HL.length)return;heroShow(0);if(HL.length>1&&!matchMedia('(prefers-reduced-motion:reduce)').matches)HT=setInterval(()=>heroShow(HI+1),6000);
+let x0=null;const h=$('#hero');h.ontouchstart=e=>{x0=e.touches[0].clientX};h.ontouchend=e=>{if(x0===null)return;const d=e.changedTouches[0].clientX-x0;if(Math.abs(d)>40)heroShow(HI+(d<0?1:-1));x0=null}}
+const TPL=[()=>[...A].sort((x,y)=>(y.views||0)-(x.views||0)),()=>[...A].sort((x,y)=>String(y.last_activity_at||'').localeCompare(String(x.last_activity_at||''))||y.id-x.id),()=>A.filter(a=>a.media_type==='film').sort((x,y)=>(y.views||0)-(x.views||0))];
+const side=()=>`<aside class="side"><div class="sh"><h2 class="disp">Top animelar</h2></div><div class="tb">${['Mashhur','Yangi','Filmlar'].map((t,i)=>`<button onclick="sideTab(${i})">${t}</button>`).join('')}</div><div id="tpl"></div></aside>`;
+function sideTab(i){document.querySelectorAll('.side .tb button').forEach((b,k)=>b.classList.toggle('on',k===i));$('#tpl').innerHTML=TPL[i]().slice(0,10).map((a,k)=>`<a class="tp" href="/anime/${a.id}"><b class="disp">${k+1}</b>${po(a)}<div><h3>${esc(a.title)}</h3><small>${esc([a.year,a.media_type==='film'?'Film':a.episode_count?a.episode_count+' qism':''].filter(Boolean).join(' · '))}</small></div></a>`).join('')||'<p class="dm">Hozircha yoʻq</p>'}
+function home(){const nw=[...A].sort((x,y)=>String(y.last_activity_at||'').localeCompare(String(x.last_activity_at||''))||y.id-x.id),
+pop=[...A].sort((x,y)=>(y.views||0)-(x.views||0)).slice(0,10),
+cont=Object.entries(PROG).sort((a,b)=>b[1].u-a[1].u).map(([id,p])=>({a:A.find(x=>x.id==id),p})).filter(x=>x.a).slice(0,12),cc={};
+A.forEach(a=>{const c=(a.category||'').trim();if(c)cc[c]=(cc[c]||0)+1});
+const tg=Object.keys(cc).sort((x,y)=>cc[y]-cc[x]).slice(0,3),q=g=>encodeURIComponent(g);
+$('#app').innerHTML=`<div class="hero" id="hero"></div><div class="wrap hm"><div style="min-width:0">${demo?'<p class="note">Server bilan aloqa yoʻq — namuna maʼlumot koʻrsatilmoqda.</p>':''}`+
+(cont.length?`<section><div class="sh"><h2 class="disp">Davom ettirish</h2></div><div class="row">${cont.map(({a,p})=>`<a class="c" href="/watch/${a.id}/${p.e}">${po(a,`<span class="bd r">${p.n}-qism</span>`)}<div class="pg"><i style="width:${p.d?Math.min(100,p.t/p.d*100):0}%"></i></div><h3>${esc(a.title)}</h3></a>`).join('')}</div></section>`:'')+
+row('Yangi qismlar',nw.slice(0,14),'','<a href="/catalog?sort=new">Hammasi</a>')+
+(CATS.length?`<section><div class="sh"><h2 class="disp">Janrlar</h2></div><div class="chips">${CATS.map(c=>`<a class="chip" href="/catalog?genre=${q(c)}">${esc(c)}</a>`).join('')}</div></section>`:'')+
+tg.map(g=>row(esc(g),A.filter(a=>(a.category||'').trim()===g).slice(0,14),'',`<a href="/catalog?genre=${q(g)}">Hammasi</a>`)).join('')+
+row('Filmlar',A.filter(a=>a.media_type==='film').slice(0,14),'','<a href="/catalog?type=film">Hammasi</a>')+'</div>'+side()+'</div>';heroStart();sideTab(0)}
+/* ---------- katalog ---------- */
+function catalog(P){const g=P.get('genre')||'',t=P.get('type')||'',s=P.get('sort')||'new',q=P.get('q')||'',l=P.get('l')||'',gl=g.toLowerCase(),ql=q.toLowerCase();
+const L=A.filter(a=>(!g||`${a.category||''},${a.genre||''}`.toLowerCase().includes(gl))&&(!t||(t==='film')===(a.media_type==='film'))&&(!q||(a.title||'').toLowerCase().includes(ql))&&(!l||(a.title||'').toUpperCase().startsWith(l)));
+L.sort(s==='pop'?(x,y)=>(y.views||0)-(x.views||0):s==='az'?(x,y)=>(x.title||'').localeCompare(y.title||''):s==='year'?(x,y)=>(parseInt(y.year)||0)-(parseInt(x.year)||0):(x,y)=>y.id-x.id);
+const o=(v,l,c)=>`<option value="${esc(v)}"${v===c?' selected':''}>${l}</option>`;
+$('#app').innerHTML=`<div class="wrap"><h1 class="disp ttl">${q?'Qidiruv: '+esc(q):l?'Harf: '+esc(l):g?esc(g):'Katalog'}</h1><div class="fl"><select class="f" id="fg">${o('','Barcha janrlar',g)}${CATS.map(c=>o(c,esc(c),g)).join('')}</select><select class="f" id="ft">${o('','Seriallar va filmlar',t)}${o('serial','Seriallar',t)}${o('film','Filmlar',t)}</select><select class="f" id="fs">${o('new','Yangilari',s)}${o('pop','Mashhurlari',s)}${o('year','Yil boʻyicha',s)}${o('az','Alifbo boʻyicha',s)}</select></div><p class="dm" style="margin:10px 0 14px">${L.length?L.length+' ta natija':'Hech narsa topilmadi'}</p><div class="grid" id="cg"></div><div id="sen"></div></div>`;
+['fg','ft','fs'].forEach(i=>{$('#'+i).onchange=()=>{nav('/catalog?'+new URLSearchParams(Object.entries({genre:$('#fg').value,type:$('#ft').value,sort:$('#fs').value,q}).filter(x=>x[1])))}});
+let n=0;const more=()=>{$('#cg').insertAdjacentHTML('beforeend',L.slice(n,n+24).map(a=>card(a)).join(''));n+=24;if(n>=L.length&&IO){IO.disconnect();IO=null}};
+more();if(n<L.length){IO=new IntersectionObserver(e=>{if(e[0].isIntersecting)more()},{rootMargin:'500px'});IO.observe($('#sen'))}}
+/* ---------- anime sahifasi ---------- */
+async function animePage(id){const ap=$('#app');ap.innerHTML='<div class="wrap pad dm">Yuklanmoqda…</div>';const d=await getJ('/api/public/animes/'+id);
+const a=Object.assign({},A.find(x=>x.id==id)||{},d||{});if(!a.title){ap.innerHTML=empty('Anime topilmadi','<a class="btn" href="/catalog">Katalogga qaytish</a>');return}
+const eps=(d&&d.episodes)||[],p=PROG[id],f=a.media_type==='film',seen=(p&&p.s)||[],res=p&&eps.find(e=>e.id==p.e),tgt=res||eps.find(e=>!e.locked)||eps[0],
+gl=(a.genre||'').split(',').map(x=>x.trim()).filter(Boolean),sim=A.filter(x=>x.id!=a.id&&a.category&&(x.category||'').trim()===(a.category||'').trim()).slice(0,12);
+document.title=a.title+' — AniFilm.uz';
+ap.innerHTML=`<div class="ad"><div class="bgb" style="${a.photo_id?`background-image:url(${pic(a)})`:`background:hsl(${hue(a.id)} 45% 28%)`}"></div><div class="wrap">${po(a)}<div><h1 class="disp ttl" style="margin-top:0">${esc(a.title)}</h1><div class="meta">${[a.year,f?'Film':'Serial',a.country,a.language,a.status==='finished'?'Tugagan':(a.status==='ongoing'&&!f?'Davom etmoqda':''),a.views?a.views+' marta koʻrilgan':''].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join('')}</div><div class="chips">${gl.map(g=>`<a class="chip" href="/catalog?genre=${encodeURIComponent(g)}">${esc(g)}</a>`).join('')}</div><p class="desc">${esc(a.description||'')}</p><div class="bar">${tgt?`<a class="btn" href="/watch/${id}/${tgt.id}">${ic('play')} ${res?`Davom ettirish · ${p.n}-qism`:f?'Filmni koʻrish':'Koʻrishni boshlash'}</a>`:`<a class="btn" href="${BOT}?start=anime_${id}">Botda koʻrish</a>`}<button class="btn g${FAV.has(+id)?' on':''}" onclick="toggleFav(${+id},this)">${ic('heart')} Sevimli</button><button class="btn g" onclick="share()">Ulashish</button></div></div></div></div><div class="wrap">${!f&&eps.length?`<section><div class="sh"><h2 class="disp">Qismlar</h2></div><div class="eps">${eps.map(e=>`<a class="ep${res&&e.id==res.id?' on':''}${seen.includes(e.id)?' seen':''}${e.locked?' lk':''}" href="/watch/${id}/${e.id}">${e.n}</a>`).join('')}</div></section>`:''}${row('Oʻxshash animelar',sim)}</div>`}
+function share(){const u=location.href;if(navigator.share)navigator.share({title:document.title,url:u}).catch(()=>{});else{if(navigator.clipboard)navigator.clipboard.writeText(u);alert('Havola nusxalandi')}}
+/* ---------- tomosha sahifasi ---------- */
+async function watch(aid,eid){const ap=$('#app');ap.innerHTML='<div class="wrap pad dm">Yuklanmoqda…</div>';const d=await getJ('/api/public/animes/'+aid),eps=(d&&d.episodes)||[];
+if(!eps.length){ap.innerHTML=empty('Bu animening qismlari saytda hali mavjud emas',`<a class="btn" href="${BOT}?start=anime_${aid}">Botda koʻrish</a>`);return}
+const p=PROG[aid];let i=eps.findIndex(e=>e.id==eid);if(i<0){i=p?eps.findIndex(e=>e.id==p.e):-1;if(i<0)i=Math.max(0,eps.findIndex(e=>!e.locked))}
+const e=eps[i],pv=eps[i-1],nx=eps[i+1],seen=(p&&p.s)||[];
+const lock=`<div class="ov"><div><h2 class="disp">Premium qism</h2><p class="dm">Bu qism hozircha faqat Premium foydalanuvchilar uchun.</p><br><a class="btn" href="${BOT}?start=anime_${aid}">Botda ochish</a></div></div>`;
+ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" controls playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span><a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></div><div class="tg"><label><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}>Avto keyingi qism</label><label><input type="checkbox" id="tl">Chiroqni oʻchirish</label><button class="btn g" onclick="share()" style="margin:0">Ulashish</button></div><div class="bar">${pv?`<a class="btn g" href="/watch/${aid}/${pv.id}">‹ Oldingi</a>`:''}${nx?`<a class="btn" href="/watch/${aid}/${nx.id}">Keyingi ›</a>`:''}<select id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button class="btn g" id="sk">+85 soniya</button></div></div><div class="eps">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}">${x.n}</a>`).join('')}</div></div>`;
+document.title=`${d.title} · ${e.n}-qism — AniFilm.uz`;
+if(TOKEN)api('/api/site/history',{method:'POST',body:JSON.stringify({anime_id:Number(aid)})}).catch(()=>{});
+const v=$('#v');if(!v){$('#sp').disabled=true;$('#sk').disabled=true;return}
+$('#sp').value=ls('af_speed',1);
+const save=end=>{const s=new Set((PROG[aid]||{}).s||[]);if(end||(v.duration&&v.currentTime>v.duration*.9))s.add(e.id);PROG[aid]={e:e.id,n:e.n,t:end?0:v.currentTime,d:v.duration||0,u:Date.now(),s:[...s]};sv('af_prog',PROG)};
+v.onloadedmetadata=()=>{v.playbackRate=ls('af_speed',1);if(p&&p.e==e.id&&p.t>5&&p.t<v.duration-20)v.currentTime=p.t};
+let lt=0;v.ontimeupdate=()=>{const n=Date.now();if(n-lt>4000){lt=n;save()}};v.onpause=()=>save();
+v.onended=()=>{save(true);if(nx&&!nx.locked&&ls('af_auto',true)){const o=document.createElement('div');o.className='ov';o.innerHTML=`<div><h2 class="disp">Keyingi: ${nx.n}-qism</h2><p class="dm">5 soniyadan soʻng boshlanadi</p><br><a class="btn" href="/watch/${aid}/${nx.id}">Hozir</a><button class="btn g" id="cn">Bekor qilish</button></div>`;$('#pl').appendChild(o);HT=setTimeout(()=>{nav(`/watch/${aid}/${nx.id}`)},5000);$('#cn').onclick=()=>{clearTimeout(HT);o.remove()}}};
+v.onerror=()=>{$('#pl').insertAdjacentHTML('beforeend',`<div class="ov"><div><h2 class="disp">Video ochilmadi</h2><p class="dm">Birozdan soʻng qayta urinib koʻring yoki botda tomosha qiling.</p><br><button class="btn g" onclick="go()">Qayta urinish</button><a class="btn" href="${BOT}?start=anime_${aid}">Botda koʻrish</a></div></div>`)};
+$('#sp').onchange=ev=>{sv('af_speed',+ev.target.value);v.playbackRate=+ev.target.value};$('#sk').onclick=()=>{v.currentTime+=85};$('#ta').onchange=ev=>sv('af_auto',ev.target.checked);$('#tl').onchange=ev=>document.body.classList.toggle('lo',ev.target.checked);
+document.onkeydown=ev=>{if(/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))return;if(ev.key==='ArrowRight')v.currentTime+=10;else if(ev.key==='ArrowLeft')v.currentTime-=10;else if(ev.key==='f'&&v.requestFullscreen)v.requestFullscreen();else if(ev.key==='m')v.muted=!v.muted}}
+/* ---------- qidiruv ---------- */
+function S(o){$('#srch').classList.toggle('on',!!o);if(o){$('#si').value='';sr('');setTimeout(()=>$('#si').focus(),50)}}
+function sr(q){q=q.trim().toLowerCase();const L=q?A.filter(a=>(a.title||'').toLowerCase().includes(q)).slice(0,8):[];
+$('#sres').innerHTML=!q?'<p class="dm">Anime nomini yozing</p>':L.length?L.map(a=>`<a href="/anime/${a.id}" onclick="S(0)">${po(a)}<div><b>${esc(a.title)}</b><br><small class="dm">${esc(a.year||'')}</small></div></a>`).join('')+`<a href="/catalog?q=${encodeURIComponent(q)}" onclick="S(0)"><b style="color:var(--tq)">Barcha natijalar</b></a>`:'<p class="dm">Hech narsa topilmadi</p>'}
+/* ---------- hisob va sevimlilar ---------- */
+function auth(){$('#au').classList.add('on');authView()}
+function authClose(){$('#au').classList.remove('on');if(AM==='forgot'){AM='login';FPM=''}}
+async function authView(){const b=$('#aub'),x='<button class="ib" onclick="authClose()" aria-label="Yopish">✕</button>';
+if(AM==='forgot'){b.innerHTML=`<div class="sh"><h2 class="disp">Parolni tiklash</h2>${x}</div>`+(FPM?`<p>${esc(FPM)}</p><p class="dm">Xat kelmasa, «Spam» papkasini ham tekshiring. Havola 1 soat amal qiladi.</p><br><button class="btn" onclick="AM='login';FPM='';authView()">Kirishga qaytish</button>`:`<p class="dm">Roʻyxatdan oʻtgan emailingizni kiriting — parolni tiklash havolasini yuboramiz.</p><input class="f" id="a1" type="email" placeholder="Email" autocomplete="email" onkeydown="if(event.key==='Enter')authForgot()"><p class="er" id="aer"></p><button class="btn" onclick="authForgot()">Havola yuborish</button><button class="btn g" onclick="AM='login';authView()">Orqaga</button>`);return}
+if(TOKEN){let u=null;try{const r=await api('/api/site/me');if(r.ok)u=(await r.json()).user}catch(e){}
+if(u){b.innerHTML=`<div class="sh"><h2 class="disp">Profil</h2>${x}</div><p><b>${esc(u.display_name||u.email||u.phone)}</b></p><p class="dm">${esc(u.email||u.phone||'')}</p><br><a class="btn" href="/favorites" onclick="authClose()">Sevimlilar (${FAV.size})</a><button class="btn g" onclick="logout();authView()">Chiqish</button>`;return}}
+const L=AM==='login',t=L?'Kirish':'Roʻyxatdan oʻtish';
+b.innerHTML=`<div class="sh"><h2 class="disp">${t}</h2>${x}</div>`+(L?'<input class="f" id="a1" placeholder="Email yoki telefon" autocomplete="username"><input class="f" id="a2" type="password" placeholder="Parol" autocomplete="current-password"><a href="#" class="dm" style="display:inline-block;padding:10px 0;text-decoration:underline" onclick="forgot();return false">Parolni unutdim?</a>':'<input class="f" id="a1" type="email" placeholder="Email" autocomplete="email"><input class="f" id="a3" placeholder="Ismingiz" autocomplete="name"><input class="f" id="a2" type="password" placeholder="Parol (kamida 6 ta belgi)" autocomplete="new-password">')+`<p class="er" id="aer"></p><button class="btn" onclick="authGo()">${t}</button><button class="btn g" onclick="AM=AM==='login'?'reg':'login';authView()">${L?'Hisob yaratish':'Hisobim bor'}</button>`}
+async function authGo(){const e=$('#aer'),v=i=>($('#'+i)?$('#'+i).value:'').trim(),L=AM==='login';e.textContent='';
+const body=L?{identifier:v('a1'),password:$('#a2').value}:{email:v('a1'),phone:'',display_name:v('a3'),password:$('#a2').value};
+if(L?!body.identifier||!body.password:!body.email||body.password.length<6){e.textContent=L?'Barcha maydonlarni toʻldiring':'Email va kamida 6 belgili parol kiriting';return}
+try{const r=await fetch('/api/site/'+(L?'login':'register'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();if(!r.ok){e.textContent=d.error||'Xatolik yuz berdi';return}
+TOKEN=d.token;sv('af_token',TOKEN);await loadFav();authView()}catch(x){e.textContent='Tarmoq xatosi, qayta urinib koʻring'}}
+function forgot(){AM='forgot';FPM='';auth()}
+async function authForgot(){if(BUSY)return;const e=$('#aer'),em=($('#a1').value||'').trim().toLowerCase();e.textContent='';
+if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){e.textContent='Email manzilini toʻgʻri kiriting';return}
+BUSY=1;
+try{const r=await fetch('/api/site/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em})}),d=await r.json();
+if(!r.ok){e.textContent=d.error||'Xatolik yuz berdi';return}
+FPM=d.message||'Agar bu email roʻyxatdan oʻtgan boʻlsa, tiklash havolasi yuborildi.';authView()}catch(x){e.textContent='Tarmoq xatosi, qayta urinib koʻring'}finally{BUSY=0}}
+function resetPage(){const tk=new URLSearchParams(location.search).get('token')||'';document.title='Yangi parol — AniFilm.uz';
+$('#app').innerHTML=`<div class="wrap pad"><div class="box" style="margin:0 auto">`+(tk?`<h1 class="disp ttl" style="margin-top:0">Yangi parol</h1><p class="dm">Hisobingiz uchun yangi parol oʻrnating.</p><input class="f" id="rp1" type="password" placeholder="Yangi parol (kamida 6 ta belgi)" autocomplete="new-password"><input class="f" id="rp2" type="password" placeholder="Parolni takrorlang" autocomplete="new-password" onkeydown="if(event.key==='Enter')resetGo()"><p class="er" id="rer"></p><button class="btn" id="rb" onclick="resetGo()">Parolni oʻrnatish</button><br><a href="#" class="dm" style="display:inline-block;padding:10px 0;text-decoration:underline" onclick="forgot();return false">Havolani qayta soʻrash</a>`:`<h1 class="disp ttl" style="margin-top:0">Havola notoʻgʻri</h1><p class="dm">Parolni tiklash havolasi toʻliq emas yoki eskirgan.</p><br><button class="btn" onclick="forgot()">Havolani qayta soʻrash</button>`)+`</div></div>`}
+async function resetGo(){if(BUSY)return;const e=$('#rer'),p=$('#rp1').value,tk=new URLSearchParams(location.search).get('token')||'';e.textContent='';
+if(p.length<6){e.textContent='Parol kamida 6 ta belgidan iborat boʻlishi kerak';return}
+if(p!==$('#rp2').value){e.textContent='Parollar bir xil emas';return}
+BUSY=1;$('#rb').disabled=true;
+try{const r=await fetch('/api/site/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tk,password:p})}),d=await r.json();
+if(!r.ok){e.textContent=d.error||'Xatolik yuz berdi';return}
+history.replaceState(null,'','/');
+$('#app').innerHTML=`<div class="wrap pad"><div class="box" style="margin:0 auto"><h1 class="disp ttl" style="margin-top:0">Parol oʻzgartirildi</h1><p class="dm">Endi yangi parol bilan hisobingizga kirishingiz mumkin.</p><br><button class="btn" onclick="nav('/');AM='login';auth()">Kirish</button></div></div>`}catch(x){e.textContent='Tarmoq xatosi, qayta urinib koʻring'}finally{BUSY=0;const b=$('#rb');if(b)b.disabled=false}}
+function logout(){TOKEN=null;try{localStorage.removeItem('af_token')}catch(e){}FAV=new Set();sv('af_fav_cache',[])}
+async function loadFav(){if(!TOKEN)return;try{const r=await api('/api/site/favorites');if(r.ok){FAV=new Set((await r.json()).map(a=>a.id));sv('af_fav_cache',[...FAV])}}catch(e){}}
+async function toggleFav(id,btn){if(!TOKEN){auth();return}try{const r=await api('/api/site/favorite',{method:'POST',body:JSON.stringify({anime_id:id})});if(r.ok){const d=await r.json();d.active?FAV.add(id):FAV.delete(id);sv('af_fav_cache',[...FAV]);if(btn)btn.classList.toggle('on',d.active)}}catch(e){}}
+async function favs(){const ap=$('#app');if(!TOKEN){ap.innerHTML=empty('Sevimlilarni koʻrish uchun hisobingizga kiring','<button class="btn" onclick="auth()">Kirish</button>');return}
+ap.innerHTML='<div class="wrap pad dm">Yuklanmoqda…</div>';const L=(await getAuth('/api/site/favorites'))||[];
+ap.innerHTML=`<div class="wrap"><h1 class="disp ttl">Sevimlilar</h1>${L.length?`<div class="grid">${L.map(a=>card(a)).join('')}</div>`:'<p class="dm">Hali sevimlilar yoʻq. Anime sahifasidagi «Sevimli» tugmasini bosing.</p>'}</div>`}
+async function getAuth(u){try{const r=await api(u);return r.ok?await r.json():null}catch(e){return null}}
+/* ---------- ishga tushirish ---------- */
+document.querySelectorAll('[data-i]').forEach(e=>{e.innerHTML=ic(e.dataset.i)+(e.dataset.l?`<span>${e.dataset.l}</span>`:'')});
+addEventListener('popstate',go);
+document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
+$('#az').innerHTML='<span class="dm">A–Z:</span>'+[...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(l=>`<a href="/catalog?sort=az&l=${l}">${l}</a>`).join('');
+(async()=>{const[r,c,b]=await Promise.all([getJ('/api/public/animes'),getJ('/api/public/categories'),getJ('/api/public/banners')]);
+if(Array.isArray(r)&&r.length){A=r;CATS=Array.isArray(c)?c:[];BAN=Array.isArray(b)?b:[]}else{demo=true;A=DEMO;CATS=['Aksiya','Drama','Komediya','Fantastika']}
+loadFav();go()})();
 </script>
-
 </body>
 </html>
