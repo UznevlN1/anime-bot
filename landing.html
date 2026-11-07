@@ -226,8 +226,8 @@ footer .bot .btn{margin:0;min-height:52px;padding:0 clamp(22px,3vw,34px);font-si
 .pc-btn span{display:none}
 .pc-time{padding:0 10px;font-size:13px;font-variant-numeric:tabular-nums;color:#e6e9ff;white-space:nowrap}
 .pc-vol{display:none;width:84px;height:44px;margin:0 6px 0 0;background:transparent;accent-color:var(--sf);cursor:pointer}
-.pc-big{position:absolute;left:50%;top:50%;z-index:1;width:78px;height:78px;margin:-39px 0 0 -39px;border-radius:50%;display:grid;place-items:center;color:var(--sf);background:rgba(14,19,48,.72);box-shadow:inset 0 0 0 2px rgba(255,255,255,.22),0 14px 32px -12px rgba(0,0,0,.8);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
-.pc-big svg{width:34px;height:34px;margin-left:4px}
+.pc-big{position:absolute;left:50%;top:50%;z-index:1;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;display:grid;place-items:center;color:var(--sf);background:rgba(14,19,48,.72);box-shadow:inset 0 0 0 2px rgba(255,255,255,.22),0 14px 32px -12px rgba(0,0,0,.8);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
+.pc-big svg{width:26px;height:26px;margin-left:3px}
 .pc-big:hover{transform:scale(1.06)}
 .pl.pz:not(.wt):not(.en) .pc-big{opacity:1;pointer-events:auto}
 .pc-spin{position:absolute;left:50%;top:50%;z-index:1;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;border:4px solid rgba(255,255,255,.25);border-top-color:var(--sf);opacity:0;pointer-events:none;animation:spn .8s linear infinite}
@@ -339,6 +339,14 @@ footer .soc a:focus-visible{outline:2px solid #fff;outline-offset:2px}
 @media(hover:hover){footer .soc a:hover{transform:translateY(-2px);filter:brightness(1.1)}}
 @media(pointer:coarse){footer .soc a{width:44px;height:44px}}
 @media(prefers-reduced-motion:reduce){footer .soc a{transition:none}}
+/* ===== v4: telefonda anime sahifasi sarlavhasi oʻrtada ===== */
+@media(max-width:699.98px){
+.ad .wrap{justify-items:center;text-align:center}
+.ad .wrap>div:not(.po){width:100%;min-width:0}
+.ad .meta,.ad .chips,.ad .bar{justify-content:center}
+.ad .desc{text-align:left;margin-left:auto;margin-right:auto}
+.ad .bar>*{margin-left:3px;margin-right:3px}
+}
 </style>
 </head>
 <body>
@@ -351,7 +359,7 @@ footer .soc a:focus-visible{outline:2px solid #fff;outline-offset:2px}
 <nav class="tabs"><a data-t="home" href="/" data-i="home" data-l="Bosh"></a><a data-t="catalog" href="/catalog" data-i="grid" data-l="Katalog"></a><a href="#" onclick="S(1);return false" data-i="search" data-l="Qidiruv"></a><a data-t="favorites" href="/favorites" data-i="heart" data-l="Sevimli"></a><a href="#" onclick="auth();return false" data-i="user" data-l="Profil"></a></nav>
 <div class="md" id="srch" onclick="if(event.target===this)S(0)"><div class="box"><input class="f" id="si" placeholder="Anime nomini yozing…" autocomplete="off" oninput="sr(this.value)" onkeydown="if(event.key==='Enter'){S(0);nav('/catalog?q='+encodeURIComponent(this.value))}"><div class="sres" id="sres" style="margin-top:12px"></div></div></div>
 <div class="md" id="au" onclick="if(event.target===this)authClose()"><div class="box" id="aub"></div></div>
-<button class="up" id="up" aria-label="Tepaga" onclick="scrollTo({top:0,behavior:'smooth'})"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+<button class="up" id="up" aria-label="Tepaga" onclick="window.scrollTo({top:0,behavior:'smooth'})"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
 <script>(()=>{let ly=scrollY,tk=0;const up=document.getElementById('up'),b=document.body;
 addEventListener('scroll',()=>{if(tk)return;tk=1;requestAnimationFrame(()=>{tk=0;const y=Math.max(0,scrollY),d=y-ly;up.classList.toggle('on',y>700);
 if(y<80||y+innerHeight>=document.documentElement.scrollHeight-4||document.querySelector('.md.on'))b.classList.remove('hdn');
@@ -425,8 +433,8 @@ function toast(m){let t=document.getElementById('toast');if(!t){t=document.creat
 function dlp(e,d){if(e.locked)return'';const t=d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism',nm=esc((t||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');return`<div class="dl" role="group" aria-label="Yuklab olish"><div>${ic('dl')}<b>Yuklab olish</b></div><div class="dlb">${d.can_download===false?'':`<a class="btn" href="/stream/${e.id}?site=1&amp;dl=1" download="${nm}" title="${esc(t)}">Saytdan</a>`}<a class="btn tgb" href="${BOT}?start=ep_${e.id}" target="_blank" rel="noopener">Telegram</a></div></div>`}
 const mmss=t=>{t=isFinite(t)&&t>0?Math.floor(t):0;const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
 const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
-const ctl=(e,d)=>{const nm=esc(((d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism')||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');
-return`<button class="pc-big" aria-label="Ijro etish">${ic('play')}</button><i class="pc-spin"></i><div class="pc-mini"><b></b></div><div class="pc"><div class="pc-line" tabindex="0" role="slider" aria-label="Video vaqti" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="pc-trk"><div class="pc-buf"></div><div class="pc-fil"></div><div class="pc-thm"></div></div><span class="pc-tip">0:00</span></div><div class="pc-row"><button class="pc-btn" data-a="play"></button><button class="pc-btn" data-a="mute"></button><input class="pc-vol" type="range" min="0" max="1" step=".05" aria-label="Ovoz balandligi"><span class="pc-time">0:00 / --:--</span><span class="pc-sp"></span>${d.can_download===false?'':`<a class="pc-btn" href="/stream/${e.id}?site=1&amp;dl=1" download="${nm}" aria-label="Yuklab olish" title="Yuklab olish">${ic('dl')}<span>Yuklab olish</span></a>`}<button class="pc-btn" data-a="wide"></button><button class="pc-btn" data-a="fs"></button></div></div>`};
+const ctl=()=>{
+return`<button class="pc-big" aria-label="Ijro etish">${ic('play')}</button><i class="pc-spin"></i><div class="pc-mini"><b></b></div><div class="pc"><div class="pc-line" tabindex="0" role="slider" aria-label="Video vaqti" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="pc-trk"><div class="pc-buf"></div><div class="pc-fil"></div><div class="pc-thm"></div></div><span class="pc-tip">0:00</span></div><div class="pc-row"><button class="pc-btn" data-a="play"></button><button class="pc-btn" data-a="mute"></button><input class="pc-vol" type="range" min="0" max="1" step=".05" aria-label="Ovoz balandligi"><span class="pc-time">0:00 / --:--</span><span class="pc-sp"></span><button class="pc-btn" data-a="wide"></button><button class="pc-btn" data-a="fs"></button></div></div>`};
 function pctl(v,pl,wg){
 PC=new AbortController();
 const sg={signal:PC.signal},q=s=>pl.querySelector(s),on=(t,n,f)=>t.addEventListener(n,f,sg),
@@ -552,6 +560,7 @@ async function getAuth(u){try{const r=await api(u);return r.ok?await r.json():nu
 /* ---------- ishga tushirish ---------- */
 document.querySelectorAll('[data-i]').forEach(e=>{e.innerHTML=ic(e.dataset.i)+(e.dataset.l?`<span>${e.dataset.l}</span>`:'')});
 addEventListener('popstate',go);
+addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if($('#srch').classList.contains('on'))S(0);if($('#au').classList.contains('on'))authClose()});
 document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
 (async()=>{const[r,c,b]=await Promise.all([getJ('/api/public/animes'),getJ('/api/public/categories'),getJ('/api/public/banners')]);
 if(Array.isArray(r)&&r.length){A=r;CATS=Array.isArray(c)?c:[];BAN=Array.isArray(b)?b:[]}else{demo=true;A=DEMO;CATS=['Aksiya','Drama','Komediya','Fantastika']}

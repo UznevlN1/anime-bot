@@ -11098,6 +11098,33 @@ def _rate_limited(key: str, max_hits: int, window_seconds: float) -> bool:
     hits.append(now)
     return False
 
+def _parse_range_header(header, size: int):
+    """HTTP Range sarlavhasini tahlil qiladi.
+    (start, end) — 206 uchun oraliq; None — Range yoʻq yoki tushunarsiz (butun fayl, 200);
+    False — oraliq fayl hajmiga toʻgʻri kelmaydi (416).
+    Avval "bytes=-N" (faylning oxirgi N bayti) notoʻgʻri talqin qilinib, videoning
+    BOSHIDAN N bayt yuborilardi — indeksi (moov) fayl oxirida boʻlgan MP4'lar
+    iPhone/Safari'da ochilmay qolishi mumkin edi."""
+    if not header or size <= 0:
+        return None
+    m = re.fullmatch(r"\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*", header)
+    if not m or not (m.group(1) or m.group(2)):
+        return None
+    first, last = m.group(1), m.group(2)
+    if first:
+        start = int(first)
+        if last and int(last) < start:
+            return None
+        end = min(int(last), size - 1) if last else size - 1
+    else:
+        n = int(last)
+        if n == 0:
+            return False
+        start, end = max(size - n, 0), size - 1
+    if start >= size:
+        return False
+    return start, end
+
 def _client_ip(request) -> str:
     """Render kabi teskari proksi ortida to'g'ridan-to'g'ri request.remote
     proksining o'z IP'ini qaytaradi, shuning uchun boshqa manbalarga qaraladi.
@@ -11191,7 +11218,7 @@ async def webapp_site_register(request):
     if phone and await asyncio.to_thread(db.get_site_user_by_login, phone):
         return web.json_response({"error": "bunday foydalanuvchi allaqachon mavjud"}, status=409)
 
-    password_hash = _hash_password(password)
+    password_hash = await asyncio.to_thread(_hash_password, password)
     try:
         user = await asyncio.to_thread(db.create_site_user, email, phone, password_hash, display_name)
     except Exception:
@@ -11220,7 +11247,7 @@ async def webapp_site_login(request):
     if identifier and _rate_limited(f"login_id:{identifier}", max_hits=8, window_seconds=900):
         return web.json_response({"error": "juda ko'p urinish, birozdan keyin qayta urining"}, status=429)
     user = await asyncio.to_thread(db.get_site_user_by_login, identifier)
-    if not user or not _verify_password(password, user["password_hash"]):
+    if not user or not await asyncio.to_thread(_verify_password, password, user["password_hash"]):
         return web.json_response({"error": "email/telefon yoki parol notoʻgʻri"}, status=401)
     token = _make_site_token(user["id"])
     return web.json_response({"token": token, "user": _public_site_user(user)})
@@ -11292,7 +11319,7 @@ async def webapp_site_reset_password(request):
     site_user_id = await asyncio.to_thread(db.mark_password_reset_used, token)
     if not site_user_id:
         return web.json_response({"error": "havola notoʻgʻri yoki eskirgan"}, status=400)
-    password_hash = _hash_password(new_password)
+    password_hash = await asyncio.to_thread(_hash_password, new_password)
     await asyncio.to_thread(db.update_site_user_password, site_user_id, password_hash)
     return web.json_response({"ok": True})
 
@@ -12354,22 +12381,11 @@ async def start_web_server():
         file_size = media.file_size
         mime_type = getattr(media, "mime_type", None) or "video/mp4"
 
-        start, end = 0, file_size - 1
-        status_code = 200
-        range_header = request.headers.get("Range")
-        if range_header:
-            try:
-                rng = range_header.replace("bytes=", "").split("-")
-                if rng[0]:
-                    start = int(rng[0])
-                if len(rng) > 1 and rng[1]:
-                    end = int(rng[1])
-                status_code = 206
-            except Exception:
-                start, end = 0, file_size - 1
-        end = min(end, file_size - 1)
-        if start > end:
-            start = 0
+        rng = _parse_range_header(request.headers.get("Range"), file_size)
+        if rng is False:
+            return web.Response(status=416, headers={"Content-Range": f"bytes */{file_size}"})
+        start, end = rng if rng else (0, file_size - 1)
+        status_code = 206 if rng else 200
         length = end - start + 1
 
         resp_headers = {
