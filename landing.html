@@ -200,6 +200,56 @@ footer .bot .btn{margin:0;min-height:52px;padding:0 clamp(22px,3vw,34px);font-si
 .skr{display:flex;gap:clamp(10px,1.6vw,20px);overflow:hidden;margin-top:clamp(28px,4vw,52px)}
 .skr i{flex:none;width:clamp(130px,30vw,200px);aspect-ratio:3/4.1;border-radius:var(--r);background:var(--p1)}
 @media(prefers-reduced-motion:no-preference){.sk,.skr i{background:linear-gradient(100deg,var(--p1) 30%,var(--p2) 50%,var(--p1) 70%) 0 0/300% 100%;animation:shim 1.6s linear infinite}@keyframes shim{to{background-position:-300% 0}}}
+/* ===== Pleyer boshqaruvi: koʻrilgan joy chizigʻi, kengaytirish, yuklab olish ===== */
+.pl video{object-fit:contain;cursor:pointer}
+.pc,.pc-big,.pc-spin,.pc-mini{-webkit-user-select:none;user-select:none}
+.pc{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:46px clamp(10px,1.6vw,20px) clamp(8px,1vw,14px);background:linear-gradient(0deg,rgba(6,9,28,.94),rgba(6,9,28,.62) 55%,rgba(6,9,28,0));opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .22s,transform .22s}
+.pl.ui .pc{opacity:1;transform:none;pointer-events:auto}
+.pl.fz{max-height:none;border-radius:0}
+.pl.fz:not(.ui){cursor:none}
+.pc-line{position:relative;display:flex;align-items:center;height:24px;cursor:pointer;touch-action:none}
+.pc-trk{position:relative;width:100%;height:5px;border-radius:3px;background:rgba(255,255,255,.24);transition:height .12s}
+.pc-buf,.pc-fil{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:inherit}
+.pc-buf{background:rgba(255,255,255,.36)}
+.pc-fil{background:var(--sf)}
+.pc-thm{position:absolute;top:50%;left:0;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;border-radius:50%;background:var(--sf);box-shadow:0 0 0 4px rgba(255,185,56,.28);transform:scale(0);transition:transform .12s}
+.pl:not(.dr) .pc-fil{transition:width .25s linear}
+.pl:not(.dr) .pc-thm{transition:transform .12s,left .25s linear}
+.pc-line:focus-visible .pc-trk,.pl.dr .pc-trk{height:9px}
+.pc-line:focus-visible .pc-thm,.pl.dr .pc-thm,.pl.pz .pc-thm{transform:scale(1)}
+.pc-tip{position:absolute;bottom:28px;left:0;transform:translateX(-50%);padding:3px 8px;border-radius:8px;background:var(--p1);border:1px solid var(--ln);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s}
+.pl.dr .pc-tip{opacity:1}
+@media(hover:hover){.pc-line:hover .pc-trk{height:9px}.pc-line:hover .pc-thm{transform:scale(1)}.pc-line:hover .pc-tip{opacity:1}}
+.pc-row{display:flex;align-items:center;gap:2px}
+.pc-sp{flex:1}
+.pc-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:44px;height:44px;padding:0 10px;border-radius:12px;color:#fff;font-size:13px;font-weight:600;white-space:nowrap}
+.pc-btn[hidden]{display:none}
+.pc-btn:hover{background:rgba(255,255,255,.16)}
+.pc-btn svg{width:22px;height:22px;flex:none}
+.pc-btn span{display:none}
+.pc-time{padding:0 10px;font-size:13px;font-variant-numeric:tabular-nums;color:#e6e9ff;white-space:nowrap}
+.pc-vol{display:none;width:84px;height:44px;margin:0 6px 0 0;background:transparent;accent-color:var(--sf);cursor:pointer}
+.pc-big{position:absolute;left:50%;top:50%;z-index:1;width:78px;height:78px;margin:-39px 0 0 -39px;border-radius:50%;display:grid;place-items:center;color:var(--sf);background:rgba(14,19,48,.72);box-shadow:inset 0 0 0 2px rgba(255,255,255,.22),0 14px 32px -12px rgba(0,0,0,.8);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
+.pc-big svg{width:34px;height:34px;margin-left:4px}
+.pc-big:hover{transform:scale(1.06)}
+.pl.pz:not(.wt):not(.en) .pc-big{opacity:1;pointer-events:auto}
+.pc-spin{position:absolute;left:50%;top:50%;z-index:1;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;border:4px solid rgba(255,255,255,.25);border-top-color:var(--sf);opacity:0;pointer-events:none;animation:spn .8s linear infinite}
+.pl.wt .pc-spin{opacity:1}
+@keyframes spn{to{transform:rotate(360deg)}}
+.pc-mini{position:absolute;left:0;right:0;bottom:0;z-index:1;height:4px;background:rgba(6,9,28,.55);opacity:0;pointer-events:none;transition:opacity .2s}
+.pc-mini b{display:block;height:100%;width:0;background:var(--sf)}
+body.lo .tg{position:relative;z-index:41}
+.pl:not(.ui):not(.pz) .pc-mini{opacity:1}
+@media(min-width:700px){.pc-vol{display:block}}
+@media(min-width:1200px){.pc-btn span{display:inline}}
+@media(max-width:999.98px){.pc-btn[data-a=wide]{display:none}}
+@media(min-width:1000px){
+.wrap.wg.wide{max-width:none}
+.wg.wide{grid-template-columns:minmax(0,1fr)}
+.wg.wide .eps{order:0;max-height:none;margin-top:0;grid-template-columns:repeat(auto-fill,minmax(64px,1fr))}
+.wg.wide .pl{width:min(100%,calc((100vh - 110px)*16/9));max-height:calc(100vh - 110px);margin-left:auto;margin-right:auto}
+.wg.wide .pl.fz{width:100%;max-height:none}
+}
 </style>
 </head>
 <body>
@@ -218,8 +268,8 @@ const $=s=>document.querySelector(s),BOT='https://t.me/ANIFILM_BOT';
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ls=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const sv=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
-let TOKEN=ls('af_token',null),FAV=new Set(ls('af_fav_cache',[])),PROG=ls('af_prog',{}),A=[],CATS=[],BAN=[],demo=false,HT,HI=0,HL=[],IO=null,AM='login',FPM='',BUSY=0;
-const I={home:'<path d="M3 11l9-8 9 8v10H3z"/>',grid:'<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',heart:'<path d="M12 20s-8-5-9.5-10A5 5 0 0 1 12 6a5 5 0 0 1 9.5 4C20 15 12 20 12 20z"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-5.500 8-5.500s6.500 1.500 8 5.500"/>',play:'<path d="M7 4l13 8-13 8z" fill="currentColor"/>'};
+let TOKEN=ls('af_token',null),FAV=new Set(ls('af_fav_cache',[])),PROG=ls('af_prog',{}),A=[],CATS=[],BAN=[],demo=false,HT,HI=0,HL=[],IO=null,AM='login',FPM='',BUSY=0,PC=null;
+const I={home:'<path d="M3 11l9-8 9 8v10H3z"/>',grid:'<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',heart:'<path d="M12 20s-8-5-9.5-10A5 5 0 0 1 12 6a5 5 0 0 1 9.5 4C20 15 12 20 12 20z"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-5.500 8-5.500s6.500 1.500 8 5.500"/>',play:'<path d="M7 4l13 8-13 8z" fill="currentColor"/>',pause:'<rect x="6" y="4" width="4.2" height="16" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2" fill="currentColor" stroke="none"/>',vol:'<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',mute:'<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m16 9 5 6M21 9l-5 6"/>',dl:'<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',wide:'<rect x="2" y="7" width="20" height="10" rx="2"/>',narrow:'<rect x="6" y="5" width="12" height="14" rx="2"/>',fs:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',fsx:'<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'};
 const ic=n=>`<svg class="i" viewBox="0 0 24 24">${I[n]}</svg>`;
 const hue=id=>(Number(id)*47)%360,pic=a=>`/api/photo/${a.photo_id}`;
 const po=(a,x='')=>`<div class="po" style="--h:${hue(a.id)}">${a.photo_id?`<img loading="lazy" onload="this.classList.add('ld')" src="${pic(a)}" alt="${esc(a.title)}">`:`<span class="ph disp">${esc((a.title||'?')[0])}</span>`}${x}</div>`;
@@ -230,7 +280,7 @@ const empty=(t,x='')=>`<div class="wrap pad" style="text-align:center"><p>${t}</
 const DEMO=[['Sulh Ovchisi',2026,'Aksiya',24],['Qora Daftar',2006,'Drama',37],['Samuray Yoʻli',2021,'Sarguzasht',12],['Maktab Kunlari',2023,'Komediya',11],['Yulduz Tunlari',2022,'Fantastika',13],['Ikki Dunyo',2024,'Romantika',12]].map((x,i)=>({id:i+1,title:x[0],year:x[1],category:x[2],genre:x[2],media_type:'serial',episode_count:x[3],views:900-i*100,description:'Namuna tavsif: server bilan aloqa oʻrnatilgach, haqiqiy animelar shu yerda koʻrinadi.'}));
 async function api(u,o={}){o.headers=Object.assign({'Content-Type':'application/json'},TOKEN?{Authorization:'Bearer '+TOKEN}:{});const r=await fetch(u,o);if(r.status===401&&TOKEN)logout();return r}
 async function getJ(u){try{const r=await fetch(u);return r.ok?await r.json():null}catch(e){return null}}
-function stop(){clearInterval(HT);clearTimeout(HT);document.onkeydown=null;document.body.classList.remove('lo');if(IO){IO.disconnect();IO=null}document.title='AniFilm.uz — Oʻzbek tilidagi animelar'}
+function stop(){clearInterval(HT);clearTimeout(HT);document.onkeydown=null;if(PC){PC.abort();PC=null}document.body.classList.remove('lo');if(IO){IO.disconnect();IO=null}document.title='AniFilm.uz — Oʻzbek tilidagi animelar'}
 function nav(u){history.pushState(null,'',u);go()}
 function rnd(){if(A.length)nav('/anime/'+A[Math.floor(Math.random()*A.length)].id)}
 function go(){const p=location.pathname,s=p.split('/').filter(Boolean),P=new URLSearchParams(location.search),k=s[0]==='anime'||s[0]==='watch'?'catalog':(s[0]||'home');
@@ -273,16 +323,77 @@ gl=(a.genre||'').split(',').map(x=>x.trim()).filter(Boolean),sim=A.filter(x=>x.i
 document.title=a.title+' — AniFilm.uz';
 ap.innerHTML=`<div class="ad"><div class="bgb" style="${a.photo_id?`background-image:url(${pic(a)})`:`background:hsl(${hue(a.id)} 45% 28%)`}"></div><div class="wrap">${po(a)}<div><h1 class="disp ttl" style="margin-top:0">${esc(a.title)}</h1><div class="meta">${[a.year,f?'Film':'Serial',a.country,a.language,a.status==='finished'?'Tugagan':(a.status==='ongoing'&&!f?'Davom etmoqda':''),a.views?a.views+' marta koʻrilgan':''].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join('')}</div><div class="chips">${gl.map(g=>`<a class="chip" href="/catalog?genre=${encodeURIComponent(g)}">${esc(g)}</a>`).join('')}</div><p class="desc">${esc(a.description||'')}</p><div class="bar">${tgt?`<a class="btn" href="/watch/${id}/${tgt.id}">${ic('play')} ${res?`Davom ettirish · ${p.n}-qism`:f?'Filmni koʻrish':'Koʻrishni boshlash'}</a>`:`<a class="btn" href="${BOT}?start=anime_${id}">Botda koʻrish</a>`}<button class="btn g${FAV.has(+id)?' on':''}" onclick="toggleFav(${+id},this)">${ic('heart')} Sevimli</button><button class="btn g" onclick="share()">Ulashish</button></div></div></div></div><div class="wrap">${!f&&eps.length?`<section><div class="sh"><h2 class="disp">Qismlar</h2></div><div class="eps">${eps.map(e=>`<a class="ep${res&&e.id==res.id?' on':''}${seen.includes(e.id)?' seen':''}${e.locked?' lk':''}" href="/watch/${id}/${e.id}">${e.n}</a>`).join('')}</div></section>`:''}${row('Oʻxshash animelar',sim)}</div>`}
 function share(){const u=location.href;if(navigator.share)navigator.share({title:document.title,url:u}).catch(()=>{});else{if(navigator.clipboard)navigator.clipboard.writeText(u);alert('Havola nusxalandi')}}
+/* ---------- pleyer boshqaruvi: koʻrilgan joy chizigʻi, kengaytirish, yuklab olish ---------- */
+const mmss=t=>{t=isFinite(t)&&t>0?Math.floor(t):0;const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
+const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
+const ctl=(e,d)=>{const nm=esc(((d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism')||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');
+return`<button class="pc-big" aria-label="Ijro etish">${ic('play')}</button><i class="pc-spin"></i><div class="pc-mini"><b></b></div><div class="pc"><div class="pc-line" tabindex="0" role="slider" aria-label="Video vaqti" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="pc-trk"><div class="pc-buf"></div><div class="pc-fil"></div><div class="pc-thm"></div></div><span class="pc-tip">0:00</span></div><div class="pc-row"><button class="pc-btn" data-a="play"></button><button class="pc-btn" data-a="mute"></button><input class="pc-vol" type="range" min="0" max="1" step=".05" aria-label="Ovoz balandligi"><span class="pc-time">0:00 / --:--</span><span class="pc-sp"></span>${d.can_download===false?'':`<a class="pc-btn" href="/stream/${e.id}?site=1&amp;dl=1" download="${nm}" aria-label="Yuklab olish" title="Yuklab olish">${ic('dl')}<span>Yuklab olish</span></a>`}<button class="pc-btn" data-a="wide"></button><button class="pc-btn" data-a="fs"></button></div></div>`};
+function pctl(v,pl,wg){
+PC=new AbortController();
+const sg={signal:PC.signal},q=s=>pl.querySelector(s),on=(t,n,f)=>t.addEventListener(n,f,sg),
+line=q('.pc-line'),buf=q('.pc-buf'),fil=q('.pc-fil'),thm=q('.pc-thm'),tip=q('.pc-tip'),mini=q('.pc-mini b'),tm=q('.pc-time'),
+pp=q('.pc-btn[data-a=play]'),big=q('.pc-big'),mu=q('[data-a=mute]'),vo=q('.pc-vol'),wd=q('[data-a=wide]'),fb=q('[data-a=fs]'),
+HV=matchMedia('(hover:hover) and (pointer:fine)').matches;
+let hid=0,drag=false,dr=0,ck=0,tp=false,init=true;
+const D=()=>isFinite(v.duration)&&v.duration>0?v.duration:0,
+frac=x=>{const r=line.getBoundingClientRect();return r.width?Math.min(1,Math.max(0,(x-r.left)/r.width)):0},
+draw=r=>{fil.style.width=thm.style.left=mini.style.width=r*100+'%'},
+paint=()=>{const d=D(),t=drag?dr*d:v.currentTime;if(!drag)draw(d?Math.min(1,t/d):0);
+tm.textContent=mmss(t)+' / '+(d?mmss(d):'--:--');line.setAttribute('aria-valuenow',d?Math.round(t/d*100):0);line.setAttribute('aria-valuetext',mmss(t));
+let b=0;for(let i=0;i<v.buffered.length;i++)if(v.buffered.start(i)<=v.currentTime+.5&&v.buffered.end(i)>=v.currentTime-.5){b=v.buffered.end(i);break}
+buf.style.width=(d?Math.min(100,b/d*100):0)+'%'},
+busy=()=>HV&&!!pl.querySelector('.pc:hover'),
+show=()=>{pl.classList.add('ui');clearTimeout(hid);if(!v.paused&&!drag)hid=setTimeout(()=>{if(!busy())pl.classList.remove('ui')},2800)},
+st=()=>{pl.classList.toggle('pz',v.paused);pl.classList.toggle('en',v.ended);const l=v.paused?'Ijro etish':'Toʻxtatish';pp.innerHTML=ic(v.paused?'play':'pause');pp.setAttribute('aria-label',l);pp.title=l+' (K)'},
+wait=()=>pl.classList.toggle('wt',init||((!v.paused||v.seeking)&&v.readyState<3)),
+tog=()=>{if(v.paused||v.ended){const p=v.play();if(p&&p.catch)p.catch(()=>{})}else v.pause()},
+vol=()=>{const m=v.muted||v.volume===0,l=m?'Ovozni yoqish':'Ovozni oʻchirish';mu.innerHTML=ic(m?'mute':'vol');mu.setAttribute('aria-label',l);mu.title=l+' (M)';vo.value=m?0:v.volume},
+wide=a=>{wg.classList.toggle('wide',a);const l=a?'Kichraytirish':'Kengaytirish';wd.innerHTML=ic(a?'narrow':'wide')+'<span>'+l+'</span>';wd.setAttribute('aria-label',l);wd.setAttribute('aria-pressed',a);wd.title=l+' (T)'},
+wideTog=()=>{const a=!wg.classList.contains('wide');sv('af_wide',a);wide(a);pl.scrollIntoView({block:'nearest'})},
+fsTog=()=>{if(fsEl()){(document.exitFullscreen||document.webkitExitFullscreen).call(document);return}const r=pl.requestFullscreen||pl.webkitRequestFullscreen;if(r){const p=r.call(pl);if(p&&p.catch)p.catch(()=>{})}else if(v.webkitEnterFullscreen)v.webkitEnterFullscreen()},
+fz=()=>{const a=fsEl()===pl,l=a?'Toʻliq ekrandan chiqish':'Toʻliq ekran';pl.classList.toggle('fz',a);fb.innerHTML=ic(a?'fsx':'fs')+'<span>'+(a?'Chiqish':'Toʻliq ekran')+'</span>';fb.setAttribute('aria-label',l);fb.title=l+' (F)';show()},
+tipAt=x=>{const r=line.getBoundingClientRect();tip.textContent=mmss(frac(x)*D());tip.style.left=Math.min(r.width-26,Math.max(26,frac(x)*r.width))+'px'};
+/* vaqt, chiziq, holatlar */
+['timeupdate','durationchange','loadedmetadata','progress','seeked','seeking','emptied'].forEach(n=>on(v,n,paint));
+['play','pause','ended','emptied'].forEach(n=>on(v,n,()=>{st();wait();show()}));
+['waiting','seeking','seeked','playing','canplay','loadeddata','stalled','emptied'].forEach(n=>on(v,n,wait));
+on(v,'playing',()=>{init=false;wait()});on(v,'error',()=>{init=false;wait()});
+on(v,'volumechange',()=>{vol();sv('af_vol',v.volume);sv('af_mute',v.muted)});
+/* chiziq: bosib yoki sudrab surish (video faqat qoʻyib yuborilganda suriladi) */
+on(line,'pointerdown',ev=>{if(ev.button||!D())return;drag=true;dr=frac(ev.clientX);pl.classList.add('dr');try{line.setPointerCapture(ev.pointerId)}catch(x){}draw(dr);tipAt(ev.clientX);paint()});
+on(line,'pointermove',ev=>{tipAt(ev.clientX);if(drag){dr=frac(ev.clientX);draw(dr);paint()}});
+on(line,'pointerup',()=>{if(!drag)return;drag=false;pl.classList.remove('dr');const d=D();if(d)v.currentTime=dr*d;paint();show()});
+on(line,'pointercancel',()=>{drag=false;pl.classList.remove('dr');paint()});
+on(line,'keydown',ev=>{const d=D(),k=ev.key;if(!d)return;let t=null;if(k==='ArrowDown')t=v.currentTime-10;else if(k==='ArrowUp')t=v.currentTime+10;else if(k==='Home')t=0;else if(k==='End')t=d-1;if(t!==null){v.currentTime=Math.min(d,Math.max(0,t));ev.preventDefault();ev.stopPropagation()}});
+/* tugmalar */
+on(pp,'click',tog);on(big,'click',tog);
+on(mu,'click',()=>{v.muted=!v.muted;if(!v.muted&&v.volume===0)v.volume=.5});
+on(vo,'input',()=>{v.volume=+vo.value;v.muted=+vo.value===0});
+on(wd,'click',wideTog);on(fb,'click',fsTog);
+if(!(pl.requestFullscreen||pl.webkitRequestFullscreen||v.webkitEnterFullscreen))fb.hidden=true;
+on(document,'fullscreenchange',fz);on(document,'webkitfullscreenchange',fz);
+/* video ustida: bosish — ijro/pauza, ikki marta bosish — toʻliq ekran */
+on(v,'pointerdown',ev=>{tp=ev.pointerType==='touch'&&!pl.classList.contains('ui')});
+on(v,'click',()=>{clearTimeout(ck);if(tp){tp=false;show();return}ck=setTimeout(tog,230);show()});
+on(v,'dblclick',()=>{clearTimeout(ck);fsTog()});
+/* boshqaruv paneli: sichqoncha/barmoq harakatlanganda koʻrinadi, 3 soniyadan soʻng yashirinadi */
+on(pl,'pointermove',show);on(pl,'pointerdown',show);on(pl,'keydown',show);on(pl,'focusin',show);
+on(pl,'pointerleave',ev=>{if(ev.pointerType==='mouse'&&!v.paused&&!drag){clearTimeout(hid);hid=setTimeout(()=>pl.classList.remove('ui'),700)}});
+const v0=+ls('af_vol',1);v.volume=v0>=0&&v0<=1?v0:1;v.muted=!!ls('af_mute',false);
+vol();wide(!!ls('af_wide',false));st();paint();wait();fz();
+const p0=v.play();if(p0&&p0.then)p0.then(()=>{init=false;wait()},()=>{init=false;wait();st();show()});
+return{tog,fs:fsTog,wide:wideTog,show}}
 /* ---------- tomosha sahifasi ---------- */
 async function watch(aid,eid){const ap=$('#app');ap.innerHTML='<div class="wrap pad dm">Yuklanmoqda…</div>';const d=await getJ('/api/public/animes/'+aid),eps=(d&&d.episodes)||[];
 if(!eps.length){ap.innerHTML=empty('Bu animening qismlari saytda hali mavjud emas',`<a class="btn" href="${BOT}?start=anime_${aid}">Botda koʻrish</a>`);return}
 const p=PROG[aid];let i=eps.findIndex(e=>e.id==eid);if(i<0){i=p?eps.findIndex(e=>e.id==p.e):-1;if(i<0)i=Math.max(0,eps.findIndex(e=>!e.locked))}
 const e=eps[i],pv=eps[i-1],nx=eps[i+1],seen=(p&&p.s)||[];
 const lock=`<div class="ov"><div><h2 class="disp">Premium qism</h2><p class="dm">Bu qism hozircha faqat Premium foydalanuvchilar uchun.</p><br><a class="btn" href="${BOT}?start=anime_${aid}">Botda ochish</a></div></div>`;
-ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" controls playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span><a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></div><div class="tg"><label><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}>Avto keyingi qism</label><label><input type="checkbox" id="tl">Chiroqni oʻchirish</label><button class="btn g" onclick="share()" style="margin:0">Ulashish</button></div><div class="bar">${pv?`<a class="btn g" href="/watch/${aid}/${pv.id}">‹ Oldingi</a>`:''}${nx?`<a class="btn" href="/watch/${aid}/${nx.id}">Keyingi ›</a>`:''}<select id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button class="btn g" id="sk">+85 soniya</button></div></div><div class="eps">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}">${x.n}</a>`).join('')}</div></div>`;
+ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>${ctl(e,d)}`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span><a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></div><div class="tg"><label><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}>Avto keyingi qism</label><label><input type="checkbox" id="tl">Chiroqni oʻchirish</label><button class="btn g" onclick="share()" style="margin:0">Ulashish</button></div><div class="bar">${pv?`<a class="btn g" href="/watch/${aid}/${pv.id}">‹ Oldingi</a>`:''}${nx?`<a class="btn" href="/watch/${aid}/${nx.id}">Keyingi ›</a>`:''}<select id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button class="btn g" id="sk">+85 soniya</button></div></div><div class="eps">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}">${x.n}</a>`).join('')}</div></div>`;
 document.title=`${d.title} · ${e.n}-qism — AniFilm.uz`;
 if(TOKEN)api('/api/site/history',{method:'POST',body:JSON.stringify({anime_id:Number(aid)})}).catch(()=>{});
 const v=$('#v');if(!v){$('#sp').disabled=true;$('#sk').disabled=true;return}
+let P=null;try{P=pctl(v,$('#pl'),$('.wg'))}catch(x){console.error(x);v.controls=true;document.querySelectorAll('#pl .pc,#pl .pc-big,#pl .pc-spin,#pl .pc-mini').forEach(n=>n.remove())}
 $('#sp').value=ls('af_speed',1);
 const save=end=>{const s=new Set((PROG[aid]||{}).s||[]);if(end||(v.duration&&v.currentTime>v.duration*.9))s.add(e.id);PROG[aid]={e:e.id,n:e.n,t:end?0:v.currentTime,d:v.duration||0,u:Date.now(),s:[...s]};sv('af_prog',PROG)};
 v.onloadedmetadata=()=>{v.playbackRate=ls('af_speed',1);if(p&&p.e==e.id&&p.t>5&&p.t<v.duration-20)v.currentTime=p.t};
@@ -290,7 +401,9 @@ let lt=0;v.ontimeupdate=()=>{const n=Date.now();if(n-lt>4000){lt=n;save()}};v.on
 v.onended=()=>{save(true);if(nx&&!nx.locked&&ls('af_auto',true)){const o=document.createElement('div');o.className='ov';o.innerHTML=`<div><h2 class="disp">Keyingi: ${nx.n}-qism</h2><p class="dm">5 soniyadan soʻng boshlanadi</p><br><a class="btn" href="/watch/${aid}/${nx.id}">Hozir</a><button class="btn g" id="cn">Bekor qilish</button></div>`;$('#pl').appendChild(o);HT=setTimeout(()=>{nav(`/watch/${aid}/${nx.id}`)},5000);$('#cn').onclick=()=>{clearTimeout(HT);o.remove()}}};
 v.onerror=()=>{$('#pl').insertAdjacentHTML('beforeend',`<div class="ov"><div><h2 class="disp">Video ochilmadi</h2><p class="dm">Birozdan soʻng qayta urinib koʻring yoki botda tomosha qiling.</p><br><button class="btn g" onclick="go()">Qayta urinish</button><a class="btn" href="${BOT}?start=anime_${aid}">Botda koʻrish</a></div></div>`)};
 $('#sp').onchange=ev=>{sv('af_speed',+ev.target.value);v.playbackRate=+ev.target.value};$('#sk').onclick=()=>{v.currentTime+=85};$('#ta').onchange=ev=>sv('af_auto',ev.target.checked);$('#tl').onchange=ev=>document.body.classList.toggle('lo',ev.target.checked);
-document.onkeydown=ev=>{if(/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName))return;if(ev.key==='ArrowRight')v.currentTime+=10;else if(ev.key==='ArrowLeft')v.currentTime-=10;else if(ev.key==='f'&&v.requestFullscreen)v.requestFullscreen();else if(ev.key==='m')v.muted=!v.muted}}
+document.onkeydown=ev=>{if(/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)||ev.ctrlKey||ev.metaKey||ev.altKey)return;const k=ev.key;
+if(k==='ArrowRight'){v.currentTime+=10;P&&P.show()}else if(k==='ArrowLeft'){v.currentTime-=10;P&&P.show()}else if(k==='m'||k==='M')v.muted=!v.muted;
+else if(P&&(k==='f'||k==='F'))P.fs();else if(P&&(k==='t'||k==='T'))P.wide();else if(P&&(k==='k'||k==='K'||(k===' '&&!/^(BUTTON|A)$/.test(ev.target.tagName)))){P.tog();ev.preventDefault()}}}
 /* ---------- qidiruv ---------- */
 function S(o){$('#srch').classList.toggle('on',!!o);if(o){$('#si').value='';sr('');setTimeout(()=>$('#si').focus(),50)}}
 function sr(q){q=q.trim().toLowerCase();const L=q?A.filter(a=>(a.title||'').toLowerCase().includes(q)).slice(0,8):[];
@@ -336,7 +449,7 @@ async function getAuth(u){try{const r=await api(u);return r.ok?await r.json():nu
 /* ---------- ishga tushirish ---------- */
 document.querySelectorAll('[data-i]').forEach(e=>{e.innerHTML=ic(e.dataset.i)+(e.dataset.l?`<span>${e.dataset.l}</span>`:'')});
 addEventListener('popstate',go);
-document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
+document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
 $('#az').innerHTML='<span class="dm">A–Z:</span>'+[...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(l=>`<a href="/catalog?sort=az&l=${l}">${l}</a>`).join('');
 (async()=>{const[r,c,b]=await Promise.all([getJ('/api/public/animes'),getJ('/api/public/categories'),getJ('/api/public/banners')]);
 if(Array.isArray(r)&&r.length){A=r;CATS=Array.isArray(c)?c:[];BAN=Array.isArray(b)?b:[]}else{demo=true;A=DEMO;CATS=['Aksiya','Drama','Komediya','Fantastika']}

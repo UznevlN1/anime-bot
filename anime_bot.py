@@ -2647,6 +2647,9 @@ def admin_cat_settings_keyboard():
             InlineKeyboardButton(text="🔧 Texnik ishlar", callback_data="admin_maintenance", style="danger"),
         ],
         [
+            InlineKeyboardButton(text="🌐 Webapp yoqish/oʻchirish", callback_data="admin_webapp", style="primary"),
+        ],
+        [
             InlineKeyboardButton(text="🎬 Avtomatik klip", callback_data="admin_autoclip", style="primary"),
         ],
         [
@@ -9609,6 +9612,48 @@ async def set_maintenance(call: CallbackQuery):
     await call.answer(f"🔧 {status}", show_alert=True)
     await admin_maintenance(call)
 
+# ---- WEBAPP YOQISH / OʻCHIRISH ----
+async def _webapp_is_enabled() -> bool:
+    """Webapp (Telegram mini-ilova) admin tomonidan oʻchirib qoʻyilmaganmi?
+    Sozlama hali yozilmagan boʻlsa — yoqiq deb hisoblanadi."""
+    return await asyncio.to_thread(db.get_setting, "webapp_enabled") != "0"
+
+@dp.callback_query(F.data == "admin_webapp")
+async def admin_webapp(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    status = "✅ Yoqiq" if await _webapp_is_enabled() else "❌ Oʻchiq"
+    try:
+        await call.message.edit_text(
+            f"🌐 <b>Webapp</b>\nHolat: {status}\n\n"
+            "Oʻchirilsa, oddiy foydalanuvchilar webapp'ga kira olmaydi (adminlar bundan mustasno). "
+            "Sayt (anifilm.uz) bunga bogʻliq emas — u ishlashda davom etadi.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Yoqish", callback_data="webapp_on"),
+                    InlineKeyboardButton(text="❌ Oʻchirish", callback_data="webapp_off"),
+                ],
+                [InlineKeyboardButton(text="🔙 Admin panel", callback_data="admin_back")],
+            ]),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        if not _is_message_not_modified(e):
+            raise
+
+@dp.callback_query(F.data.in_(["webapp_on", "webapp_off"]))
+async def set_webapp_enabled(call: CallbackQuery):
+    if not await is_admin_user(call.from_user.id, min_role="super"):
+        await call.answer("Bu funksiya uchun sizning admin darajangiz yetarli emas.", show_alert=True)
+        return
+    value = "1" if call.data == "webapp_on" else "0"
+    await asyncio.to_thread(db.set_setting, "webapp_enabled", value)
+    status = "✅ Yoqildi" if value == "1" else "❌ Oʻchirildi"
+    await log_admin_action(call.from_user, "Webapp holati", status)
+    await call.answer(f"🌐 Webapp: {status}", show_alert=True)
+    await admin_webapp(call)
+
 # ---- KONTENT HIMOYASI ----
 @dp.callback_query(F.data == "admin_content")
 async def admin_content(call: CallbackQuery):
@@ -10453,6 +10498,8 @@ async def admin_help(call: CallbackQuery):
             "filtrlanadi)\n"
             "🔧 Texnik ishlar — yoqilsa, oddiy foydalanuvchilar botga kira olmaydi "
             "(adminlar bundan mustasno)\n"
+            "🌐 Webapp — mini-ilovani (webapp) yoqish/oʻchirish; oʻchirilsa oddiy "
+            "foydalanuvchilar kira olmaydi, sayt (anifilm.uz) bunga bogʻliq emas\n"
             "📣 Eʼlon kanali — yangi anime/qism qoʻshilganda avtomatik eʼlon "
             "yuboriladigan kanal\n\n"
     
@@ -11310,9 +11357,17 @@ async def webapp_access_status(user_id: int):
     """Webapp uchun kirish holatini tekshiradi: texnik ishlar va majburiy obuna."""
     is_admin = user_id == ADMIN_ID
 
-    maintenance = await asyncio.to_thread(db.get_setting, "maintenance") == "1"
+    cfg = await asyncio.to_thread(db.get_settings, ["maintenance", "webapp_enabled"])
+    maintenance = cfg.get("maintenance") == "1"
     if maintenance and not is_admin:
         return {"maintenance": True, "subscribed": True, "channels": []}
+
+    # Admin webapp'ni oʻchirgan boʻlsa (🌐 Webapp tugmasi): adminlardan boshqa hamma uchun
+    # "texnik ishlar" kabi javob qaytaramiz — webapp'ning mavjud "texnik ishlar" ekrani
+    # chiqadi, webapp_access_status ishlatadigan barcha endpointlar esa 503 qaytaradi.
+    # (anifilm.uz sayti bu tekshiruvdan oʻtmaydi — u oʻz /api/public va /api/site yoʻllaridan foydalanadi.)
+    if cfg.get("webapp_enabled") == "0" and not is_admin:
+        return {"maintenance": True, "webapp_disabled": True, "subscribed": True, "channels": []}
 
     if is_admin:
         return {"maintenance": False, "subscribed": True, "channels": []}
@@ -11807,6 +11862,7 @@ async def webapp_public_anime(request):
         anime_id = int(request.match_info["anime_id"])
         data = await asyncio.to_thread(db.get_anime_detail_for_webapp, anime_id)
         prices = await premium_settings()
+        protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
     except Exception:
         return web.json_response({"error": "unavailable"}, status=503)
     if not data:
@@ -11816,6 +11872,8 @@ async def webapp_public_anime(request):
     out["episodes"] = [{"id": e["id"], "n": e["episode_number"],
                         "locked": bool(_episode_locked(e, 0, prices, False, anime=data))}
                        for e in data.get("episodes", [])]
+    # Sayt pleyeridagi "Yuklab olish" tugmasi: "Kontent himoyasi" yoqilgan boʻlsa yashiriladi.
+    out["can_download"] = not protect
     return web.json_response(out, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30"})
 
 async def webapp_public_categories(request):
@@ -12110,6 +12168,35 @@ async def serve_webapp_index(request):
         logger.error(f"serve_webapp_index xato: {e} | path: {filepath}")
         return web.Response(text="Server xatosi yuz berdi", status=500)
 
+_VIDEO_EXT = {
+    "video/mp4": ".mp4", "video/x-matroska": ".mkv", "video/webm": ".webm",
+    "video/quicktime": ".mov", "video/x-msvideo": ".avi", "video/mpeg": ".mpg",
+}
+# Yuklab olinadigan fayl kengaytmasi faqat video formatlaridan biri boʻladi.
+_VIDEO_EXT_OK = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".mpg", ".mpeg", ".m4v", ".3gp", ".wmv", ".flv", ".ts"}
+
+async def _download_disposition(ep, media, mime_type) -> str:
+    """/stream/{id}?dl=1 uchun Content-Disposition: brauzer videoni "Anime nomi - 5-qism.mp4"
+    kabi fayl nomi bilan saqlaydi. Nomdagi taqiqlangan belgilar olib tashlanadi; sarlavhaga
+    ASCII nusxa va RFC 5987 (filename*) koʻrinishidagi UTF-8 nom yoziladi."""
+    from urllib.parse import quote
+    anime = None
+    try:
+        anime = await asyncio.to_thread(db.get_anime, ep["anime_id"])
+    except Exception:
+        pass
+    title = (anime or {}).get("title") or "anime"
+    is_film = (anime or {}).get("media_type") == "film"
+    ext = os.path.splitext(getattr(media, "file_name", None) or "")[1].lower()
+    if ext not in _VIDEO_EXT_OK:
+        ext = _VIDEO_EXT.get((mime_type or "").lower(), ".mp4")
+    base = title if is_film else f"{title} - {ep.get('episode_number')}-qism"
+    base = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", base)
+    base = re.sub(r"\s+", " ", base).strip(" .") or "anime"
+    name = base[:120].rstrip(" .") + ext
+    ascii_name = re.sub(r"\s+", " ", re.sub(r"[^A-Za-z0-9._ -]+", "", name.encode("ascii", "ignore").decode())).strip() or ("video" + ext)
+    return "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (ascii_name, quote(name, safe=""))
+
 async def start_web_server():
     import os
     import mimetypes
@@ -12195,6 +12282,12 @@ async def start_web_server():
         if await is_episode_locked_for_user(ep, user_id):
             return web.Response(text="Bu qism hozircha faqat Premium foydalanuvchilar uchun ochiq", status=403)
 
+        # ?dl=1 — saytdagi "Yuklab olish" tugmasi. "Kontent himoyasi" yoqilgan boʻlsa
+        # (forward/saqlash taqiqlangan) yuklab olish ham yopiladi.
+        is_download = request.query.get("dl") == "1"
+        if is_download and await asyncio.to_thread(db.get_setting, "content_protect") == "1":
+            return web.Response(text="Bu videoni yuklab olish taqiqlangan", status=403)
+
         if not await _ensure_pyro_ready(pyro):
             return web.Response(text="Onlayn ko'rish vaqtincha ishlamayapti, birozdan so'ng qayta urinib ko'ring", status=503)
 
@@ -12263,11 +12356,14 @@ async def start_web_server():
             start = 0
         length = end - start + 1
 
-        resp = web.StreamResponse(status=status_code, headers={
+        resp_headers = {
             "Content-Type": mime_type,
             "Content-Length": str(length),
             "Accept-Ranges": "bytes",
-        })
+        }
+        if is_download:
+            resp_headers["Content-Disposition"] = await _download_disposition(ep, media, mime_type)
+        resp = web.StreamResponse(status=status_code, headers=resp_headers)
         if status_code == 206:
             resp.headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
         await resp.prepare(request)
@@ -12441,6 +12537,10 @@ async def handle_webapp_data(message: Message):
         u = await asyncio.to_thread(db.get_user, message.from_user.id)
         if u and u.get("is_blocked"):
             await message.answer("🚫 Siz bloklandingiz.")
+            return
+
+        if not await _webapp_is_enabled() and not await is_admin_user(message.from_user.id):
+            await message.answer("🌐 Webapp vaqtincha oʻchirilgan.")
             return
 
         episode_id = data.get("episode_id")
