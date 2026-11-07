@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0e1330">
 <title>AniFilm.uz — Oʻzbek tilidagi animelar</title>
+<meta property="og:type" content="website"><meta property="og:site_name" content="AniFilm.uz"><meta property="og:title" content="AniFilm.uz — Oʻzbek tilidagi animelar"><meta property="og:description" content="Eng yangi animelar oʻzbek tilida: tarjima va dublyaj qismlar har kuni yangilanadi."><meta name="twitter:card" content="summary">
 <link rel="canonical" href="https://www.anifilm.uz/">
 <meta name="description" content="Eng yangi animelar oʻzbek tilida: tarjima va dublyaj qismlar har kuni yangilanadi. Saytning oʻzida onlayn koʻring.">
 <link rel="icon" href="/favicon.ico">
@@ -114,7 +115,6 @@ footer .soc a:hover{background:var(--p2)}
 .tg label{display:flex;align-items:center;gap:8px;color:var(--dm);font-size:13px;cursor:pointer}.tg input{accent-color:var(--tq);width:16px;height:16px}
 body.lo:before{content:"";position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.93)}body.lo .pl{z-index:41}
 .hs{display:none;flex:1;max-width:440px;align-items:center;gap:8px;background:var(--p1);border:1px solid var(--ln);border-radius:12px;padding:10px 14px;color:var(--dm)}
-.az{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px}.az a{margin:0;padding:4px 7px;color:var(--dm)}
 @media(min-width:900px){.hs{display:flex}header .ib[data-i=search]{display:none}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 /* ===== Barcha qurilmalar uchun moslashuvchan dizayn ===== */
@@ -151,7 +151,6 @@ section{margin-top:clamp(28px,4vw,52px)}
 .ttl{font-size:clamp(24px,3.2vw + 8px,44px)}
 .btn{min-height:44px;padding:12px clamp(18px,2.4vw,28px)}
 .chip{padding:10px 16px}
-.az a{padding:9px}
 .md{padding:max(16px,env(safe-area-inset-top)) 16px 16px}
 @media(min-width:1280px){.hm{grid-template-columns:minmax(0,1fr) 360px}}
 @media(hover:hover) and (pointer:fine){.row{scrollbar-width:thin;scrollbar-color:var(--ln) transparent}.row::-webkit-scrollbar{display:block;height:8px}.row::-webkit-scrollbar-thumb{background:var(--ln);border-radius:4px}}
@@ -250,19 +249,90 @@ body.lo .tg{position:relative;z-index:41}
 .wg.wide .pl{width:min(100%,calc((100vh - 110px)*16/9));max-height:calc(100vh - 110px);margin-left:auto;margin-right:auto}
 .wg.wide .pl.fz{width:100%;max-height:none}
 }
+/* ===== Shisha dizayn (glassmorphism) ===== */
+:root{--gl:rgba(255,255,255,.07);--gb:rgba(255,255,255,.15);--gh:inset 0 1px 0 rgba(255,255,255,.2),0 14px 36px -18px rgba(0,0,0,.7)}
+header,.tabs,.box,.note,.dl,.soc a,.hs,.up{background:var(--gl);border:1px solid var(--gb);box-shadow:var(--gh);-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%)}
+header{background:rgba(14,19,48,.5);border-width:0 0 1px;box-shadow:none}
+.tabs{background:rgba(14,19,48,.55);border-width:1px 0 0}
+.box{background:rgba(26,32,78,.62)}
+.md{background:rgba(6,9,28,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.ib,.chip,.ep,.side .tb button,input.f,select.f,.bar select{background:var(--gl);border:1px solid var(--gb)}
+.ib{box-shadow:var(--gh)}.chip:hover{background:rgba(45,212,191,.16)}
+.bot{background:linear-gradient(135deg,rgba(45,212,191,.18),rgba(240,71,108,.1) 62%,rgba(255,255,255,.05));border:1px solid var(--gb);box-shadow:var(--gh);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+.bd.r{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.22);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+@media(hover:hover){.c .po{transition:transform .3s,box-shadow .3s}.c:hover .po{transform:translateY(-4px);box-shadow:0 22px 34px -16px rgba(0,0,0,.8),0 0 0 1px rgba(45,212,191,.45)}}
+.pc{background:linear-gradient(0deg,rgba(6,9,28,.6),rgba(6,9,28,0))}
+.pc-row{padding:2px 8px;border-radius:16px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.dl{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 20px;margin:14px 0;padding:14px 16px;border-radius:18px}
+.dl b{display:block;font-size:16px}.dl small{color:var(--dm)}
+.dlb{display:flex;flex-wrap:wrap;gap:8px}.dlb .btn{margin:0}
+.btn.tgb{background:linear-gradient(135deg,#2aabee,#229ed9);color:#fff;box-shadow:0 12px 24px -14px rgba(42,171,238,.9)}
+.up{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));z-index:29;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .2s,transform .2s}
+.up.on{opacity:1;transform:none;pointer-events:auto}
+@media(min-width:768px){.up{bottom:24px}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){header,.tabs,.box,.dl,.pc-row,.up{background:rgba(22,28,69,.94)}}
+/* ===== Zamonaviy koʻrinish: suzuvchi shisha panellar ===== */
+:root{--r:clamp(14px,1.5vw,22px)}
+html{scroll-padding-top:96px}
+header{top:max(8px,env(safe-area-inset-top));width:min(calc(100% - 16px),1360px);margin:max(8px,env(safe-area-inset-top)) auto 0;padding-top:0;border:1px solid var(--gb);border-radius:22px;overflow:hidden;box-shadow:var(--gh)}
+@media(min-width:1700px){header{width:min(calc(100% - 16px),1560px)}}
+header .wrap{padding-left:clamp(14px,1.8vw,22px);padding-right:clamp(14px,1.8vw,22px)}
+.stripe{height:2px}
+.ib{border-radius:50%}.hs{border-radius:99px}
+nav.top a{border-radius:99px}nav.top a.on{box-shadow:none;background:rgba(45,212,191,.16);color:var(--tx)}
+.btn{border-radius:99px;background:linear-gradient(135deg,#34e0cb,#1fbfa8)}
+.hero .meta{gap:8px}.hero .meta span{padding:5px 13px;border-radius:99px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);color:#fff;font-weight:600;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.hero .meta span+span:before{display:none}
+.dots i{height:5px;border-radius:3px;transition:width .3s,background .3s}.dots i.on{width:34px}
+footer{margin-top:clamp(40px,6vw,72px)}
+footer .soc{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;max-width:none}
+footer .soc a{flex-direction:row;gap:10px;padding:10px 18px;border-radius:99px}
+.soc svg{width:22px;height:22px}
+@media(max-width:767.98px){
+.tabs{left:max(10px,env(safe-area-inset-left));right:max(10px,env(safe-area-inset-right));bottom:calc(10px + env(safe-area-inset-bottom));padding:6px;gap:4px;border:1px solid var(--gb);border-radius:26px;box-shadow:var(--gh)}
+.tabs a{padding:8px 0 6px;border-radius:20px}
+.tabs a.on{background:rgba(45,212,191,.16)}.tabs a.on:before{display:none}
+body{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+.up{bottom:calc(100px + env(safe-area-inset-bottom))}}
+/* ===== Tuzatishlar ===== */
+html:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(900px 520px at 10% -6%,rgba(45,212,191,.22),transparent 62%),radial-gradient(800px 520px at 96% 6%,rgba(240,71,108,.18),transparent 62%),radial-gradient(900px 600px at 50% 112%,rgba(255,185,56,.13),transparent 62%)}
+body{background:var(--bg)}
+.stripe{display:none}header{margin-bottom:10px}
+.bd.r{background:rgba(14,19,48,.62);-webkit-backdrop-filter:none;backdrop-filter:none}
+.ad .meta{gap:8px}.ad .meta span{padding:3px 11px;border-radius:99px;background:rgba(255,255,255,.1)}.ad .meta span+span:before{display:none}
+.hs{text-align:left;cursor:pointer}
+@media(max-width:767.98px){header .ib{display:none}}
+/* ===== Pastga surganda panellar yashirinadi, tepaga surganda qaytadi ===== */
+header,.tabs{transition:transform .35s cubic-bezier(.2,.7,.2,1),opacity .25s}
+body.hdn header{transform:translateY(calc(-100% - 24px - env(safe-area-inset-top)));opacity:0;pointer-events:none}
+body.hdn .tabs{transform:translateY(calc(100% + 24px + env(safe-area-inset-bottom)));opacity:0;pointer-events:none}
+body.hdn header:focus-within,body.hdn .tabs:focus-within{transform:none;opacity:1;pointer-events:auto}
+.up{transition:opacity .2s,transform .2s,bottom .35s cubic-bezier(.2,.7,.2,1)}
+@media(max-width:767.98px){body.hdn .up{bottom:calc(20px + env(safe-area-inset-bottom))}}
+/* ===== Telefonda logotip oʻrtada ===== */
+@media(max-width:767.98px){header .wrap{justify-content:center}header .sp{display:none}.logo{font-size:24px}}
+/* ===== Xabar (alert oʻrniga) ===== */
+#toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));z-index:70;max-width:calc(100% - 32px);padding:12px 20px;border-radius:99px;background:rgba(26,32,78,.72);border:1px solid var(--gb);box-shadow:var(--gh);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);font-weight:600;opacity:0;transform:translate(-50%,12px);pointer-events:none;transition:opacity .2s,transform .2s}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+@media(min-width:768px){#toast{bottom:32px}}
 </style>
 </head>
 <body>
 <header><div class="wrap"><a class="logo disp" href="/">Ani<span>Film</span></a>
 <nav class="top"><a data-t="home" href="/">Bosh sahifa</a><a data-t="catalog" href="/catalog">Katalog</a><a data-t="favorites" href="/favorites">Sevimlilar</a><a href="#" onclick="rnd();return false">Tasodifiy</a></nav>
-<span class="sp"></span></div><div class="stripe"></div></header>
+<span class="sp"></span><button class="hs" onclick="S(1)" aria-label="Qidirish"><span data-i="search"></span>Anime nomini yozing…</button><button class="ib" data-i="search" onclick="S(1)" aria-label="Qidirish"></button><button class="ib" data-i="user" onclick="auth()" aria-label="Profil"></button></div><div class="stripe"></div></header>
 <main id="app"><div id="sk" aria-hidden="true"><div class="hero sk"></div><div class="wrap"><div class="skr"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="skr"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div></main><script>location.pathname==='/'||document.getElementById('sk').remove()</script>
 <footer><div class="bot"><div><h2 class="disp">Birinchi boʻlib koʻring</h2><p>Yangi qismlar chiqqanda birinchilardan boʻlib xabardor boʻlish uchun botga qoʻshiling.</p></div><a class="btn" href="https://t.me/ANIFILM_BOT" target="_blank" rel="noopener"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>@ANIFILM_BOT</a></div><div class="soc"><a href="https://t.me/anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gtg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#229ed9"/></linearGradient></defs><circle cx="12" cy="12" r="10.4" fill="#fff"/><path fill="url(#gtg)" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>Telegram</a><a href="https://www.instagram.com/anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><radialGradient id="gig" cx=".3" cy="1.07" r="1.28"><stop offset="0" stop-color="#fdf497"/><stop offset=".05" stop-color="#fdf497"/><stop offset=".45" stop-color="#fd5949"/><stop offset=".6" stop-color="#d6249f"/><stop offset=".9" stop-color="#285aeb"/></radialGradient></defs><rect width="24" height="24" rx="6.2" fill="url(#gig)"/><rect x="5" y="5" width="14" height="14" rx="4.2" fill="none" stroke="#fff" stroke-width="1.7"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="#fff" stroke-width="1.7"/><circle cx="16.3" cy="7.7" r="1" fill="#fff"/></svg>Instagram</a><a href="https://www.youtube.com/@anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect y="3.6" width="24" height="16.8" rx="5" fill="#f00"/><path fill="#fff" d="M9.5 8.4v7.2l6.3-3.6z"/></svg>YouTube</a><a href="https://www.tiktok.com/@anifilm_uz" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><defs><path id="gtk" d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></defs><rect width="24" height="24" rx="6.2"/><g transform="translate(4.8 4.8) scale(.6)"><use href="#gtk" fill="#25f4ee" transform="translate(-1 -1)"/><use href="#gtk" fill="#fe2c55" transform="translate(1 1)"/><use href="#gtk" fill="#fff"/></g></svg>TikTok</a></div>
-<div class="az" id="az"></div>
 <p>Yosh toifasi: 16+ · <a href="https://t.me/Uznevl" target="_blank" rel="noopener">Reklama va aloqa</a> · <a href="https://t.me/ANIFILM_BOT">DMCA</a></p><p>© 2026 anifilm.uz</p></footer>
 <nav class="tabs"><a data-t="home" href="/" data-i="home" data-l="Bosh"></a><a data-t="catalog" href="/catalog" data-i="grid" data-l="Katalog"></a><a href="#" onclick="S(1);return false" data-i="search" data-l="Qidiruv"></a><a data-t="favorites" href="/favorites" data-i="heart" data-l="Sevimli"></a><a href="#" onclick="auth();return false" data-i="user" data-l="Profil"></a></nav>
 <div class="md" id="srch" onclick="if(event.target===this)S(0)"><div class="box"><input class="f" id="si" placeholder="Anime nomini yozing…" autocomplete="off" oninput="sr(this.value)" onkeydown="if(event.key==='Enter'){S(0);nav('/catalog?q='+encodeURIComponent(this.value))}"><div class="sres" id="sres" style="margin-top:12px"></div></div></div>
 <div class="md" id="au" onclick="if(event.target===this)authClose()"><div class="box" id="aub"></div></div>
+<button class="up" id="up" aria-label="Tepaga" onclick="scrollTo({top:0,behavior:'smooth'})"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+<script>(()=>{let ly=scrollY,tk=0;const up=document.getElementById('up'),b=document.body;
+addEventListener('scroll',()=>{if(tk)return;tk=1;requestAnimationFrame(()=>{tk=0;const y=Math.max(0,scrollY),d=y-ly;up.classList.toggle('on',y>700);
+if(y<80||y+innerHeight>=document.documentElement.scrollHeight-4||document.querySelector('.md.on'))b.classList.remove('hdn');
+else if(d>8)b.classList.add('hdn');else if(d<-8)b.classList.remove('hdn');
+if(Math.abs(d)>8||y<80)ly=y})},{passive:true})})()</script>
 <script>
 const $=s=>document.querySelector(s),BOT='https://t.me/ANIFILM_BOT';
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -321,9 +391,11 @@ const a=Object.assign({},A.find(x=>x.id==id)||{},d||{});if(!a.title){ap.innerHTM
 const eps=(d&&d.episodes)||[],p=PROG[id],f=a.media_type==='film',seen=(p&&p.s)||[],res=p&&eps.find(e=>e.id==p.e),tgt=res||eps.find(e=>!e.locked)||eps[0],
 gl=(a.genre||'').split(',').map(x=>x.trim()).filter(Boolean),sim=A.filter(x=>x.id!=a.id&&a.category&&(x.category||'').trim()===(a.category||'').trim()).slice(0,12);
 document.title=a.title+' — AniFilm.uz';
-ap.innerHTML=`<div class="ad"><div class="bgb" style="${a.photo_id?`background-image:url(${pic(a)})`:`background:hsl(${hue(a.id)} 45% 28%)`}"></div><div class="wrap">${po(a)}<div><h1 class="disp ttl" style="margin-top:0">${esc(a.title)}</h1><div class="meta">${[a.year,f?'Film':'Serial',a.country,a.language,a.status==='finished'?'Tugagan':(a.status==='ongoing'&&!f?'Davom etmoqda':''),a.views?a.views+' marta koʻrilgan':''].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join('')}</div><div class="chips">${gl.map(g=>`<a class="chip" href="/catalog?genre=${encodeURIComponent(g)}">${esc(g)}</a>`).join('')}</div><p class="desc">${esc(a.description||'')}</p><div class="bar">${tgt?`<a class="btn" href="/watch/${id}/${tgt.id}">${ic('play')} ${res?`Davom ettirish · ${p.n}-qism`:f?'Filmni koʻrish':'Koʻrishni boshlash'}</a>`:`<a class="btn" href="${BOT}?start=anime_${id}">Botda koʻrish</a>`}<button class="btn g${FAV.has(+id)?' on':''}" onclick="toggleFav(${+id},this)">${ic('heart')} Sevimli</button><button class="btn g" onclick="share()">Ulashish</button></div></div></div></div><div class="wrap">${!f&&eps.length?`<section><div class="sh"><h2 class="disp">Qismlar</h2></div><div class="eps">${eps.map(e=>`<a class="ep${res&&e.id==res.id?' on':''}${seen.includes(e.id)?' seen':''}${e.locked?' lk':''}" href="/watch/${id}/${e.id}">${e.n}</a>`).join('')}</div></section>`:''}${row('Oʻxshash animelar',sim)}</div>`}
-function share(){const u=location.href;if(navigator.share)navigator.share({title:document.title,url:u}).catch(()=>{});else{if(navigator.clipboard)navigator.clipboard.writeText(u);alert('Havola nusxalandi')}}
+ap.innerHTML=`<div class="ad"><div class="bgb" style="${a.photo_id?`background-image:url(${pic(a)})`:`background:hsl(${hue(a.id)} 45% 28%)`}"></div><div class="wrap">${po(a)}<div><h1 class="disp ttl" style="margin-top:0">${esc(a.title)}</h1><div class="meta">${[a.year,f?'Film':'Serial',a.country,a.language,a.status==='finished'?'Tugagan':(a.status==='ongoing'&&!f?'Davom etmoqda':''),a.views?a.views+' marta koʻrilgan':''].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join('')}</div><div class="chips">${gl.map(g=>`<a class="chip" href="/catalog?genre=${encodeURIComponent(g)}">${esc(g)}</a>`).join('')}</div><p class="desc">${esc(a.description||'')}</p><div class="bar">${tgt?`<a class="btn" href="/watch/${id}/${tgt.id}">${ic('play')} ${res?`Davom ettirish · ${p.n}-qism`:f?'Filmni koʻrish':'Koʻrishni boshlash'}</a>`:`<a class="btn" href="${BOT}?start=anime_${id}">Botda koʻrish</a>`}<button class="btn g${FAV.has(+id)?' on':''}" onclick="toggleFav(${+id},this)">${ic('heart')} Sevimli</button><button class="btn g" onclick="share()">Ulashish</button><a class="btn g" href="${BOT}?start=anime_${id}" target="_blank" rel="noopener">${ic('dl')} Botdan yuklab olish</a></div></div></div></div><div class="wrap">${!f&&eps.length?`<section><div class="sh"><h2 class="disp">Qismlar</h2></div><div class="eps">${eps.map(e=>`<a class="ep${res&&e.id==res.id?' on':''}${seen.includes(e.id)?' seen':''}${e.locked?' lk':''}" href="/watch/${id}/${e.id}">${e.n}</a>`).join('')}</div></section>`:''}${row('Oʻxshash animelar',sim)}</div>`}
+function share(){const u=location.href;if(navigator.share)navigator.share({title:document.title,url:u}).catch(()=>{});else if(navigator.clipboard)navigator.clipboard.writeText(u).then(()=>toast('Havola nusxalandi'),()=>toast('Nusxalab boʻlmadi'));else toast('Nusxalab boʻlmadi')}
+function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.setAttribute('role','status');document.body.appendChild(t)}t.textContent=m;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),2200)}
 /* ---------- pleyer boshqaruvi: koʻrilgan joy chizigʻi, kengaytirish, yuklab olish ---------- */
+function dlp(e,d){if(e.locked)return'';const t=d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism',nm=esc((t||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');return`<div class="dl"><div><b>Yuklab olish</b><small>${esc(t)}</small></div><div class="dlb">${d.can_download===false?'':`<a class="btn" href="/stream/${e.id}?site=1&amp;dl=1" download="${nm}">${ic('dl')} Saytdan</a>`}<a class="btn tgb" href="${BOT}?start=ep_${e.id}" target="_blank" rel="noopener">${ic('dl')} Telegram botdan</a></div></div>`}
 const mmss=t=>{t=isFinite(t)&&t>0?Math.floor(t):0;const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
 const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
 const ctl=(e,d)=>{const nm=esc(((d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism')||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');
@@ -389,7 +461,7 @@ if(!eps.length){ap.innerHTML=empty('Bu animening qismlari saytda hali mavjud ema
 const p=PROG[aid];let i=eps.findIndex(e=>e.id==eid);if(i<0){i=p?eps.findIndex(e=>e.id==p.e):-1;if(i<0)i=Math.max(0,eps.findIndex(e=>!e.locked))}
 const e=eps[i],pv=eps[i-1],nx=eps[i+1],seen=(p&&p.s)||[];
 const lock=`<div class="ov"><div><h2 class="disp">Premium qism</h2><p class="dm">Bu qism hozircha faqat Premium foydalanuvchilar uchun.</p><br><a class="btn" href="${BOT}?start=anime_${aid}">Botda ochish</a></div></div>`;
-ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>${ctl(e,d)}`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span><a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></div><div class="tg"><label><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}>Avto keyingi qism</label><label><input type="checkbox" id="tl">Chiroqni oʻchirish</label><button class="btn g" onclick="share()" style="margin:0">Ulashish</button></div><div class="bar">${pv?`<a class="btn g" href="/watch/${aid}/${pv.id}">‹ Oldingi</a>`:''}${nx?`<a class="btn" href="/watch/${aid}/${nx.id}">Keyingi ›</a>`:''}<select id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button class="btn g" id="sk">+85 soniya</button></div></div><div class="eps">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}">${x.n}</a>`).join('')}</div></div>`;
+ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>${ctl(e,d)}`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span><a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></div><div class="tg"><label><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}>Avto keyingi qism</label><label><input type="checkbox" id="tl">Chiroqni oʻchirish</label><button class="btn g" onclick="share()" style="margin:0">Ulashish</button></div>${dlp(e,d)}<div class="bar">${pv?`<a class="btn g" href="/watch/${aid}/${pv.id}">‹ Oldingi</a>`:''}${nx?`<a class="btn" href="/watch/${aid}/${nx.id}">Keyingi ›</a>`:''}<select id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button class="btn g" id="sk">+85 soniya</button></div></div><div class="eps">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}">${x.n}</a>`).join('')}</div></div>`;
 document.title=`${d.title} · ${e.n}-qism — AniFilm.uz`;
 if(TOKEN)api('/api/site/history',{method:'POST',body:JSON.stringify({anime_id:Number(aid)})}).catch(()=>{});
 const v=$('#v');if(!v){$('#sp').disabled=true;$('#sk').disabled=true;return}
@@ -450,7 +522,6 @@ async function getAuth(u){try{const r=await api(u);return r.ok?await r.json():nu
 document.querySelectorAll('[data-i]').forEach(e=>{e.innerHTML=ic(e.dataset.i)+(e.dataset.l?`<span>${e.dataset.l}</span>`:'')});
 addEventListener('popstate',go);
 document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
-$('#az').innerHTML='<span class="dm">A–Z:</span>'+[...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(l=>`<a href="/catalog?sort=az&l=${l}">${l}</a>`).join('');
 (async()=>{const[r,c,b]=await Promise.all([getJ('/api/public/animes'),getJ('/api/public/categories'),getJ('/api/public/banners')]);
 if(Array.isArray(r)&&r.length){A=r;CATS=Array.isArray(c)?c:[];BAN=Array.isArray(b)?b:[]}else{demo=true;A=DEMO;CATS=['Aksiya','Drama','Komediya','Fantastika']}
 loadFav();go()})();
