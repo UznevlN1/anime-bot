@@ -359,6 +359,8 @@ button:active,.tab:active,.seg-btn:active,.chip:active,
 .sub-channels{display:flex;flex-direction:column;gap:10px;padding:0 20px;margin-bottom:20px;}
 .sub-channel-btn{background:var(--bg-card);border:1px solid var(--border);color:var(--text);padding:13px;border-radius:12px;font-size:14px;font-weight:600;text-align:left;}
 .sub-check-btn{margin:0 20px;width:calc(100% - 40px);justify-content:center;}
+#maintenanceSite{margin-bottom:10px;}
+.sub-check-btn.alt{background:var(--bg-card);border:1px solid var(--border);color:var(--text);box-shadow:none;}
 
 /* Profil */
 .pf-wrap{padding:0 18px 24px;}
@@ -833,6 +835,7 @@ body.light-theme{--bg:#f4f4f8;--bg-card:#ffffff;--bg-card2:#eeeef4;--border:#e2e
     <div class="block-icon" id="maintenanceIcon">🔧</div>
     <div class="block-title" id="maintenanceTitle">Texnik ishlar olib borilmoqda</div>
     <div class="block-sub" id="maintenanceSub">Iltimos, birozdan so'ng qayta urinib ko'ring</div>
+    <button class="btn-primary sub-check-btn" id="maintenanceSite" style="display:none;">🌐 anifilm.uz saytini ochish</button>
     <button class="btn-primary sub-check-btn" id="maintenanceRetry">🔄 Qayta urinish</button>
   </div>
 </main>
@@ -2591,6 +2594,14 @@ function renderSubscribeChannels(channels){
     wrap.appendChild(b);
   });
 }
+// Webapp admin tomonidan o'chirilganda "Webapp vaqtincha o'chirilgan" ekranida sayt tugmasini ko'rsatadi.
+// Saytga o'tish havolasini o'zgartirmoqchi bo'lsangiz — faqat shu yerni tahrirlang.
+const SITE_LINK='https://anifilm.uz';
+function setMaintenanceSite(show){
+  document.getElementById('maintenanceSite').style.display=show?'':'none';
+  document.getElementById('maintenanceRetry').classList.toggle('alt',!!show);
+}
+document.getElementById('maintenanceSite').addEventListener('click',()=>{tg?.openLink?tg.openLink(SITE_LINK):window.open(SITE_LINK,'_blank');});
 async function checkAccess(){
   const uid=getUid();
   if(!uid){
@@ -2599,7 +2610,7 @@ async function checkAccess(){
     // ko'rsatish chalkashtiradi — aslida sabab obuna emas, balki sessiya
     // aniqlanmagani. Shuning uchun buni alohida, aniq xabar bilan ko'rsatamiz.
     document.getElementById('maintenanceIcon').textContent='⚠️';
-    document.getElementById('maintenanceTitle').textContent='Foydalanuvchi aniqlanmadi';
+    setMaintenanceSite(false);document.getElementById('maintenanceTitle').textContent='Foydalanuvchi aniqlanmadi';
     document.getElementById('maintenanceSub').textContent='Iltimos, ilovani bot ichidagi "🎌 Animelarni ko\'rish" tugmasi orqali qayta oching';
     showBlockView('maintenance');
     return false;
@@ -2608,14 +2619,16 @@ async function checkAccess(){
     const status=await fetchJSON(`${API}/check_access?${initDataQS()}`);
     if(status.bot_username)BOT_USERNAME=status.bot_username;
     if(status.maintenance){
-      document.getElementById('maintenanceIcon').textContent='🔧';
-      document.getElementById('maintenanceTitle').textContent='Texnik ishlar olib borilmoqda';
-      document.getElementById('maintenanceSub').textContent='Iltimos, birozdan so\'ng qayta urinib ko\'ring';
+      // webapp_disabled: admin botdagi "🌐 Webapp yoqish/o'chirish" tugmasi bilan webapp'ni o'chirib qo'ygan
+      const off=!!status.webapp_disabled;setMaintenanceSite(off);
+      document.getElementById('maintenanceIcon').textContent=off?'🌐':'🔧';
+      document.getElementById('maintenanceTitle').textContent=off?'Webapp vaqtincha o\'chirilgan':'Texnik ishlar olib borilmoqda';
+      document.getElementById('maintenanceSub').textContent=off?'Animelarni hozircha botning o\'zida yoki anifilm.uz saytida ko\'rishingiz mumkin. Birozdan so\'ng qayta urinib ko\'ring':'Iltimos, birozdan so\'ng qayta urinib ko\'ring';
       showBlockView('maintenance');return false;
     }
     if(status.blocked){
       document.getElementById('maintenanceIcon').textContent='🚫';
-      document.getElementById('maintenanceTitle').textContent='Siz bloklangansiz';
+      setMaintenanceSite(false);document.getElementById('maintenanceTitle').textContent='Siz bloklangansiz';
       document.getElementById('maintenanceSub').textContent='Botdan foydalanish huquqingiz cheklangan';
       showBlockView('maintenance');return false;
     }
@@ -2629,7 +2642,7 @@ async function checkAccess(){
     // butunlay chetlab o'tilardi. Endi bunday holatda ilova ochilmaydi —
     // xatolik ekrani va "qayta urinish" tugmasi ko'rsatiladi.
     document.getElementById('maintenanceIcon').textContent='⚠️';
-    document.getElementById('maintenanceTitle').textContent='Serverga ulanib bo\'lmadi';
+    setMaintenanceSite(false);document.getElementById('maintenanceTitle').textContent='Serverga ulanib bo\'lmadi';
     document.getElementById('maintenanceSub').textContent='Internetni tekshiring va qayta urinib ko\'ring';
     showBlockView('maintenance');
     return false;
