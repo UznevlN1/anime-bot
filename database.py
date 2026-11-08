@@ -49,7 +49,7 @@ _CONN_OPTIONS = "-c timezone=Asia/Tashkent"
 # zaxira bilan, lekin cheksiz emas.
 _CONNECT_TIMEOUT = 10
 _pool = psycopg2.pool.ThreadedConnectionPool(
-    minconn=1,
+    minconn=5,
     maxconn=25,  # 10 dan oshirildi: bot + webapp bir vaqtda ko'p so'rov yuborganda
                  # ulanish yetishmay ("pool exhausted") xatolik/sekinlashuv bo'lmasligi uchun
     dsn=DATABASE_URL,
@@ -724,10 +724,19 @@ def set_premium(user_id, until_dt, plan=None, active=True):
         put_conn(conn)
 
 def extend_premium(user_id, days, plan=None):
-    """Mavjud muddatga kun qo'shadi (agar hali faol bo'lsa), aks holda hozirdan boshlab hisoblaydi."""
+    """Mavjud muddatga kun qo'shadi (agar hali faol bo'lsa), aks holda hozirdan boshlab hisoblaydi.
+    days manfiy bo'lsa (masalan referal bonusini qaytarib olish) muddat QISQARADI: faol Premium
+    bo'lmasa hech narsa yozilmaydi; natija o'tmishga tushsa Premium o'chiriladi (ilgari o'tgan
+    sana is_premium=1 bilan yozilib qolardi)."""
     status = get_premium_status(user_id)
-    base = datetime.strptime(status["until"], "%Y-%m-%d %H:%M:%S") if status["is_premium"] else now_tz()
+    now = now_tz()
+    if days < 0 and not status["is_premium"]:
+        return now
+    base = datetime.strptime(status["until"], "%Y-%m-%d %H:%M:%S") if status["is_premium"] else now
     new_until = base + timedelta(days=days)
+    if new_until <= now:
+        set_premium(user_id, None, active=False)
+        return new_until
     set_premium(user_id, new_until, plan or status.get("plan"))
     return new_until
 
@@ -837,6 +846,23 @@ def try_claim_pending_payment(payment_id, new_status):
         row = c.fetchone()
         conn.commit()
         return dict(row) if row else None
+    finally:
+        put_conn(conn)
+
+def revert_payment_status(payment_id, from_status, to_status="pending"):
+    """try_claim_pending_payment'ni bekor qiladi: to'lov hozir `from_status` holatida bo'lsagina uni
+    `to_status`ga qaytaradi (masalan Premium berish xato bergach 'approved' -> 'pending', shunda admin
+    to'lovni qayta tasdiqlay oladi). Qaytarilgan bo'lsa True."""
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE premium_payments SET status=%s, processed_at=NULL WHERE id=%s AND status=%s",
+            (to_status, payment_id, from_status)
+        )
+        changed = c.rowcount > 0
+        conn.commit()
+        return changed
     finally:
         put_conn(conn)
 
@@ -1262,7 +1288,7 @@ def search_anime(query):
         # 3) Fuzzy (o'xshashlik) qidiruv — agar natija kam bo'lsa yoki umuman
         # aniq mos kelish topilmasa, yozuv xatolariga chidamli qidiruvni ham qo'shamiz
         if len(results) < 10:
-            c.execute("SELECT * FROM animes")
+            c.execute("SELECT id, title FROM animes")
             all_rows = [dict(r) for r in c.fetchall()]
             q_low = query.lower()
             scored = []
@@ -1282,7 +1308,12 @@ def search_anime(query):
                 if score >= 0.6:
                     scored.append((score, r))
             scored.sort(key=lambda x: x[0], reverse=True)
-            _add([r for _, r in scored[:20]])
+            top_ids = [r["id"] for _, r in scored[:20]]
+            if top_ids:
+                # Faqat eng o'xshash 20 tasi uchun to'liq qatorlar olinadi (media_type va h.k. kerak)
+                c.execute("SELECT * FROM animes WHERE id = ANY(%s)", (top_ids,))
+                full = {row["id"]: dict(row) for row in c.fetchall()}
+                _add([full[i] for i in top_ids if i in full])
 
         return results[:30]
     finally:
@@ -1338,8 +1369,45 @@ def update_anime(anime_id, field, value):
     try:
         c = conn.cursor()
         c.execute(f"UPDATE animes SET {field}=%s WHERE id=%s", (value, anime_id))
+        if field == "total_episodes":
+            # Jami qism soni o'zgardi — yuklanganlar soni unga yetgan bo'lsa, avto-tugatamiz.
+            _auto_finish_anime(c, anime_id)
         conn.commit()
         _invalidate_animes_cache()
+    finally:
+        put_conn(conn)
+
+# Serial animening yuklangan qismlari soni e'lon qilingan jami qism soniga yetgan
+# (yoki oshgan) bo'lsa — masalan 12/12 — uning holati avtomatik 'finished' (Tugagan)
+# bo'ladi. Faqat ongoing -> finished yo'nalishida ishlaydi (hech qachon aksincha),
+# faqat jami qism soni ma'lum seriallarga tegadi, filmlarga tegmaydi.
+_AUTO_FINISH_COND = """
+    media_type IS DISTINCT FROM 'film'
+    AND status IS DISTINCT FROM 'finished'
+    AND total_episodes IS NOT NULL AND total_episodes > 0
+    AND (SELECT COUNT(*) FROM episodes e WHERE e.anime_id = animes.id) >= total_episodes
+"""
+
+def _auto_finish_anime(cursor, anime_id):
+    """Berilgan serial to'liq yuklangan bo'lsa 'finished' qiladi. Chaqiruvchining
+    tranzaksiyasi ichida ishlaydi (commit — chaqiruvchida). O'zgargan bo'lsa True."""
+    cursor.execute(
+        f"UPDATE animes SET status='finished' WHERE id=%s AND {_AUTO_FINISH_COND}",
+        (anime_id,)
+    )
+    return cursor.rowcount > 0
+
+def finish_completed_animes():
+    """Bir martalik tuzatish: yuklangan qismlari soni jami qism soniga yetgan barcha
+    seriallarni 'Tugagan' holatiga o'tkazadi. Nechta qator o'zgargani qaytariladi."""
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute(f"UPDATE animes SET status='finished' WHERE {_AUTO_FINISH_COND}")
+        updated = c.rowcount
+        conn.commit()
+        _invalidate_animes_cache()
+        return updated
     finally:
         put_conn(conn)
 
@@ -1395,6 +1463,8 @@ def add_episode(anime_id, episode_number, channel_message_id):
         c.execute("INSERT INTO episodes (anime_id, episode_number, channel_message_id) VALUES (%s, %s, %s) RETURNING id",
                   (anime_id, episode_number, channel_message_id))
         new_id = c.fetchone()[0]
+        # Yuklangan qismlar soni jami songa yetdimi (masalan 12/12)? — u holda avto-tugatamiz.
+        _auto_finish_anime(c, anime_id)
         conn.commit()
         _invalidate_animes_cache()
         return new_id

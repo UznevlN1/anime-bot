@@ -9,6 +9,7 @@ import math
 import re
 import secrets
 import smtplib
+import ssl
 import subprocess
 import time
 from email.mime.text import MIMEText
@@ -28,6 +29,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import BaseStorage, StorageKey
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import ErrorEvent
 from aiogram.utils.callback_answer import CallbackAnswerMiddleware
 from aiohttp import web
 import aiohttp
@@ -110,8 +112,14 @@ def _send_email_sync(to_addr: str, subject: str, body: str) -> bool:
         msg["Subject"] = subject
         msg["From"] = SMTP_FROM
         msg["To"] = to_addr
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.starttls()
+        ctx = ssl.create_default_context()  # sertifikat va hostname tekshiriladi
+        if SMTP_PORT == 465:
+            server_cm = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=ctx)
+        else:
+            server_cm = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
+        with server_cm as server:
+            if SMTP_PORT != 465:
+                server.starttls(context=ctx)
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_FROM, [to_addr], msg.as_string())
         return True
@@ -119,13 +127,82 @@ def _send_email_sync(to_addr: str, subject: str, body: str) -> bool:
         logger.error(f"Email yuborish xatosi ({to_addr}): {e}")
         return False
 
+# ===== UMUMIY YORDAMCHILAR (kod tekshiruvidan keyin qo'shilgan) =====
+_BG_TASKS = set()
+
+
+def _spawn(coro, name=None):
+    """asyncio.create_task o'rniga ishlatiladi. Event loop vazifalarga faqat ZAIF havola
+    saqlaydi, shuning uchun havolasiz vazifa bajarilish o'rtasida yo'q bo'lib ketishi mumkin.
+    Bu yerda kuchli havola saqlanadi, tugagach olib tashlanadi va xatolik log'ga yoziladi."""
+    task = asyncio.create_task(coro, name=name)
+    _BG_TASKS.add(task)
+
+    def _done(t):
+        _BG_TASKS.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.error("Fon vazifasi xatosi (%s): %r", t.get_name(), exc, exc_info=exc)
+
+    task.add_done_callback(_done)
+    return task
+
+
+def _esc_html(value) -> str:
+    """parse_mode='HTML' xabarlariga qo'yiladigan foydalanuvchi/admin/AI matnini xavfsiz qiladi."""
+    return html.escape("" if value is None else str(value))
+
+
+def _safe_eq(a, b) -> bool:
+    """hmac.compare_digest ASCII bo'lmagan str bilan TypeError beradi (500 xatoga olib kelardi),
+    shuning uchun avval baytlarga o'tkazamiz."""
+    if isinstance(a, str):
+        a = a.encode("utf-8")
+    if isinstance(b, str):
+        b = b.encode("utf-8")
+    return hmac.compare_digest(a, b)
+
+
+def _caption_html(msg) -> str:
+    """Xabar caption'i (yoki matni)ni HTML ko'rinishida qaytaradi: formatlash saqlanadi,
+    <, >, & esa to'g'ri escape qilinadi (aks holda parse_mode=HTML bilan tahrirlash jim buzilardi)."""
+    try:
+        return msg.html_text or ""
+    except Exception:
+        return html.escape(getattr(msg, "caption", None) or getattr(msg, "text", None) or "")
+
+
+async def _require_text(message) -> bool:
+    """Matn kutilayotgan holatlarda (state) rasm, stiker, ovozli xabar va h.k. kelsa handler
+    yiqilmasligi uchun foydalanuvchiga tushuntiradi. False qaytarsa handler to'xtashi kerak
+    (state saqlanib qoladi, foydalanuvchi qayta urinishi mumkin)."""
+    if message.text:
+        return True
+    try:
+        await message.answer("✍️ Iltimos, matn ko'rinishida yuboring (rasm, stiker yoki fayl emas).")
+    except Exception:
+        pass
+    return False
+
+
 # Qism videolari STORAGE_CHANNEL'ga saqlanganda avtomatik qo'yiladigan caption.
 # Raqam (qism tartib raqami) har safar avtomatik hisoblanadi — admin qo'lda
 # yozmaydi. Brend nomini o'zgartirish uchun faqat shu qatorni tahrirlang.
 EPISODE_CREDIT_TAG = "@Ani_Max"
 
-def episode_caption(ep_num: int) -> str:
+def episode_caption(ep_num: int, is_film: bool = False) -> str:
+    # Film — bitta yaxlit video: unga "(1-qism)" yozilmaydi, faqat brend yozuvi.
+    if is_film:
+        return f"{EPISODE_CREDIT_TAG} kanali uchun maxsus"
     return f"{EPISODE_CREDIT_TAG} kanali uchun maxsus ({ep_num}-qism)"
+
+def _ep_title(anime, ep_num) -> str:
+    """Admin xabarlarida qism nomi: film uchun 'film', serial uchun 'N-qism'."""
+    if anime and anime.get("media_type") == "film":
+        return "film"
+    return f"{ep_num}-qism"
 
 # Yangi anime/qism qo'shilganda karta (rasm + tavsif) avtomatik post qilinadigan
 # ochiq reklama/e'lon kanali. Ixtiyoriy — o'rnatilmasa, bu funksiya oddiygina
@@ -591,6 +668,27 @@ dp = Dispatcher(storage=storage)
 # so'rovga handler ishini tugatgach avtomatik javob beradi, agar handler
 # allaqachon o'zi call.answer() chaqirgan bo'lsa — takror yubormaydi.
 dp.callback_query.middleware(CallbackAnswerMiddleware())
+
+
+@dp.error()
+async def global_error_handler(event: ErrorEvent):
+    """Hech bir handler ushlamagan xatolar: to'liq traceback log'ga yoziladi va foydalanuvchi
+    jim qolmaydi (ilgari xatoda hech narsa ko'rinmasdi)."""
+    exc = event.exception
+    logger.error("Handler xatosi: %r", exc, exc_info=exc)
+    # Foydalanuvchi botni bloklagan / Telegram so'rovlarni cheklagan bo'lsa yoki xabar o'zgarmagan bo'lsa
+    # — foydalanuvchiga xabar yuborishning foydasi yo'q.
+    if isinstance(exc, (TelegramForbiddenError, TelegramRetryAfter)) or _is_message_not_modified(exc):
+        return True
+    upd = event.update
+    try:
+        if upd.callback_query:
+            await upd.callback_query.answer("⚠️ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring.", show_alert=True)
+        elif upd.message:
+            await upd.message.answer("⚠️ Xatolik yuz berdi. Iltimos, birozdan keyin qayta urinib ko'ring.")
+    except Exception:
+        pass
+    return True
 
 # Guest Mode (Bot API 10.0, 2026-may) — bot @BotFather'da yoqilgan bo'lsa,
 # a'zo bo'lmagan guruhlarda ham @username orqali chaqirilganda javob bera
@@ -1391,7 +1489,7 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Chek qabul qilindi! Admin tomonidan tekshirilib, tez orada tasdiqlanadi.")
     u = message.from_user
-    uname = f"@{u.username}" if u.username else u.full_name
+    uname = _esc_html(f"@{u.username}" if u.username else u.full_name)
     ai_line = ""
     if ai_service.AI_ENABLED:
         try:
@@ -1402,11 +1500,11 @@ async def premium_screenshot_received(message: Message, state: FSMContext):
             if ocr and (ocr.get("amount") or ocr.get("card_last4")):
                 ai_line = (
                     f"\n\n🤖 AI o'qigani (tekshirib ko'ring): "
-                    f"{ocr.get('amount') or '—'}"
-                    + (f", karta •{ocr['card_last4']}" if ocr.get("card_last4") else "")
+                    f"{_esc_html(ocr.get('amount') or '—')}"
+                    + (f", karta •{_esc_html(ocr['card_last4'])}" if ocr.get("card_last4") else "")
                 )
             if ocr and ocr.get("suspicious"):
-                reason = ocr.get("suspicion_reason") or "sabab aniqlanmadi"
+                reason = _esc_html(ocr.get("suspicion_reason") or "sabab aniqlanmadi")
                 ai_line += (
                     f"\n\n⚠️ <b>AI shubha bildirmoqda:</b> ushbu chek "
                     f"tahrirlangan/qalbaki bo'lishi mumkin — {reason}. "
@@ -1455,10 +1553,21 @@ async def premium_approve(call: CallbackQuery):
         await call.answer("Bu so'rov allaqachon ko'rib chiqilgan", show_alert=True)
         return
     days = PLAN_DAYS.get(payment["plan"], 30)
-    new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
+    try:
+        new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
+    except Exception:
+        # Premium berilmadi — to'lovni qayta "pending" holatiga qaytaramiz, aks holda u "approved"
+        # bo'lib qolib, qayta tasdiqlab bo'lmasdi (try_claim faqat pending'ni oladi).
+        logger.exception("[premium_approve] extend_premium xatosi (payment #%s)", payment_id)
+        try:
+            await asyncio.to_thread(db.revert_payment_status, payment_id, "approved", "pending")
+        except Exception:
+            logger.exception("[premium_approve] to'lov holatini qaytarib bo'lmadi (payment #%s)", payment_id)
+        await call.answer("❌ Premium berishda xatolik. So'rov qayta ochildi — yana bir bor tasdiqlab ko'ring.", show_alert=True)
+        return
     _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
     try:
-        await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ <b>Tasdiqlandi</b>", parse_mode="HTML")
+        await call.message.edit_caption(caption=_caption_html(call.message) + "\n\n✅ <b>Tasdiqlandi</b>", parse_mode="HTML")
     except Exception:
         pass
     try:
@@ -1611,7 +1720,7 @@ async def _finalize_payment_rejection(admin_id, payment_id, reason_for_ai, sugge
         try:
             await bot.edit_message_caption(
                 chat_id=orig_chat_id, message_id=orig_message_id,
-                caption=f"💎 To'lov #{payment_id}\n\n❌ <b>Rad etildi</b> — {reason_for_ai}",
+                caption=f"💎 To'lov #{payment_id}\n\n❌ <b>Rad etildi</b> — {_esc_html(reason_for_ai)}",
                 parse_mode="HTML"
             )
         except Exception:
@@ -1652,6 +1761,8 @@ async def premium_edit_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminPaymentAdjustState.amount)
 async def premium_edit_amount(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id):
         await state.clear()
         return
@@ -1680,7 +1791,20 @@ async def premium_edit_amount(message: Message, state: FSMContext):
     days = max(1, round(full_days * real_amount / requested_amount))
 
     await asyncio.to_thread(db.set_payment_amount, payment_id, real_amount)
-    new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
+    try:
+        new_until = await asyncio.to_thread(db.extend_premium, payment["user_id"], days, payment["plan"])
+    except Exception:
+        logger.exception("[premium_edit_amount] extend_premium xatosi (payment #%s)", payment_id)
+        try:
+            await asyncio.to_thread(db.set_payment_amount, payment_id, payment["amount"])
+            await asyncio.to_thread(db.revert_payment_status, payment_id, "approved", "pending")
+        except Exception:
+            logger.exception("[premium_edit_amount] to'lov holatini qaytarib bo'lmadi (payment #%s)", payment_id)
+        await message.answer(
+            f"❌ To'lov #{payment_id}: Premium berishda xatolik yuz berdi. To'lov qayta kutilayotgan holatga "
+            f"qaytarildi — asl xabardagi tugmalar orqali qayta urinib ko'ring."
+        )
+        return
     _invalidate_sub_cache(payment["user_id"])  # Premium bo'ldi — majburiy obuna talabidan darhol ozod bo'lsin
 
     if chat_id and message_id:
@@ -2099,6 +2223,8 @@ async def padm_gift_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminPremiumGiftState.user_id)
 async def padm_gift_target(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id):
         return
     query = message.text.strip()
@@ -2115,7 +2241,7 @@ async def padm_gift_target(message: Message, state: FSMContext):
     await state.update_data(admgift_to=u["user_id"], admgift_to_name=u["full_name"])
     await state.set_state(AdminPremiumGiftState.choosing_plan)
     await message.answer(
-        f"🎁 <b>{u['full_name']}</b> (<code>{u['user_id']}</code>) uchun muddatni tanlang:",
+        f"🎁 <b>{_esc_html(u['full_name'])}</b> (<code>{u['user_id']}</code>) uchun muddatni tanlang:",
         reply_markup=_admgift_plan_kb(),
         parse_mode="HTML"
     )
@@ -2212,7 +2338,7 @@ async def padm_gift_direct(call: CallbackQuery, state: FSMContext):
     await state.update_data(admgift_to=target_id, admgift_to_name=name)
     await state.set_state(AdminPremiumGiftState.choosing_plan)
     await call.message.answer(
-        f"🎁 <b>{name}</b> (<code>{target_id}</code>) uchun muddatni tanlang:",
+        f"🎁 <b>{_esc_html(name)}</b> (<code>{target_id}</code>) uchun muddatni tanlang:",
         reply_markup=_admgift_plan_kb(),
         parse_mode="HTML"
     )
@@ -2419,7 +2545,7 @@ async def padm_premium_anime_detail(call: CallbackQuery):
     status = "👑 Premium-only" if anime.get("is_premium_only") else "⚪ Oddiy"
     try:
         await call.message.edit_text(
-            f"📌 <b>{anime['title']}</b>\n🆔 Kod: <code>{anime['id']}</code>\nHolati: {status}\n"
+            f"📌 <b>{_esc_html(anime['title'])}</b>\n🆔 Kod: <code>{anime['id']}</code>\nHolati: {status}\n"
             f"🎬 Qismlar soni: {len(episodes)}",
             reply_markup=_premium_anime_detail_kb(anime, episodes),
             parse_mode="HTML"
@@ -2445,7 +2571,7 @@ async def padm_premium_anime_toggle(call: CallbackQuery):
     status = "👑 Premium-only" if new_val else "⚪ Oddiy"
     try:
         await call.message.edit_text(
-            f"📌 <b>{anime['title']}</b>\n🆔 Kod: <code>{anime['id']}</code>\nHolati: {status}\n"
+            f"📌 <b>{_esc_html(anime['title'])}</b>\n🆔 Kod: <code>{anime['id']}</code>\nHolati: {status}\n"
             f"🎬 Qismlar soni: {len(episodes)}",
             reply_markup=_premium_anime_detail_kb(anime, episodes),
             parse_mode="HTML"
@@ -4172,6 +4298,8 @@ async def search_callback(call: CallbackQuery, state: FSMContext):
 
 @dp.message(SearchState.query)
 async def search_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.clear()
     if not await guard_access(message, is_callback=False):
         return
@@ -4179,7 +4307,7 @@ async def search_result(message: Message, state: FSMContext):
     results = await asyncio.to_thread(db.search_anime, query)
     if not results:
         await message.answer(
-            f"❌ <b>{query}</b> topilmadi.",
+            f"❌ <b>{_esc_html(query)}</b> topilmadi.",
             reply_markup=main_keyboard(),
             parse_mode="HTML"
         )
@@ -4193,7 +4321,7 @@ async def search_result(message: Message, state: FSMContext):
         )])
     buttons.append([InlineKeyboardButton(text="🏠 Bosh menu", callback_data="main_menu", style="primary")])
     await message.answer(
-        f"🔍 <b>{query}</b> natijalari:",
+        f"🔍 <b>{_esc_html(query)}</b> natijalari:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         parse_mode="HTML"
     )
@@ -4284,7 +4412,9 @@ async def download_handler(call: CallbackQuery):
     if not episodes:
         await call.answer("❌ Video hali yuklanmagan!", show_alert=True)
         return
-    if anime["media_type"] == "film":
+    # Faqat BITTA videoli film to'g'ridan-to'g'ri yuboriladi; bir nechta videosi bor
+    # bo'lsa (masalan film qismlarga bo'lingan) — serialdagidek qismlar ro'yxati chiqadi.
+    if anime["media_type"] == "film" and len(episodes) == 1:
         ep = episodes[0]
         if await is_episode_locked_for_user(ep, call.from_user.id):
             await call.answer("👑 Bu film faqat Premium foydalanuvchilar uchun ochiq", show_alert=True)
@@ -4337,6 +4467,27 @@ async def backcard_handler(call: CallbackQuery):
         pass
     await send_anime_card(call.message.chat.id, anime)
 
+@dp.callback_query(F.data.startswith("backvid_"))
+async def backvid_handler(call: CallbackQuery):
+    """Qism videosi ostidagi '🔙 Orqaga qaytish': anime kartasi videodan yuqorida turibdi
+    (qism bosilganda o'chirilmaydi), shuning uchun faqat shu video xabari olib tashlanadi.
+    Agar xabarni o'chirib bo'lmasa (masalan juda eski) — kartani qayta yuboramiz."""
+    if not await guard_access(call):
+        return
+    await call.answer()
+    try:
+        anime_id = int(call.data.split("_")[1])
+    except Exception:
+        return
+    try:
+        await call.message.delete()
+        return
+    except Exception:
+        pass
+    anime = await asyncio.to_thread(db.get_anime, anime_id)
+    if anime:
+        await send_anime_card(call.message.chat.id, anime)
+
 @dp.callback_query(F.data.startswith("eps_"))
 async def episodes_page(call: CallbackQuery):
     parts = call.data.split("_")
@@ -4361,6 +4512,14 @@ def video_episodes_keyboard(episodes, anime_id, page=0, highlight_id=None):
             if btn.callback_data and btn.callback_data.startswith("eps_"):
                 _, aid, pg = btn.callback_data.split("_")
                 new_row.append(InlineKeyboardButton(text=btn.text, callback_data=f"epv_{aid}_{pg}_{hid}"))
+            elif btn.callback_data and btn.callback_data.startswith("backcard_"):
+                # Video ostida anime kartasi allaqachon yuqorida turibdi — bu tugma
+                # kartani qayta yubormaydi, faqat shu video xabarini olib tashlaydi.
+                new_row.append(InlineKeyboardButton(
+                    text=btn.text,
+                    callback_data="backvid_" + btn.callback_data.split("_", 1)[1],
+                    style=getattr(btn, "style", None)
+                ))
             else:
                 new_row.append(btn)
         new_rows.append(new_row)
@@ -4492,11 +4651,16 @@ async def episode_handler(call: CallbackQuery):
     page = idx // 6
     video_kb = video_episodes_keyboard(all_eps_sorted, ep["anime_id"], page, episode_id)
 
-    # Avvalgi xabarni (kartochka yoki oldingi video) o'chirib, o'rniga yangisini yuboramiz.
-    try:
-        await call.message.delete()
-    except Exception:
-        pass
+    # Anime kartasi (rasm yoki matn) O'CHIRILMAYDI — qism videosi uning ostiga yangi
+    # xabar bo'lib keladi. Faqat avvalgi VIDEO xabari (o'zining qismlar tugmalari bilan
+    # turgan) yangisi bilan almashtiriladi, shunda chat videolar bilan to'lib ketmaydi.
+    _m = call.message
+    if (getattr(_m, "video", None) or getattr(_m, "document", None)
+            or getattr(_m, "animation", None) or getattr(_m, "video_note", None)):
+        try:
+            await _m.delete()
+        except Exception:
+            pass
 
     try:
         await bot.copy_message(
@@ -4540,6 +4704,83 @@ async def fixstatus_handler(message: Message):
         return
     updated = await asyncio.to_thread(db.finish_all_animes)
     await message.answer(f"✅ {updated} ta anime 'Tugagan' holatiga o'tkazildi.")
+
+async def _set_storage_caption(channel_message_id, caption) -> bool:
+    """STORAGE_CHANNEL'dagi videoning captionini almashtiradi. Muvaffaqiyatli bo'lsa
+    (yoki caption allaqachon shunday bo'lsa) True qaytaradi."""
+    for _ in range(3):
+        try:
+            await bot.edit_message_caption(
+                chat_id=STORAGE_CHANNEL, message_id=channel_message_id,
+                caption=caption, parse_mode=None
+            )
+            return True
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+        except Exception as e:
+            if _is_message_not_modified(e):
+                return True
+            logger.warning(f"[fixfilms] caption o'zgartirilmadi (channel_message_id={channel_message_id}): {e}")
+            return False
+    return False
+
+_fixfilms_running = False
+
+async def _fix_film_captions(chat_id):
+    global _fixfilms_running
+    fixed = failed = 0
+    try:
+        caption = episode_caption(1, is_film=True)
+        page = 0
+        while True:
+            films = await asyncio.to_thread(db.get_animes, "film", page, 50)
+            if not films:
+                break
+            for a in films:
+                eps = await asyncio.to_thread(db.get_episodes, a["id"])
+                for ep in eps:
+                    if await _set_storage_caption(ep["channel_message_id"], caption):
+                        fixed += 1
+                    else:
+                        failed += 1
+                    await asyncio.sleep(0.4)
+            page += 1
+        text = f"✅ Tayyor: {fixed} ta film videosining captioni tuzatildi."
+        if failed:
+            text += f"\n⚠️ {failed} tasida xato bo'ldi (batafsil log'da: [fixfilms])."
+        await bot.send_message(chat_id, text)
+    except Exception:
+        logger.exception("[fixfilms] kutilmagan xato")
+        await bot.send_message(chat_id, f"❌ Jarayonda xato yuz berdi ({fixed} ta tuzatilgan edi). Log'ga qarang.")
+    finally:
+        _fixfilms_running = False
+
+@dp.message(Command("fixfilms"))
+async def fixfilms_handler(message: Message):
+    """Bir martalik tuzatish: avval yuklangan FILMlarning saqlash kanalidagi captionidan
+    "(1-qism)" yozuvini olib tashlaydi. Yangi yuklanadigan filmlar allaqachon to'g'ri
+    caption bilan saqlanadi."""
+    global _fixfilms_running
+    if not await is_admin_user(message.from_user.id):
+        await message.answer("❌ Ruxsat yoq!")
+        return
+    if _fixfilms_running:
+        await message.answer("⏳ Tuzatish allaqachon ishlayapti, tugashini kuting.")
+        return
+    _fixfilms_running = True
+    await message.answer("⏳ Filmlar captioni fonda tuzatilmoqda — tugagach xabar beraman.")
+    _spawn(_fix_film_captions(message.chat.id))
+
+@dp.message(Command("fixfinished"))
+async def fixfinished_handler(message: Message):
+    """Bir martalik tuzatish: yuklangan qismlari soni jami qism soniga yetgan (masalan 12/12)
+    barcha seriallarni 'Tugagan' holatiga o'tkazadi. Yangi qism qo'shilganda yoki jami son
+    o'zgarganda bu endi avtomatik bajariladi — buyruq faqat eski seriallar uchun."""
+    if not await is_admin_user(message.from_user.id):
+        await message.answer("❌ Ruxsat yoq!")
+        return
+    updated = await asyncio.to_thread(db.finish_completed_animes)
+    await message.answer(f"✅ {updated} ta serial to'liq yuklangani uchun 'Tugagan' holatiga o'tkazildi.")
 
 @dp.message(Command("admin"))
 async def admin_handler(message: Message):
@@ -4791,6 +5032,8 @@ async def _commit_manual_field(target, state: FSMContext, field, value):
 
 @dp.message(AddAnime.title)
 async def add_title(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await _commit_manual_field(message, state, "title", message.text.strip())
 
 async def _add_anime_ask_year(target, state: FSMContext):
@@ -5005,22 +5248,32 @@ async def _run_anilist_autofill(target, state: FSMContext, title):
 
 @dp.message(AddAnime.year)
 async def add_year(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await _commit_manual_field(message, state, "year", message.text.strip())
 
 @dp.message(AddAnime.country)
 async def add_country(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await _commit_manual_field(message, state, "country", message.text.strip())
 
 @dp.message(AddAnime.genre)
 async def add_genre(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await _commit_manual_field(message, state, "genre", message.text.strip())
 
 @dp.message(AddAnime.description)
 async def add_desc(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await _commit_manual_field(message, state, "description", message.text.strip())
 
 @dp.message(AddAnime.language)
 async def add_language(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.update_data(language=message.text)
     await state.set_state(AddAnime.media_type)
     await message.answer(
@@ -5084,6 +5337,8 @@ async def add_total_episodes_skip(message: Message, state: FSMContext):
 
 @dp.message(AddAnime.total_episodes)
 async def add_total_episodes(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     try:
         total = int(message.text.strip())
         if total <= 0:
@@ -5160,9 +5415,11 @@ async def add_video(message: Message, state: FSMContext):
     # vaqtni kutishga majbur bo'lardi. Endi fonda (background task) ishga
     # tushiriladi va admin darhol keyingi videoni yubora oladi; barcha
     # qismlar /done bosilganda kutib olinadi (agar hali tugallanmagan bo'lsa).
+    # Film bo'lsa captionga "(1-qism)" yozilmaydi (serial qismlari avvalgidek raqamlanadi).
+    is_film = (await state.get_data()).get("media_type") == "film"
     holder = {}
     task = asyncio.create_task(_process_episode_upload(
-        message, episode_caption(ep_num), ep_label=f"{ep_num}-video", posted_holder=holder
+        message, episode_caption(ep_num, is_film=is_film), ep_label=f"{ep_num}-video", posted_holder=holder
     ))
     tasks.append(task)
     holders.append(holder)
@@ -5282,7 +5539,7 @@ async def _add_done_impl(message: Message, state: FSMContext):
 
     # Reklama klipi — 1-qismdan avtomatik yaratiladi (fonda, javobni bloklamaydi)
     if await is_auto_clip_enabled() and video_ids:
-        asyncio.create_task(_auto_generate_highlight_clip(message, video_ids[0]))
+        _spawn(_auto_generate_highlight_clip(message, video_ids[0]))
 
     # Faqat BLOKLNMAGAN foydalanuvchilarga xabar — fon vazifasi sifatida
     # (asyncio.create_task): ilgari bu tsikl shu handler ichida to'g'ridan-to'g'ri
@@ -5290,11 +5547,18 @@ async def _add_done_impl(message: Message, state: FSMContext):
     # daqiqalab kutib turishga majbur bo'lardi va bot "osilib qoldi" degan
     # taassurot qoldirardi. Endi xuddi AI push/comeback xabarlaridagi kabi
     # fonda yuboriladi, admin esa javobni zudlik bilan oladi.
-    asyncio.create_task(_notify_all_new_anime(anime_id, data['title']))
+    _spawn(_notify_all_new_anime(anime_id, data['title']))
 
     total = data.get("total_episodes")
     progress_line = f"\n📦 Yuklandi: {len(video_ids)}/{total} qism" if total else f"\n📹 {len(video_ids)} ta video"
-    await log_admin_action(message.from_user, "Anime qo'shdi", f"{data['title']} ({len(video_ids)} qism)")
+    _added_what = "film" if data.get("media_type") == "film" else f"{len(video_ids)} qism"
+    # Yuklangan qismlar soni jami songa yetgan bo'lsa, db.add_episode holatni avtomatik
+    # 'Tugagan' qilgan bo'ladi (admin "Davom etmoqda" tanlagan bo'lsa ham) — adminga ko'rsatamiz.
+    if data.get("media_type") != "film" and data.get("status", "ongoing") != "finished":
+        _a_row = await asyncio.to_thread(db.get_anime, anime_id)
+        if _a_row and _a_row.get("status") == "finished":
+            progress_line += "\n🏁 Barcha qismlar yuklandi — holati avtomatik «Tugagan» qilindi."
+    await log_admin_action(message.from_user, "Anime qo'shdi", f"{data['title']} ({_added_what})")
     # Webapp 🔔 paneli uchun bildirishnoma
     await asyncio.to_thread(
         db.create_notification, "anime",
@@ -5372,6 +5636,8 @@ async def addepi_search(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AddEpisode.choose_method)
 async def addepi_search_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     serials = [a for a in results if a["media_type"] == "serial"]
     if not serials:
@@ -5486,6 +5752,7 @@ async def addepi_done(message: Message, state: FSMContext):
         await state.clear()
         _upload_sessions.pop(message.chat.id, None)
         return
+    _before_status = ((await asyncio.to_thread(db.get_anime, data["episode_anime_id"])) or {}).get("status")
     fix_prompts = []
     for ep_num, msg_id, needs_fix in ok_pairs:
         ep_id = await asyncio.to_thread(db.add_episode, data["episode_anime_id"], ep_num, msg_id)
@@ -5505,7 +5772,7 @@ async def addepi_done(message: Message, state: FSMContext):
     # Reklama klipi — shu safar yuklangan birinchi (eng yangi) qismdan avtomatik
     # yaratiladi (fonda, javobni bloklamaydi)
     if await is_auto_clip_enabled() and episode_msg_ids:
-        asyncio.create_task(_auto_generate_highlight_clip(message, episode_msg_ids[0]))
+        _spawn(_auto_generate_highlight_clip(message, episode_msg_ids[0]))
 
     # Obunachilarga shaxsiy xabar — yangi qism chiqqani haqida.
     # MUHIM: eng birinchi yuklangan qism (data["next_ep"]) endi doim
@@ -5524,14 +5791,14 @@ async def addepi_done(message: Message, state: FSMContext):
                     anime_row["title"], latest_ep_num, anime_row.get("genre", "")
                 )
             body = ai_text_to_html(ai_text.strip()) if ai_text else f"🎬 <b>{anime_row['title']}</b> — {latest_ep_num}-qism chiqdi!"
-            asyncio.create_task(notify_anime_subscribers(
+            _spawn(notify_anime_subscribers(
                 data["episode_anime_id"],
                 f"{body}\n\n👉 https://t.me/{BOT_USERNAME}?start=ep_{new_ep['id']}"
             ))
             # Ochiq e'lon kanaliga ham post (kanal o'rnatilgan bo'lsa) — admin
             # hech narsa qilmasa ham, anime rasmi + "Tomosha qilish" tugmasi
             # bilan avtomatik chiqadi (tugma shu aniq QISMga olib boradi).
-            asyncio.create_task(post_episode_to_announce_channel(anime_row, new_ep))
+            _spawn(post_episode_to_announce_channel(anime_row, new_ep))
         # Webapp 🔔 paneli uchun bildirishnoma
         await asyncio.to_thread(
             db.create_notification, "episode",
@@ -5539,10 +5806,12 @@ async def addepi_done(message: Message, state: FSMContext):
             anime_id=data["episode_anime_id"]
         )
 
-    await message.answer(
-        f"✅ {len(episode_msg_ids)} ta qism qoshildi!",
-        reply_markup=admin_keyboard()
-    )
+    done_text = f"✅ {len(episode_msg_ids)} ta qism qoshildi!"
+    # Yuklangan qismlar soni jami songa yetgan bo'lsa (masalan 12/12), db.add_episode
+    # holatni avtomatik 'Tugagan' qilgan bo'ladi.
+    if _before_status != "finished" and anime_row and anime_row.get("status") == "finished":
+        done_text += "\n🏁 Barcha qismlar yuklandi — holati avtomatik «Tugagan» qilindi."
+    await message.answer(done_text, reply_markup=admin_keyboard())
     for ep_id, ep_num in fix_prompts:
         await _send_format_fix_prompt(message, ep_id, ep_num)
 
@@ -5591,9 +5860,9 @@ async def alist_detail(call: CallbackQuery):
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     try:
         await call.message.edit_text(
-            f"<b>{anime['title']}</b>\n"
-            f"📅 {anime['year']} | 🌍 {anime['country']}\n"
-            f"🎭 {anime['genre']}\n"
+            f"<b>{_esc_html(anime['title'])}</b>\n"
+            f"📅 {anime['year']} | 🌍 {_esc_html(anime['country'])}\n"
+            f"🎭 {_esc_html(anime['genre'])}\n"
             f"🎬 Qismlar: {len(episodes)}\n"
             f"👁 Korishlar: {anime['views']}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -5620,9 +5889,9 @@ async def unlockanime(call: CallbackQuery):
     episodes = await asyncio.to_thread(db.get_episodes, anime_id)
     try:
         await call.message.edit_text(
-            f"<b>{anime['title']}</b>\n"
-            f"📅 {anime['year']} | 🌍 {anime['country']}\n"
-            f"🎭 {anime['genre']}\n"
+            f"<b>{_esc_html(anime['title'])}</b>\n"
+            f"📅 {anime['year']} | 🌍 {_esc_html(anime['country'])}\n"
+            f"🎭 {_esc_html(anime['genre'])}\n"
             f"🎬 Qismlar: {len(episodes)}\n"
             f"👁 Korishlar: {anime['views']}\n\n"
             f"🔓 Barcha qismlar qulfdan chiqarildi.",
@@ -5695,6 +5964,8 @@ async def edit_search(call: CallbackQuery, state: FSMContext):
 
 @dp.message(EditAnime.search_query)
 async def edit_search_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     if not results:
         await message.answer("❌ Topilmadi!")
@@ -5824,10 +6095,19 @@ async def edit_value(message: Message, state: FSMContext):
         except ValueError:
             await message.answer("❌ Iltimos, musbat butun son kiriting (masalan: 24).")
             return
+    _before_status = None
+    if data["edit_field"] == "total_episodes":
+        _before_status = ((await asyncio.to_thread(db.get_anime, data["edit_anime_id"])) or {}).get("status")
     await asyncio.to_thread(db.update_anime, data["edit_anime_id"], data["edit_field"], value)
     await state.clear()
     await log_admin_action(message.from_user, "Animeni tahrirladi", f"maydon: {data['edit_field']}, anime_id: {data['edit_anime_id']}")
-    await message.answer("✅ Yangilandi!", reply_markup=admin_keyboard())
+    done_text = "✅ Yangilandi!"
+    if data["edit_field"] == "total_episodes" and _before_status != "finished":
+        # db.update_anime jami son o'zgargach avto-tugatishni ham tekshiradi.
+        _after = await asyncio.to_thread(db.get_anime, data["edit_anime_id"])
+        if _after and _after.get("status") == "finished":
+            done_text += "\n🏁 Yuklangan qismlar soni jamiga yetgan — holati avtomatik «Tugagan» qilindi."
+    await message.answer(done_text, reply_markup=admin_keyboard())
 
 # ---- BANNERLAR ----
 def banner_list_keyboard(banners):
@@ -5992,6 +6272,8 @@ async def banner_ai_cancel(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AddBanner.title)
 async def banner_title(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.update_data(title=message.text)
     await state.set_state(AddBanner.subtitle)
     await message.answer("📝 Kichik matn (subtitle) yozing, yoki /skip:")
@@ -6004,6 +6286,8 @@ async def banner_subtitle_skip(message: Message, state: FSMContext):
 
 @dp.message(AddBanner.subtitle)
 async def banner_subtitle(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.update_data(subtitle=message.text)
     await state.set_state(AddBanner.anime_link)
     await message.answer("🔗 Ushbu bannerni qaysi anime'ga bog'laymiz? Anime nomini yoki ID/kod raqamini yozing, yoki /skip:")
@@ -6017,6 +6301,8 @@ async def banner_link_skip(message: Message, state: FSMContext):
 
 @dp.message(AddBanner.anime_link)
 async def banner_link(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     if not results:
         await message.answer("❌ Topilmadi, qaytadan yozing yoki /skip bosing:")
@@ -6107,6 +6393,8 @@ async def admin_comments_anime(call: CallbackQuery, state: FSMContext):
 
 @dp.message(ModerateComment.search_query)
 async def admin_comments_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     if not results:
         await message.answer("❌ Topilmadi!")
@@ -6186,6 +6474,8 @@ async def comment_reply_write(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminReplyComment.text)
 async def comment_reply_write_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     data = await state.get_data()
     comment_id = data.get("reply_comment_id")
     await state.clear()
@@ -6277,6 +6567,8 @@ async def del_search(call: CallbackQuery, state: FSMContext):
 
 @dp.message(DeleteAnime.search_query)
 async def del_search_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     if not results:
         await message.answer("❌ Topilmadi!")
@@ -6290,11 +6582,14 @@ async def delsel(call: CallbackQuery, state: FSMContext):
         return
     anime_id = int(call.data.split("_")[1])
     anime = await asyncio.to_thread(db.get_anime, anime_id)
+    if not anime:
+        await call.answer("❌ Anime topilmadi (allaqachon o'chirilgan bo'lishi mumkin).", show_alert=True)
+        return
     await state.update_data(del_anime_id=anime_id)
     await state.set_state(DeleteAnime.confirm)
     try:
         await call.message.edit_text(
-            f"⚠️ <b>{anime['title']}</b> ni ochirasizmi?",
+            f"⚠️ <b>{_esc_html(anime['title'])}</b> ni ochirasizmi?",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="✅ Ha", callback_data="del_confirm_yes", style="danger"),
@@ -6312,13 +6607,17 @@ async def del_confirm(call: CallbackQuery, state: FSMContext):
     if not await is_admin_user(call.from_user.id, min_role="moderator"):
         return
     data = await state.get_data()
+    if not data.get("del_anime_id"):
+        await state.clear()
+        await call.answer("❌ Seans eskirgan. Animeni qaytadan tanlang.", show_alert=True)
+        return
     anime = await asyncio.to_thread(db.get_anime, data["del_anime_id"])
     await asyncio.to_thread(db.delete_anime, data["del_anime_id"])
     await state.clear()
     await log_admin_action(call.from_user, "Anime o'chirdi", anime["title"] if anime else str(data["del_anime_id"]))
     try:
         await call.message.edit_text(
-            f"🗑 <b>{anime['title']}</b> ochirildi!",
+            f"🗑 <b>{_esc_html(anime['title'] if anime else '#' + str(data['del_anime_id']))}</b> ochirildi!",
             reply_markup=admin_back(),
             parse_mode="HTML"
         )
@@ -6532,6 +6831,8 @@ async def epact_search(call: CallbackQuery, state: FSMContext):
 
 @dp.message(EditEpisode.search_query)
 async def epact_search_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     serials = [a for a in results if a["media_type"] == "serial"]
     if not serials:
@@ -6608,7 +6909,7 @@ async def epact_new_video(message: Message, state: FSMContext):
     )
     await asyncio.to_thread(db.update_episode, data["edit_ep_id"], new_msg_id)
     await state.clear()
-    asyncio.create_task(_warmup_stream_clients(new_msg_id))
+    _spawn(_warmup_stream_clients(new_msg_id))
     await message.answer("✅ Qism yangilandi!", reply_markup=admin_keyboard())
     if needs_fix:
         await _send_format_fix_prompt(message, data["edit_ep_id"], ep_num)
@@ -6738,7 +7039,7 @@ async def _process_episode_upload(message, caption, ep_label, posted_holder=None
         await message.answer(f"✅ {ep_label} kanalga saqlandi.")
     except Exception:
         pass
-    asyncio.create_task(_warmup_stream_clients(new_msg_id))
+    _spawn(_warmup_stream_clients(new_msg_id))
     return new_msg_id, needs_fix
 
 async def _upload_episode_to_storage(orig_chat_id, orig_message_id, caption, status_message=None, posted_holder=None):
@@ -6886,7 +7187,7 @@ async def _send_format_fix_prompt(message, ep_id, ep_num):
     header = f"📌 {anime['title']}\n" if anime else ""
     try:
         await message.answer(
-            f"{header}🎞 {ep_num}-qism formati ba'zi brauzerlarda (masalan Chrome/webapp) "
+            f"{header}🎞 {_ep_title(anime, ep_num)} formati ba'zi brauzerlarda (masalan Chrome/webapp) "
             "ishlamasligi mumkin bo'lgan holda saqlandi. Hozir to'g'irlaysizmi "
             "(fayl hajmiga qarab bir necha daqiqa vaqt olishi mumkin), yoki "
             "shunday qoldirib, keyinroq to'g'irlaymizmi?",
@@ -6910,7 +7211,7 @@ async def epfmt_fix_cb(call: CallbackQuery):
     await call.answer()
     try:
         try:
-            await call.message.edit_text(f"{header}🔄 {ep['episode_number']}-qism formati to'g'irlanmoqda, kuting...")
+            await call.message.edit_text(f"{header}🔄 {_ep_title(anime, ep['episode_number'])} formati to'g'irlanmoqda, kuting...")
         except Exception as e:
             if not _is_message_not_modified(e):
                 raise
@@ -6918,13 +7219,14 @@ async def epfmt_fix_cb(call: CallbackQuery):
         pass
     try:
         new_msg_id = await _transcode_episode_in_storage(
-            ep["channel_message_id"], episode_caption(ep["episode_number"])
+            ep["channel_message_id"],
+            episode_caption(ep["episode_number"], is_film=bool(anime and anime.get("media_type") == "film"))
         )
         await asyncio.to_thread(db.update_episode, ep_id, new_msg_id)
-        asyncio.create_task(_warmup_stream_clients(new_msg_id))
+        _spawn(_warmup_stream_clients(new_msg_id))
         try:
             try:
-                await call.message.edit_text(f"{header}✅ {ep['episode_number']}-qism formati to'g'irlandi!")
+                await call.message.edit_text(f"{header}✅ {_ep_title(anime, ep['episode_number'])} formati to'g'irlandi!")
             except Exception as e:
                 if not _is_message_not_modified(e):
                     raise
@@ -6935,7 +7237,7 @@ async def epfmt_fix_cb(call: CallbackQuery):
         try:
             try:
                 await call.message.edit_text(
-                    f"{header}❌ {ep['episode_number']}-qism formatini to'g'irlashda xato yuz berdi. Qaytadan urinib ko'rishingiz mumkin.",
+                    f"{header}❌ {_ep_title(anime, ep['episode_number'])} formatini to'g'irlashda xato yuz berdi. Qaytadan urinib ko'rishingiz mumkin.",
                     reply_markup=_format_fix_keyboard(ep_id)
                 )
             except Exception as e:
@@ -6957,7 +7259,7 @@ async def epfmt_skip_cb(call: CallbackQuery):
     await call.answer("Shunday qoldirildi")
     try:
         try:
-            await call.message.edit_text(f"{header}➡️ {ep_num}-qism asl formatida qoldirildi.")
+            await call.message.edit_text(f"{header}➡️ {_ep_title(anime, ep_num)} asl formatida qoldirildi.")
         except Exception as e:
             if not _is_message_not_modified(e):
                 raise
@@ -8215,6 +8517,8 @@ async def clipa_search(call: CallbackQuery, state: FSMContext):
 
 @dp.message(ClipVideo.search_query)
 async def clipa_search_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     results = await asyncio.to_thread(db.search_anime, message.text.strip())
     if not results:
         await message.answer("❌ Topilmadi!")
@@ -8760,7 +9064,7 @@ async def admin_ai_push_go(call: CallbackQuery):
     except Exception as e:
         if not _is_message_not_modified(e):
             raise
-    asyncio.create_task(_run_ai_push_job(call.message))
+    _spawn(_run_ai_push_job(call.message))
 
 # ---- UZOQ VAQT KELMAGAN USERLARGA "QAYTIB KEL" XABARI ----
 COMEBACK_USER_CAP = 150  # bitta yugurishda AI/Telegram limitlarini tejash uchun maksimal user soni
@@ -8861,7 +9165,7 @@ async def admin_comeback_go(call: CallbackQuery):
     except Exception as e:
         if not _is_message_not_modified(e):
             raise
-    asyncio.create_task(_run_comeback_job(call.message, days))
+    _spawn(_run_comeback_job(call.message, days))
 
 # ---- FAOL, LEKIN PREMIUM BO'LMAGAN USERLARGA AI TAKLIF XABARI ----
 PREMIUM_PITCH_USER_CAP = 150  # bitta yugurishda AI/Telegram limitlarini tejash uchun maksimal user soni
@@ -8962,7 +9266,7 @@ async def admin_premium_pitch_go(call: CallbackQuery):
     except Exception as e:
         if not _is_message_not_modified(e):
             raise
-    asyncio.create_task(_run_premium_pitch_job(call.message))
+    _spawn(_run_premium_pitch_job(call.message))
 
 @dp.callback_query(F.data == "bc_ai_invite")
 async def bc_ai_invite(call: CallbackQuery, state: FSMContext):
@@ -9105,12 +9409,16 @@ async def bc_message(message: Message, state: FSMContext):
 
 @dp.message(BroadcastState.button_text)
 async def bc_button_text(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.update_data(bc_button_text=message.text)
     await state.set_state(BroadcastState.button_link)
     await message.answer("🔗 Tugma linkini yozing:")
 
 @dp.message(BroadcastState.button_link)
 async def bc_button_link(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.update_data(bc_button_link=message.text)
     users = await asyncio.to_thread(db.get_all_active_users)
     await state.set_state(BroadcastState.confirm)
@@ -9228,6 +9536,8 @@ async def ch_add(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AddChannelState.channel)
 async def ch_add_done(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id):
         return
     await state.clear()
@@ -9324,6 +9634,8 @@ async def announce_channel_set(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AnnounceChannelState.channel)
 async def announce_channel_save(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id, min_role="super"):
         return
     await state.clear()
@@ -9435,6 +9747,8 @@ async def episode_announce_channel_set(call: CallbackQuery, state: FSMContext):
 
 @dp.message(EpisodeAnnounceChannelState.channel)
 async def episode_announce_channel_save(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id, min_role="super"):
         return
     await state.clear()
@@ -9519,6 +9833,8 @@ async def do_block(call: CallbackQuery, state: FSMContext):
 
 @dp.message(BlockState.user_id)
 async def block_action(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id):
         return
     await state.clear()
@@ -9536,7 +9852,7 @@ async def block_action(message: Message, state: FSMContext):
     await asyncio.to_thread(db.block_user, u["user_id"])
     await log_admin_action(message.from_user, "Foydalanuvchini bloklandi", f"{u['full_name']} (ID: {u['user_id']})")
     await message.answer(
-        f"🚫 <b>{u['full_name']}</b> bloklandi!",
+        f"🚫 <b>{_esc_html(u['full_name'])}</b> bloklandi!",
         reply_markup=admin_keyboard(),
         parse_mode="HTML"
     )
@@ -9554,6 +9870,8 @@ async def do_unblock(call: CallbackQuery, state: FSMContext):
 
 @dp.message(UnblockState.user_id)
 async def unblock_action(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id):
         return
     await state.clear()
@@ -9571,7 +9889,7 @@ async def unblock_action(message: Message, state: FSMContext):
     await asyncio.to_thread(db.unblock_user, u["user_id"])
     await log_admin_action(message.from_user, "Foydalanuvchini blokdan chiqardi", f"{u['full_name']} (ID: {u['user_id']})")
     await message.answer(
-        f"✅ <b>{u['full_name']}</b> blokdan chiqarildi!",
+        f"✅ <b>{_esc_html(u['full_name'])}</b> blokdan chiqarildi!",
         reply_markup=admin_keyboard(),
         parse_mode="HTML"
     )
@@ -10305,6 +10623,8 @@ async def admin_find_user(call: CallbackQuery, state: FSMContext):
 
 @dp.message(FindUserState.query)
 async def find_user_result(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     await state.clear()
     query = message.text.strip()
     if query.startswith("@"):
@@ -10320,11 +10640,11 @@ async def find_user_result(message: Message, state: FSMContext):
     status = "🚫 Bloklangan" if u.get("is_blocked") else "✅ Faol"
     await message.answer(
         f"👤 <b>Foydalanuvchi</b>\n\n"
-        f"📌 Ism: {u['full_name']}\n"
+        f"📌 Ism: {_esc_html(u['full_name'])}\n"
         f"🔢 Raqam: {u['join_number']}-chi\n"
         f"🆔 ID: <code>{u['user_id']}</code>\n"
-        f"👤 Username: @{u['username'] or 'yoq'}\n"
-        f"📱 Telefon: {u['phone'] or 'yoq'}\n"
+        f"👤 Username: @{_esc_html(u['username'] or 'yoq')}\n"
+        f"📱 Telefon: {_esc_html(u['phone'] or 'yoq')}\n"
         f"📅 Qoshilgan: {u['joined_at'][:10]}\n"
         f"📊 Holat: {status}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -10557,6 +10877,8 @@ async def admin_add_admin(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminManageState.add_id)
 async def admin_add_admin_save(message: Message, state: FSMContext):
+    if not await _require_text(message):
+        return
     if not await is_admin_user(message.from_user.id, min_role="super"):
         await state.clear()
         return
@@ -10950,15 +11272,28 @@ async def serve_robots(request):
 
 async def serve_site_page(request):
     """/anime/{id}, /watch/{id}/..., /catalog, /favorites — bitta sahifali sayt (landing.html).
-    Anime sahifalarida sarlavha va ijtimoiy tarmoq (Open Graph) teglari bazadan qo'shiladi,
-    shunda havola Telegram/WhatsApp'da poster va nom bilan ko'rinadi."""
+    <title>, description, canonical va Open Graph teglari ALMASHTIRILADI (qo'shilmaydi —
+    aks holda landing.html dagi tayyor teglar bilan dublikat bo'lardi), shunda havola
+    Telegram/WhatsApp'da poster va nom bilan ko'rinadi."""
     import os, html as _html
+    from urllib.parse import quote as _quote
     base_dir = os.path.dirname(os.path.abspath(__file__))
     try:
         with open(os.path.join(base_dir, "landing.html"), "r", encoding="utf-8") as f:
             page = f.read()
     except Exception:
         return web.Response(text="AniFilm Bot ishlayapti!")
+
+    def _set_tag(pg, pattern, tag):
+        # mavjud tegni almashtiradi; yo'q bo'lsa </head> oldiga qo'shadi
+        rx = re.compile(pattern, re.I)
+        if rx.search(pg):
+            return rx.sub(lambda m: tag, pg, count=1)
+        return pg.replace("</head>", tag + "</head>", 1)
+
+    site = "https://www.anifilm.uz"
+    canonical = _html.escape(site + _quote(request.path or "/", safe="/"))
+    page = _set_tag(page, r'<link\s+rel="canonical"[^>]*>', f'<link rel="canonical" href="{canonical}">')
     parts = [x for x in request.path.split("/") if x]
     if len(parts) >= 2 and parts[0] in ("anime", "watch"):
         try:
@@ -10967,11 +11302,17 @@ async def serve_site_page(request):
             a = None
         if a and a.get("title"):
             t = _html.escape(f'{a["title"]} — AniFilm.uz')
-            d = _html.escape((a.get("description") or "")[:200])
-            tags = f'<meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:type" content="video.tv_show">'
+            desc_raw = (a.get("description") or "").strip()[:200] or (a["title"] + " — AniFilm.uz saytida o'zbek tilida onlayn ko'ring.")
+            d = _html.escape(desc_raw)
+            page = re.sub(r"<title>.*?</title>", lambda m: f"<title>{t}</title>", page, count=1)
+            page = _set_tag(page, r'<meta\s+name="description"[^>]*>', f'<meta name="description" content="{d}">')
+            page = _set_tag(page, r'<meta\s+property="og:title"[^>]*>', f'<meta property="og:title" content="{t}">')
+            page = _set_tag(page, r'<meta\s+property="og:description"[^>]*>', f'<meta property="og:description" content="{d}">')
+            page = _set_tag(page, r'<meta\s+property="og:type"[^>]*>', '<meta property="og:type" content="video.tv_show">')
+            page = _set_tag(page, r'<meta\s+property="og:url"[^>]*>', f'<meta property="og:url" content="{canonical}">')
             if a.get("photo_id"):
-                tags += f'<meta property="og:image" content="https://www.anifilm.uz/api/photo/{_html.escape(str(a["photo_id"]))}">'
-            page = re.sub(r"<title>.*?</title>", lambda m: f"<title>{t}</title>{tags}", page, count=1)
+                img = _html.escape(f'{site}/api/photo/{_quote(str(a["photo_id"]), safe="")}')
+                page = _set_tag(page, r'<meta\s+property="og:image"[^>]*>', f'<meta property="og:image" content="{img}">')
     return web.Response(text=page, content_type="text/html", charset="utf-8")
 
 def verify_init_data(init_data: str, max_age_seconds: int = 86400):
@@ -10996,7 +11337,7 @@ def verify_init_data(init_data: str, max_age_seconds: int = 86400):
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
     secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(calculated_hash, received_hash):
+    if not _safe_eq(calculated_hash, received_hash):
         return None
     try:
         auth_date = int(pairs.get("auth_date", "0"))
@@ -11072,7 +11413,7 @@ def _verify_password(password: str, stored: str) -> bool:
     try:
         salt, digest = stored.split("$", 1)
         calc = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 200_000).hex()
-        return hmac.compare_digest(calc, digest)
+        return _safe_eq(calc, digest)
     except Exception:
         return False
 
@@ -11083,12 +11424,25 @@ def _verify_password(password: str, stored: str) -> bool:
 # kvotasining bitta foydalanuvchi tomonidan tugatilib qo'yilishining oldini
 # olish uchun ishlatiladi.
 _rate_hits: dict[str, list[float]] = {}
+_rate_windows: dict[str, float] = {}  # kalit -> oyna (soniya), tozalash uchun
+_rate_next_sweep = 0.0
 
 def _rate_limited(key: str, max_hits: int, window_seconds: float) -> bool:
     """True qaytarsa — limit oshgan (rad etish kerak). Oynadan chiqib ketgan
     eski urinishlar avtomatik tozalanadi, shuning uchun xotira vaqt o'tishi
     bilan cheksiz o'smaydi."""
+    global _rate_next_sweep
     now = time.time()
+    # Har 5 daqiqada bir marta oynasi o'tib ketgan kalitlarni butunlay o'chiramiz — aks holda
+    # har bir yangi IP/email uchun kalit abadiy qolib, xotira sekin o'sib borardi.
+    if now >= _rate_next_sweep:
+        _rate_next_sweep = now + 300
+        for _k in list(_rate_hits):
+            _h = _rate_hits[_k]
+            if not _h or _h[-1] < now - _rate_windows.get(_k, 3600):
+                _rate_hits.pop(_k, None)
+                _rate_windows.pop(_k, None)
+    _rate_windows[key] = window_seconds
     hits = _rate_hits.setdefault(key, [])
     cutoff = now - window_seconds
     while hits and hits[0] < cutoff:
@@ -11166,7 +11520,7 @@ def _verify_site_token(token: str):
         uid_str, expires_str, sig = token.split(".")
         payload = f"{uid_str}.{expires_str}"
         expected = hmac.new(SITE_AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, sig):
+        if not _safe_eq(expected, sig):
             return None
         if int(expires_str) < time.time():
             return None
@@ -11252,6 +11606,27 @@ async def webapp_site_login(request):
     token = _make_site_token(user["id"])
     return web.json_response({"token": token, "user": _public_site_user(user)})
 
+async def _send_password_reset_email(user, email):
+    """Token yaratib, emailni FON vazifasida yuboradi — shunda HTTP javob vaqti (SMTP kutishi)
+    email ro'yxatdan o'tgan-o'tmaganini oshkor qilmaydi."""
+    try:
+        token = secrets.token_urlsafe(32)
+        await asyncio.to_thread(db.create_password_reset, token, user["id"])
+        reset_link = f"{SITE_URL}/reset-password?token={token}"
+        name_part = f" {user['display_name']}" if user.get("display_name") else ""
+        body = (
+            f"Salom{name_part}!\n\n"
+            f"AniFilm hisobingiz uchun parolni tiklash so'ralgan edi. Agar bu siz "
+            f"bo'lmasangiz, xatni e'tiborsiz qoldiring — parolingiz o'zgarmaydi.\n\n"
+            f"Yangi parol o'rnatish uchun havola (1 soat amal qiladi):\n{reset_link}\n"
+        )
+        sent = await asyncio.to_thread(_send_email_sync, email, "AniFilm — parolni tiklash", body)
+        if not sent:
+            logger.error(f"Parol tiklash xati yuborilmadi: {email}")
+    except Exception:
+        logger.exception("Parol tiklash xatini yuborishda xatolik")
+
+
 async def webapp_site_forgot_password(request):
     """Parolni tiklash havolasini emailga yuboradi. Email ro'yxatdan o'tган-
     o'tmaganidan qat'iy nazar HAR DOIM bir xil muvaffaqiyat xabari qaytariladi —
@@ -11276,21 +11651,7 @@ async def webapp_site_forgot_password(request):
     user = await asyncio.to_thread(db.get_site_user_by_email, email)
     if not user:
         return generic_ok
-    token = secrets.token_urlsafe(32)
-    await asyncio.to_thread(db.create_password_reset, token, user["id"])
-    reset_link = f"{SITE_URL}/reset-password?token={token}"
-    name_part = f" {user['display_name']}" if user.get("display_name") else ""
-    body = (
-        f"Salom{name_part}!\n\n"
-        f"AniFilm hisobingiz uchun parolni tiklash so'ralgan edi. Agar bu siz "
-        f"bo'lmasangiz, xatni e'tiborsiz qoldiring — parolingiz o'zgarmaydi.\n\n"
-        f"Yangi parol o'rnatish uchun havola (1 soat amal qiladi):\n{reset_link}\n"
-    )
-    sent = await asyncio.to_thread(_send_email_sync, email, "AniFilm — parolni tiklash", body)
-    if not sent:
-        # SMTP sozlanmagan yoki xatolik — foydalanuvchiga baribir aniq bo'lmagan
-        # xabar qaytariladi (enumeration'dan himoya), lekin log'da admin buni ko'radi.
-        logger.error(f"Parol tiklash xati yuborilmadi: {email}")
+    _spawn(_send_password_reset_email(user, email))
     return generic_ok
 
 async def webapp_site_reset_password(request):
@@ -12042,7 +12403,7 @@ async def webapp_add_comment(request):
     # AI orqali savolga avtomatik javob (masalan "qachon davomi chiqadi?")
     # — asenkron fon vazifasi sifatida, foydalanuvchi javobini kutmasin
     if ai_service.AI_ENABLED and anime_row and ai_service.looks_like_question(text):
-        asyncio.create_task(_ai_answer_comment(anime_id, new_id, anime_row, text))
+        _spawn(_ai_answer_comment(anime_id, new_id, anime_row, text))
 
     return web.json_response({"ok": True, "id": new_id, "is_spoiler": spoiler_flag})
 
@@ -12170,7 +12531,7 @@ async def debug_path(request):
     # ochiq edi — istalgan kishi server fayl tuzilishini ko'rishi mumkin edi.
     # Endi faqat DEBUG_TOKEN muhit o'zgaruvchisi o'rnatilgan bo'lsa va
     # so'rovda to'g'ri ?token=... berilgan bo'lsagina javob qaytaradi.
-    if not DEBUG_TOKEN or not hmac.compare_digest(request.query.get("token") or "", DEBUG_TOKEN):
+    if not DEBUG_TOKEN or not _safe_eq(request.query.get("token") or "", DEBUG_TOKEN):
         return web.Response(status=404)
     import os
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12666,12 +13027,12 @@ async def main():
 
     await _recover_stale_clip_jobs()
     await start_web_server()
-    asyncio.create_task(daily_report_task())
-    asyncio.create_task(weekly_ai_report_task())
-    asyncio.create_task(premium_maintenance_task())
-    asyncio.create_task(db_keepalive_task())
-    asyncio.create_task(db_backup_task())
-    asyncio.create_task(maintenance_cleanup_task())
+    _spawn(daily_report_task())
+    _spawn(weekly_ai_report_task())
+    _spawn(premium_maintenance_task())
+    _spawn(db_keepalive_task())
+    _spawn(db_backup_task())
+    _spawn(maintenance_cleanup_task())
     try:
         await dp.start_polling(
             bot,
