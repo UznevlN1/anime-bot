@@ -2487,7 +2487,8 @@ def _premium_anime_kb(animes, page, total, per_page=10):
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"padm_pa_page_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"padm_pa_page_{page+1}"))
     if nav:
@@ -2597,7 +2598,8 @@ def _premium_episodes_kb(anime_id, episodes, page, per_page=15):
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"padm_pa_eps_{anime_id}_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"padm_pa_eps_{anime_id}_{page+1}"))
     if nav:
@@ -2804,7 +2806,8 @@ def anime_list_keyboard(animes, media_type, page, total):
     prefix = "films" if media_type == "film" else "serials"
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_{page+1}"))
     if nav:
@@ -2833,7 +2836,8 @@ def episodes_keyboard(episodes, anime_id, page=0, highlight_id=None):
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"eps_{anime_id}_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"eps_{anime_id}_{page+1}"))
     if nav:
@@ -2997,7 +3001,8 @@ def admin_anime_list_keyboard(animes, page, total, prefix):
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"{prefix}_page_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"{prefix}_page_{page+1}"))
     if nav:
@@ -4638,7 +4643,8 @@ async def episode_handler(call: CallbackQuery):
     #  • tugma anime KARTASI (rasm yoki matn) ostidan bosilgan bo'lsa — video
     #    yuborilgach karta O'CHIRILADI (video uning o'rnini egallaydi);
     #  • tugma oldingi qism VIDEOSI ostidan bosilgan bo'lsa — eski video
-    #    O'CHIRILMAYDI, yangi qism uning ostiga yangi xabar bo'lib keladi.
+    #    O'CHIRILMAYDI (faqat tugmalari olib tashlanadi), yangi qism uning ostiga
+    #    yangi xabar bo'lib keladi.
     _m = call.message
     _is_video_msg = bool(
         getattr(_m, "video", None) or getattr(_m, "document", None)
@@ -4668,6 +4674,16 @@ async def episode_handler(call: CallbackQuery):
     if isinstance(_m, Message) and not _is_video_msg:
         try:
             await _m.delete()
+        except Exception:
+            pass
+
+    # Oldingi qism videosi ostidan bosilgan bo'lsa — yangi qism yuborildi, shuning
+    # uchun eski videoning tugmalari (qismlar ro'yxati, sahifalash, "Orqaga qaytish")
+    # olib tashlanadi: navigatsiya faqat eng oxirgi qism xabarida qoladi.
+    # Videoning o'zi o'chirilmaydi. Xabar juda eski/yetib bo'lmaydigan bo'lsa — e'tibor bermaymiz.
+    if isinstance(_m, Message) and _is_video_msg:
+        try:
+            await _m.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
 
@@ -5827,7 +5843,8 @@ async def admin_list(call: CallbackQuery):
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"admin_list_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"admin_list_{page+1}"))
     if nav:
@@ -8810,7 +8827,8 @@ async def admin_ai_questions(call: CallbackQuery):
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"admin_aiq_{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if total_pages > 1:
+        nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
     if page + 1 < total_pages:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"admin_aiq_{page+1}"))
     buttons = [nav] if nav else []

@@ -416,7 +416,7 @@ const DEMO=[['Sulh Ovchisi',2026,'Aksiya',24],['Qora Daftar',2006,'Drama',37],['
 async function api(u,o={}){o.headers=Object.assign({'Content-Type':'application/json'},TOKEN?{Authorization:'Bearer '+TOKEN}:{});const r=await fetch(u,o);if(r.status===401&&TOKEN)logout();return r}
 async function getJ(u){try{const r=await fetch(u);return r.ok?await r.json():null}catch(e){return null}}
 function stop(){clearInterval(HT);clearTimeout(HT);document.onkeydown=null;if(PC){PC.abort();PC=null}document.body.classList.remove('lo');if(IO){IO.disconnect();IO=null}document.title='AniFilm.uz — Oʻzbek tilidagi animelar'}
-function nav(u){history.pushState(null,'',u);go()}
+function nav(u){history.replaceState({y:scrollY},'');history.pushState(null,'',u);go()}
 function rnd(){if(A.length)nav('/anime/'+A[Math.floor(Math.random()*A.length)].id)}
 function go(){const p=location.pathname,s=p.split('/').filter(Boolean),P=new URLSearchParams(location.search),k=s[0]==='anime'||s[0]==='watch'?'catalog':(s[0]||'home');
 document.querySelectorAll('[data-t]').forEach(e=>{const on=e.dataset.t===k;e.classList.toggle('on',on);on?e.setAttribute('aria-current','page'):e.removeAttribute('aria-current')});stop();scrollTo(0,0);$('link[rel=canonical]').href='https://www.anifilm.uz'+p;
@@ -425,7 +425,7 @@ const RT={catalog:()=>catalog(P),anime:()=>animePage(parseInt(s[1])),watch:()=>w
 function heroList(){let L=Array.isArray(BAN)?BAN.map(b=>{const a=A.find(x=>x.id==b.anime_id)||{};return Object.assign({},a,{id:b.anime_id,title:b.title||a.title,description:b.subtitle||a.description,img:b.photo_id||a.photo_id})}).filter(x=>x.id&&x.title):[];if(!L.length)L=A.slice(0,5).map(a=>Object.assign({},a,{img:a.photo_id}));return L}
 function heroShow(i){HI=(i+HL.length)%HL.length;const a=HL[HI],f=a.media_type==='film';
 $('#hero').innerHTML=`<div class="bg" style="${a.img?`background-image:url(${pu(a.img)})`:`background:hsl(${hue(a.id)} 45% 28%)`}"></div><div class="tx"><div class="wrap"><h1 class="disp">${esc(a.title)}</h1><div class="meta">${[a.year,f?'Film':a.episode_count?a.episode_count+' qism':'',a.category].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join('')}</div><p>${esc((a.description||'').slice(0,160))}</p><a class="btn" href="/watch/${a.id}">${ic('play')} Koʻrish</a><a class="btn g" href="/anime/${a.id}">Batafsil</a></div></div><div class="dots">${HL.map((_,k)=>`<button type="button" class="${k===HI?'on':''}" aria-label="${k+1}-slayd" onclick="heroGo(${k})"></button>`).join('')}</div>`}
-function heroTick(){return setInterval(()=>{if(!document.hidden&&!$('#hero:hover'))heroShow(HI+1)},6000)}
+function heroTick(){return setInterval(()=>{if(!document.hidden&&!(matchMedia('(hover:hover)').matches&&$('#hero:hover')))heroShow(HI+1)},6000)}
 function heroGo(k){heroShow(k);if(HT){clearInterval(HT);HT=heroTick()}}
 function heroStart(){HL=heroList();if(!HL.length)return;heroShow(0);if(HL.length>1&&!matchMedia('(prefers-reduced-motion:reduce)').matches)HT=heroTick();
 let x0=null;const h=$('#hero');h.ontouchstart=e=>{x0=e.touches[0].clientX};h.ontouchend=e=>{if(x0===null)return;const d=e.changedTouches[0].clientX-x0;if(Math.abs(d)>40)heroShow(HI+(d<0?1:-1));x0=null}}
@@ -591,7 +591,7 @@ function clearWatched(){if(!confirm('Koʻrilganlar roʻyxati tozalansinmi?'))ret
 async function getAuth(u){try{const r=await api(u);return r.ok?await r.json():null}catch(e){return null}}
 /* ---------- ishga tushirish ---------- */
 document.querySelectorAll('[data-i]').forEach(e=>{e.innerHTML=ic(e.dataset.i)+(e.dataset.l?`<span>${e.dataset.l}</span>`:'')});
-addEventListener('popstate',go);
+addEventListener('popstate',()=>{const y=(history.state&&history.state.y)|0;go();if(y)requestAnimationFrame(()=>scrollTo(0,y))});
 addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if($('#srch').classList.contains('on'))S(0);if($('#au').classList.contains('on'))authClose()});
 document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
 /* ---------- yangi: skeleton, oxirgi qidiruvlar, kichik oyna, tepaga ---------- */
