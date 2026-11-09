@@ -2899,7 +2899,7 @@ def announce_caption_text(anime):
 async def post_anime_to_announce_channel(anime):
     """Yangi qo'shilgan animining qisqa e'loni (rasm + nom/yil/janr/kod)ni
     ochiq e'lon kanaliga post qiladi. Tugma bosilganda foydalanuvchi botga
-    o'tib, deep-link (?start=anime_<id>) orqali to'g'ridan-to'g'ri 1-qismni
+    o'tib, deep-link (?start=anime_<id>) orqali shu animening kartasini
     oladi."""
     channel = await get_announce_channel()
     if not channel:
@@ -3093,8 +3093,10 @@ async def start_handler(message: Message, state: FSMContext):
             )
             return
 
-    # Deep link: /start anime_45 (kanal e'lonidagi "Tomosha qilish" tugmasidan) —
-    # shu animening BIRINCHI qismini avtomatik yuboradi.
+    # Deep link: /start anime_45 (kanal e'lonidagi "Tomosha qilish" tugmasidan,
+    # saytdagi "Botda ko'rish" / "Botdan yuklab olish" tugmalaridan) —
+    # shu animening KARTASINI yuboradi (rasm + ma'lumot + "Yuklab olish" tugmasi).
+    # Qismni foydalanuvchi kartadan o'zi tanlaydi.
     if len(args) > 1 and args[1].startswith('anime_'):
         try:
             anime_id = int(args[1].split('_')[1])
@@ -3112,26 +3114,11 @@ async def start_handler(message: Message, state: FSMContext):
                     reply_markup=await sub_keyboard()
                 )
                 return
-            episodes = await asyncio.to_thread(db.get_episodes, anime_id)
-            if not episodes:
-                await message.answer("❌ Bu anime uchun hali qism yuklanmagan.")
+            anime = await asyncio.to_thread(db.get_anime, anime_id)
+            if not anime:
+                await message.answer("❌ Anime topilmadi.")
                 return
-            ep = episodes[0]
-            if await is_episode_locked_for_user(ep, message.from_user.id):
-                text, kb = await locked_episode_message(ep)
-                await message.answer(text, reply_markup=kb, parse_mode="HTML")
-                return
-            protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
-            try:
-                await bot.copy_message(
-                    chat_id=message.chat.id,
-                    from_chat_id=STORAGE_CHANNEL,
-                    message_id=ep["channel_message_id"],
-                    protect_content=protect
-                )
-            except Exception as e:
-                logger.error(f"[start anime_ deep-link] video yuborilmadi (anime_id={anime_id}): {e}")
-                await message.answer("❌ Videoni yuborishda xatolik yuz berdi. Keyinroq qayta urinib ko'ring.")
+            await send_anime_card(message.chat.id, anime)
             return
 
     if len(args) > 1 and args[1].startswith('ep_'):
@@ -4469,8 +4456,10 @@ async def backcard_handler(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("backvid_"))
 async def backvid_handler(call: CallbackQuery):
-    """Qism videosi ostidagi '🔙 Orqaga qaytish': anime kartasi videodan yuqorida turibdi
-    (qism bosilganda o'chirilmaydi), shuning uchun faqat shu video xabari olib tashlanadi.
+    """ESKI xabarlar uchun (yangilanishdan oldin yuborilgan videolar): u paytda anime kartasi
+    videodan yuqorida turgan, shuning uchun faqat shu video xabari olib tashlanadi.
+    Yangi videolar ostidagi '🔙 Orqaga qaytish' tugmasi 'backcard_' ishlatadi (karta qism
+    bosilganda o'chirilgani uchun qayta yuboriladi).
     Agar xabarni o'chirib bo'lmasa (masalan juda eski) — kartani qayta yuboramiz."""
     if not await guard_access(call):
         return
@@ -4512,14 +4501,8 @@ def video_episodes_keyboard(episodes, anime_id, page=0, highlight_id=None):
             if btn.callback_data and btn.callback_data.startswith("eps_"):
                 _, aid, pg = btn.callback_data.split("_")
                 new_row.append(InlineKeyboardButton(text=btn.text, callback_data=f"epv_{aid}_{pg}_{hid}"))
-            elif btn.callback_data and btn.callback_data.startswith("backcard_"):
-                # Video ostida anime kartasi allaqachon yuqorida turibdi — bu tugma
-                # kartani qayta yubormaydi, faqat shu video xabarini olib tashlaydi.
-                new_row.append(InlineKeyboardButton(
-                    text=btn.text,
-                    callback_data="backvid_" + btn.callback_data.split("_", 1)[1],
-                    style=getattr(btn, "style", None)
-                ))
+            # 'backcard_' (Orqaga qaytish) tugmasi O'ZGARTIRILMAYDI: qism bosilganda karta
+            # o'chirib yuborilgani uchun u shu video xabarini olib tashlab, kartani qayta yuboradi.
             else:
                 new_row.append(btn)
         new_rows.append(new_row)
@@ -4651,16 +4634,16 @@ async def episode_handler(call: CallbackQuery):
     page = idx // 6
     video_kb = video_episodes_keyboard(all_eps_sorted, ep["anime_id"], page, episode_id)
 
-    # Anime kartasi (rasm yoki matn) O'CHIRILMAYDI — qism videosi uning ostiga yangi
-    # xabar bo'lib keladi. Faqat avvalgi VIDEO xabari (o'zining qismlar tugmalari bilan
-    # turgan) yangisi bilan almashtiriladi, shunda chat videolar bilan to'lib ketmaydi.
+    # Qism bosilganda:
+    #  • tugma anime KARTASI (rasm yoki matn) ostidan bosilgan bo'lsa — video
+    #    yuborilgach karta O'CHIRILADI (video uning o'rnini egallaydi);
+    #  • tugma oldingi qism VIDEOSI ostidan bosilgan bo'lsa — eski video
+    #    O'CHIRILMAYDI, yangi qism uning ostiga yangi xabar bo'lib keladi.
     _m = call.message
-    if (getattr(_m, "video", None) or getattr(_m, "document", None)
-            or getattr(_m, "animation", None) or getattr(_m, "video_note", None)):
-        try:
-            await _m.delete()
-        except Exception:
-            pass
+    _is_video_msg = bool(
+        getattr(_m, "video", None) or getattr(_m, "document", None)
+        or getattr(_m, "animation", None) or getattr(_m, "video_note", None)
+    )
 
     try:
         await bot.copy_message(
@@ -4677,6 +4660,16 @@ async def episode_handler(call: CallbackQuery):
             "❌ Videoni yuborishda xatolik yuz berdi. Bu qism kanaldan o'chirilgan yoki botga ruxsat yo'q bo'lishi mumkin.\n\n"
             "Admin bilan bog'laning yoki keyinroq qayta urinib ko'ring."
         )
+        # Video yuborilmadi — karta joyida qoladi, foydalanuvchi qayta urinib ko'ra oladi.
+        return
+
+    # Video yuborildi — endi kartani olib tashlaymiz (faqat aniq karta bo'lsa;
+    # video xabari yoki eskirgan/yetib bo'lmaydigan xabarga tegmaymiz).
+    if isinstance(_m, Message) and not _is_video_msg:
+        try:
+            await _m.delete()
+        except Exception:
+            pass
 
 # ===================== RANDOM =====================
 @dp.callback_query(F.data == "random")
