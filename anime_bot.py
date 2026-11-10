@@ -4404,8 +4404,8 @@ async def download_handler(call: CallbackQuery):
     if not episodes:
         await call.answer("❌ Video hali yuklanmagan!", show_alert=True)
         return
-    # Faqat BITTA videoli film to'g'ridan-to'g'ri yuboriladi; bir nechta videosi bor
-    # bo'lsa (masalan film qismlarga bo'lingan) — serialdagidek qismlar ro'yxati chiqadi.
+    # BITTA videoli film to'g'ridan-to'g'ri yuboriladi; serial (yoki qismlarga bo'lingan
+    # film) bo'lsa — 1-qism darhol yuboriladi, qolgan qismlar video ostidagi ro'yxatdan tanlanadi.
     if anime["media_type"] == "film" and len(episodes) == 1:
         ep = episodes[0]
         if await is_episode_locked_for_user(ep, call.from_user.id):
@@ -4439,9 +4439,19 @@ async def download_handler(call: CallbackQuery):
         except Exception:
             pass
     else:
-        await call.message.edit_reply_markup(
-            reply_markup=episodes_keyboard(episodes, anime_id, page)
-        )
+        # '⬇️ Yuklab olish' bosilganda 1-qism darhol yuboriladi — xuddi '1-qism' tugmasi
+        # bosilgandek: video ostida qismlar ro'yxati chiqadi (1-qism yashil).
+        first_ep = min(episodes, key=lambda e: e["episode_number"])
+        if not await _send_episode_to_user(call, first_ep):
+            # 1-qism yuborilmadi (Premium uchun qulflangan yoki kanaldan olib bo'lmadi) —
+            # sababi foydalanuvchiga yozildi; boshqa qismni tanlay olishi uchun avvalgidek
+            # qismlar ro'yxatini ko'rsatamiz.
+            try:
+                await call.message.edit_reply_markup(
+                    reply_markup=episodes_keyboard(episodes, anime_id, page)
+                )
+            except Exception:
+                pass
 
 @dp.callback_query(F.data.startswith("backcard_"))
 async def backcard_handler(call: CallbackQuery):
@@ -4612,16 +4622,13 @@ async def locked_episode_message(episode, anime=None):
     ])
     return text, kb
 
-@dp.callback_query(F.data.regexp(r"^ep_\d+$"))
-async def episode_handler(call: CallbackQuery):
-    if not await guard_access(call):
-        return
-    await call.answer()
-    episode_id = int(call.data.split("_")[1])
-    ep = await asyncio.to_thread(db.get_episode, episode_id)
-    if not ep:
-        await call.answer("❌ Topilmadi", show_alert=True)
-        return
+async def _send_episode_to_user(call: CallbackQuery, ep) -> bool:
+    """Qismni foydalanuvchiga yuboradi: video ostida qismlar ro'yxati chiqadi (joriy qism
+    yashil), anime kartasi ostidan bosilgan bo'lsa karta o'chiriladi. 'N-qism' tugmasi ham,
+    kartadagi '⬇️ Yuklab olish' (1-qismni darhol yuboradi) ham shu funksiyadan foydalanadi.
+    True — video yuborildi. False — yuborilmadi: qism Premium uchun qulflangan yoki kanaldan
+    olib bo'lmadi (sababi foydalanuvchiga allaqachon yozilgan, karta joyida qoladi)."""
+    episode_id = ep["id"]
 
     if await is_episode_locked_for_user(ep, call.from_user.id):
         text, kb = await locked_episode_message(ep)
@@ -4629,7 +4636,7 @@ async def episode_handler(call: CallbackQuery):
             await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
         except Exception:
             pass
-        return
+        return False
 
     protect = await asyncio.to_thread(db.get_setting, "content_protect") == "1"
 
@@ -4667,7 +4674,7 @@ async def episode_handler(call: CallbackQuery):
             "Admin bilan bog'laning yoki keyinroq qayta urinib ko'ring."
         )
         # Video yuborilmadi — karta joyida qoladi, foydalanuvchi qayta urinib ko'ra oladi.
-        return
+        return False
 
     # Video yuborildi — endi kartani olib tashlaymiz (faqat aniq karta bo'lsa;
     # video xabari yoki eskirgan/yetib bo'lmaydigan xabarga tegmaymiz).
@@ -4686,6 +4693,19 @@ async def episode_handler(call: CallbackQuery):
             await _m.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
+    return True
+
+@dp.callback_query(F.data.regexp(r"^ep_\d+$"))
+async def episode_handler(call: CallbackQuery):
+    if not await guard_access(call):
+        return
+    await call.answer()
+    episode_id = int(call.data.split("_")[1])
+    ep = await asyncio.to_thread(db.get_episode, episode_id)
+    if not ep:
+        await call.answer("❌ Topilmadi", show_alert=True)
+        return
+    await _send_episode_to_user(call, ep)
 
 # ===================== RANDOM =====================
 @dp.callback_query(F.data == "random")
