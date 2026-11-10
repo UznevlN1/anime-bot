@@ -76,7 +76,7 @@ section{margin-top:28px}
 @media(min-width:700px){.ad .wrap{grid-template-columns:230px 1fr;gap:30px}.ad .po{width:230px}}
 .eps{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
 .ep{position:relative;padding:12px 0;text-align:center;border-radius:12px;background:var(--p1);border:1px solid var(--ln);font-weight:700}
-.ep.on{background:var(--tq);color:#06231f;border-color:var(--tq)}.ep.seen{color:var(--dm)}
+.ep.seen{color:var(--dm)}.ep.on{background:var(--tq);color:#06231f;border-color:var(--tq)}
 .ep.lk:after{content:"🔒";position:absolute;top:1px;right:4px;font-size:10px}
 .pl{position:relative;margin-top:12px;background:#000;aspect-ratio:16/9;max-height:76vh;border-radius:var(--r);overflow:hidden}
 .pl video{width:100%;height:100%;background:#000}
@@ -110,8 +110,6 @@ footer .soc a:hover{background:var(--p2)}
 @media(hover:hover){.c .po:after{content:"";position:absolute;inset:0;background:rgba(14,19,48,.55) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5l12 7-12 7z' fill='%232dd4bf'/%3E%3C/svg%3E") center/42px no-repeat;opacity:0;transition:opacity .2s}.c:hover .po:after{opacity:1}}
 .wg{display:grid;gap:16px}.wm{min-width:0}
 @media(min-width:1000px){.wg{grid-template-columns:230px minmax(0,1fr);align-items:start}.wg .eps{grid-template-columns:repeat(auto-fill,minmax(52px,1fr));max-height:72vh;overflow:auto;order:-1;margin-top:12px}}
-.tg{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin:4px 0 10px}
-.tg label{display:flex;align-items:center;gap:8px;color:var(--dm);font-size:13px;cursor:pointer}.tg input{accent-color:var(--tq);width:16px;height:16px}
 body.lo:before{content:"";position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.93)}body.lo .pl{z-index:41}
 .hs{display:none;flex:1;max-width:440px;align-items:center;gap:8px;background:var(--p1);border:1px solid var(--ln);border-radius:12px;padding:10px 14px;color:var(--dm)}
 @media(min-width:900px){.hs{display:flex}header .ib[data-i=search]{display:none}}
@@ -243,13 +241,13 @@ body.lo .tg{position:relative;z-index:41}
 @media(min-width:1000px){
 .wrap.wg.wide{max-width:none}
 .wg.wide{grid-template-columns:minmax(0,1fr)}
-.wg.wide .eps{order:0;max-height:none;margin-top:0;grid-template-columns:repeat(auto-fill,minmax(64px,1fr))}
+.wg.wide .eps{order:0;max-height:none;margin-top:0;grid-template-columns:repeat(auto-fill,minmax(46px,1fr))}
 .wg.wide .pl{width:min(100%,calc((100vh - 110px)*16/9));max-height:calc(100vh - 110px);margin-left:auto;margin-right:auto}
 .wg.wide .pl.fz{width:100%;max-height:none}
 }
 /* ===== Shisha dizayn (glassmorphism) ===== */
 :root{--gl:rgba(255,255,255,.07);--gb:rgba(255,255,255,.15);--gh:inset 0 1px 0 rgba(255,255,255,.2),0 14px 36px -18px rgba(0,0,0,.7)}
-header,.tabs,.box,.note,.dl,.soc a,.hs,.up{background:var(--gl);border:1px solid var(--gb);box-shadow:var(--gh);-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%)}
+header,.tabs,.box,.note,.soc a,.hs,.up{background:var(--gl);border:1px solid var(--gb);box-shadow:var(--gh);-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%)}
 header{background:rgba(14,19,48,.5);border-width:0 0 1px;box-shadow:none}
 .tabs{background:rgba(14,19,48,.55);border-width:1px 0 0}
 .box{background:rgba(26,32,78,.62)}
@@ -261,14 +259,10 @@ header{background:rgba(14,19,48,.5);border-width:0 0 1px;box-shadow:none}
 @media(hover:hover){.c .po{transition:transform .3s,box-shadow .3s}.c:hover .po{transform:translateY(-4px);box-shadow:0 22px 34px -16px rgba(0,0,0,.8),0 0 0 1px rgba(45,212,191,.45)}}
 .pc{background:linear-gradient(0deg,rgba(6,9,28,.6),rgba(6,9,28,0))}
 .pc-row{padding:2px 8px;border-radius:16px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
-.dl{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 20px;margin:14px 0;padding:14px 16px;border-radius:18px}
-.dl b{display:block;font-size:16px}.dl small{color:var(--dm)}
-.dlb{display:flex;flex-wrap:wrap;gap:8px}.dlb .btn{margin:0}
-.btn.tgb{background:linear-gradient(135deg,#2aabee,#229ed9);color:#fff;box-shadow:0 12px 24px -14px rgba(42,171,238,.9)}
 .up{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));z-index:29;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .2s,transform .2s}
 .up.on{opacity:1;transform:none;pointer-events:auto}
 @media(min-width:768px){.up{bottom:24px}}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){header,.tabs,.box,.dl,.pc-row,.up{background:rgba(22,28,69,.94)}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){header,.tabs,.box,.pc-row,.up{background:rgba(22,28,69,.94)}}
 /* ===== Zamonaviy koʻrinish: suzuvchi shisha panellar ===== */
 :root{--r:clamp(14px,1.5vw,22px)}
 html{scroll-padding-top:96px}
@@ -312,16 +306,7 @@ body.hdn header:focus-within,body.hdn .tabs:focus-within{transform:none;opacity:
 #toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));z-index:70;max-width:calc(100% - 32px);padding:12px 20px;border-radius:99px;background:rgba(26,32,78,.72);border:1px solid var(--gb);box-shadow:var(--gh);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);font-weight:600;opacity:0;transform:translate(-50%,12px);pointer-events:none;transition:opacity .2s,transform .2s}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 @media(min-width:768px){#toast{bottom:32px}}
-/* ===== v2: ixcham yuklab olish, koʻrishlar soni, Koʻrilganlar ===== */
-.dl{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:6px 10px;width:fit-content;max-width:100%;margin:10px 0;padding:5px 5px 5px 14px;border-radius:99px}
-.dl>div:first-child{display:flex;align-items:center;gap:7px;min-width:0}
-.dl>div:first-child svg{width:17px;height:17px;flex:none;color:var(--tq)}
-.dl b{display:inline;font-size:13px;font-weight:600}
-.dl small{display:none}
-.dlb{display:flex;flex-wrap:nowrap;gap:4px}
-.dlb .btn{min-height:36px;padding:0 15px;margin:0;border-radius:99px;font-size:13px;box-shadow:none}
-.dlb .btn.tgb{box-shadow:none}
-@media(max-width:420px){.dl{padding-left:5px}.dl>div:first-child b{display:none}.dl>div:first-child{padding-left:9px}}
+/* ===== v2: koʻrishlar soni, Koʻrilganlar ===== */
 .vw{display:inline-flex;align-items:center;gap:4px;color:var(--dm)}
 .vw svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2}
 .c small.sub{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -360,7 +345,7 @@ button.chip{font:inherit;font-size:13px;font-weight:600;color:var(--tx);cursor:p
 /* ===== v5: tezkor va ravon dizayn ===== */
 .skip{position:fixed;left:12px;top:-64px;z-index:100;padding:10px 16px;border-radius:12px;background:var(--tq);color:#06231f;font-weight:700}
 .skip:focus{top:max(12px,env(safe-area-inset-top))}
-.note,.dl,.hs,.soc a,.hero .meta span,.ad .meta span{-webkit-backdrop-filter:none;backdrop-filter:none}
+.note,.hs,.soc a,.hero .meta span,.ad .meta span{-webkit-backdrop-filter:none;backdrop-filter:none}
 .hero .meta span{background:rgba(14,19,48,.5)}
 .pc-row{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(14,19,48,.72)}
 .hero{border-radius:0 0 clamp(22px,3.4vw,40px) clamp(22px,3.4vw,40px)}
@@ -376,6 +361,43 @@ button.chip{font:inherit;font-size:13px;font-weight:600;color:var(--tx);cursor:p
 .ep{min-height:44px;display:grid;place-items:center;padding:0;transition:border-color .15s,background .15s}
 .ep:hover{border-color:var(--tq)}
 .chip,.btn{touch-action:manipulation}
+/* ===== v6: tomosha sahifasi — ixcham boshqaruv, yagona yuklab olish menyusi, ixcham qismlar ===== */
+.wm .ttl{font-size:clamp(18px,1.2vw + 13px,28px);line-height:1.2;margin:14px 0 4px}
+.wm .meta{margin:4px 0 8px}
+.wtb{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}
+.mini{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 13px;border-radius:99px;background:var(--gl);border:1px solid var(--gb);color:var(--tx);font-size:13px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;touch-action:manipulation;transition:background-color .15s,border-color .15s}
+.mini svg{width:16px;height:16px;flex:none}
+.mini:disabled{opacity:.45;cursor:not-allowed}
+.mini:focus-visible{outline:2px solid var(--sf);outline-offset:2px}
+select.mini{display:inline-block;height:36px;padding:0 30px 0 14px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa3d6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:13px}
+.dd{position:relative;display:inline-flex}
+.dd .mini>svg:first-child{color:var(--tq)}
+.dd .mini>svg:last-child{width:14px;height:14px;margin-left:-1px;opacity:.7;transition:transform .2s}
+.dd .mini[aria-expanded=true]{background-color:rgba(45,212,191,.16);border-color:rgba(45,212,191,.5)}
+.dd .mini[aria-expanded=true]>svg:last-child{transform:rotate(180deg)}
+.ddm{position:absolute;left:0;top:calc(100% + 6px);z-index:25;width:max-content;min-width:230px;max-width:calc(100vw - 2*var(--gx));padding:6px;border-radius:18px;background:#181e4a;border:1px solid var(--gb);box-shadow:var(--gh),0 24px 44px -18px rgba(0,0,0,.85);scroll-margin-bottom:100px}
+.ddm a{display:flex;align-items:center;gap:12px;padding:8px 14px 8px 8px;border-radius:13px}
+.ddm a:hover,.ddm a:focus-visible{background:rgba(255,255,255,.1)}
+.ddm a:focus-visible{outline:2px solid var(--sf);outline-offset:-2px}
+.ddm i{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:50%;color:#fff}
+.ddm i svg{width:18px;height:18px}
+.ddm .s1{background:linear-gradient(135deg,#34e0cb,#1fbfa8);color:#06231f}
+.ddm .s2{background:linear-gradient(135deg,#2aabee,#229ed9)}
+.ddm b{display:block;font-size:14px;font-weight:600;line-height:1.25}
+.ddm small{display:block;color:var(--dm);font-size:12px;line-height:1.3}
+.tgl{position:relative;display:inline-flex}
+.tgl input{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.tgl .mini{color:var(--dm)}
+.tgl .mini:before{content:"";flex:none;width:14px;height:14px;border-radius:50%;border:1.5px solid rgba(255,255,255,.4);background:center/9px no-repeat;transition:background-color .15s,border-color .15s}
+.tgl input:checked+.mini{background-color:rgba(45,212,191,.16);border-color:rgba(45,212,191,.55);color:var(--tx)}
+.tgl input:checked+.mini:before{border-color:var(--tq);background-color:var(--tq);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5' fill='none' stroke='%2306231f' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+.tgl input:focus-visible+.mini{outline:2px solid var(--sf);outline-offset:2px}
+@media(hover:hover){.mini:hover,.tgl input:hover+.mini{background-color:rgba(255,255,255,.13)}.mini:disabled:hover{background-color:var(--gl)}.dd .mini[aria-expanded=true]:hover,.tgl input:checked:hover+.mini{background-color:rgba(45,212,191,.24)}}
+.wg .eps{position:relative;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px;align-content:start;scrollbar-width:thin;scrollbar-color:var(--ln) transparent}
+.wg .ep{min-height:38px;border-radius:10px;font-size:13px}
+.wg .ep.lk:after{top:0;right:3px;font-size:9px}
+.wg .ep:focus-visible{outline-offset:-2px}
+@media(max-width:999.98px){.wg{gap:12px}.wg .eps{max-height:250px;overflow-y:auto}}
 </style>
 </head>
 <body>
@@ -400,8 +422,8 @@ const $=s=>document.querySelector(s),BOT='https://t.me/ANIFILM_BOT';
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ls=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const sv=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
-let TOKEN=ls('af_token',null),FAV=new Set(ls('af_fav_cache',[])),PROG=ls('af_prog',{}),A=[],CATS=[],BAN=[],demo=false,HT,HI=0,HL=[],IO=null,AM='login',FPM='',BUSY=0,PC=null;
-const I={eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',home:'<path d="M3 11l9-8 9 8v10H3z"/>',grid:'<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',heart:'<path d="M12 20s-8-5-9.5-10A5 5 0 0 1 12 6a5 5 0 0 1 9.5 4C20 15 12 20 12 20z"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-5.500 8-5.500s6.500 1.500 8 5.500"/>',play:'<path d="M7 4l13 8-13 8z" fill="currentColor"/>',pause:'<rect x="6" y="4" width="4.2" height="16" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2" fill="currentColor" stroke="none"/>',vol:'<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',mute:'<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m16 9 5 6M21 9l-5 6"/>',dl:'<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',wide:'<rect x="2" y="7" width="20" height="10" rx="2"/>',narrow:'<rect x="6" y="5" width="12" height="14" rx="2"/>',fs:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',fsx:'<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'};
+let TOKEN=ls('af_token',null),FAV=new Set(ls('af_fav_cache',[])),PROG=ls('af_prog',{}),A=[],CATS=[],BAN=[],demo=false,HT,HI=0,HL=[],IO=null,AM='login',FPM='',BUSY=0,PC=null,NV=0;
+const I={eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',home:'<path d="M3 11l9-8 9 8v10H3z"/>',grid:'<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',heart:'<path d="M12 20s-8-5-9.5-10A5 5 0 0 1 12 6a5 5 0 0 1 9.5 4C20 15 12 20 12 20z"/>',user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-5.500 8-5.500s6.500 1.500 8 5.500"/>',play:'<path d="M7 4l13 8-13 8z" fill="currentColor"/>',pause:'<rect x="6" y="4" width="4.2" height="16" rx="1.2" fill="currentColor" stroke="none"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2" fill="currentColor" stroke="none"/>',vol:'<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',mute:'<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m16 9 5 6M21 9l-5 6"/>',dl:'<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',wide:'<rect x="2" y="7" width="20" height="10" rx="2"/>',narrow:'<rect x="6" y="5" width="12" height="14" rx="2"/>',fs:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',fsx:'<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',chev:'<path d="M6 9l6 6 6-6"/>',share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',pip:'<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none"/>',fwd:'<path d="M5 5l7 7-7 7M13 5l7 7-7 7"/>',globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>',send:'<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>'};
 const ic=n=>`<svg class="i" viewBox="0 0 24 24">${I[n]}</svg>`;
 const fmt=n=>{n=+n||0;const f=(v,u)=>(v>=10?Math.round(v):Math.round(v*10)/10)+u;return n>=1e6?f(n/1e6,'M'):n>=1e3?f(n/1e3,'K'):String(n)};
 const vw=a=>a.views?`<span class="vw" title="${a.views} marta koʻrilgan">${ic('eye')}${fmt(a.views)}</span>`:'';
@@ -418,7 +440,7 @@ async function getJ(u){try{const r=await fetch(u);return r.ok?await r.json():nul
 function stop(){clearInterval(HT);clearTimeout(HT);document.onkeydown=null;if(PC){PC.abort();PC=null}document.body.classList.remove('lo');if(IO){IO.disconnect();IO=null}document.title='AniFilm.uz — Oʻzbek tilidagi animelar'}
 function nav(u){history.replaceState({y:scrollY},'');history.pushState(null,'',u);go()}
 function rnd(){if(A.length)nav('/anime/'+A[Math.floor(Math.random()*A.length)].id)}
-function go(){const p=location.pathname,s=p.split('/').filter(Boolean),P=new URLSearchParams(location.search),k=s[0]==='anime'||s[0]==='watch'?'catalog':(s[0]||'home');
+function go(){NV++;const p=location.pathname,s=p.split('/').filter(Boolean),P=new URLSearchParams(location.search),k=s[0]==='anime'||s[0]==='watch'?'catalog':(s[0]||'home');
 document.querySelectorAll('[data-t]').forEach(e=>{const on=e.dataset.t===k;e.classList.toggle('on',on);on?e.setAttribute('aria-current','page'):e.removeAttribute('aria-current')});stop();scrollTo(0,0);$('link[rel=canonical]').href='https://www.anifilm.uz'+p;
 const RT={catalog:()=>catalog(P),anime:()=>animePage(parseInt(s[1])),watch:()=>watch(parseInt(s[1]),parseInt(s[2])),favorites:favs,watched:watched,'reset-password':resetPage};(Object.prototype.hasOwnProperty.call(RT,s[0])?RT[s[0]]:home)()}
 /* ---------- bosh sahifa ---------- */
@@ -453,7 +475,7 @@ $('#app').innerHTML=`<div class="wrap"><h1 class="disp ttl">${q?'Qidiruv: '+esc(
 let n=0;const more=()=>{$('#cg').insertAdjacentHTML('beforeend',L.slice(n,n+24).map(a=>card(a)).join(''));n+=24;if(n>=L.length&&IO){IO.disconnect();IO=null}};
 more();if(n<L.length){IO=new IntersectionObserver(e=>{if(e[0].isIntersecting)more()},{rootMargin:'500px'});IO.observe($('#sen'))}}
 /* ---------- anime sahifasi ---------- */
-async function animePage(id){const ap=$('#app');ap.innerHTML=SKH;const d=await getJ('/api/public/animes/'+id);
+async function animePage(id){const ap=$('#app'),nv=NV;ap.innerHTML=SKH;const d=await getJ('/api/public/animes/'+id);if(nv!==NV)return;
 const a=Object.assign({},A.find(x=>x.id==id)||{},d||{});if(!a.title){ap.innerHTML=empty('Anime topilmadi','<a class="btn" href="/catalog">Katalogga qaytish</a>');return}
 const eps=(d&&d.episodes)||[],p=PROG[id],f=a.media_type==='film',seen=(p&&p.s)||[],res=p&&eps.find(e=>e.id==p.e),tgt=res||eps.find(e=>!e.locked)||eps[0],
 gl=(a.genre||'').split(',').map(x=>x.trim()).filter(Boolean),sim=A.filter(x=>x.id!=a.id&&a.category&&(x.category||'').trim()===(a.category||'').trim()).slice(0,12);
@@ -462,7 +484,14 @@ ap.innerHTML=`<div class="ad"><div class="bgb" style="${a.photo_id?`background-i
 function share(){const u=location.href;if(navigator.share)navigator.share({title:document.title,url:u}).catch(()=>{});else if(navigator.clipboard)navigator.clipboard.writeText(u).then(()=>toast('Havola nusxalandi'),()=>toast('Nusxalab boʻlmadi'));else toast('Nusxalab boʻlmadi')}
 function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.setAttribute('role','status');document.body.appendChild(t)}t.textContent=m;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),2200)}
 /* ---------- pleyer boshqaruvi: koʻrilgan joy chizigʻi, kengaytirish, yuklab olish ---------- */
-function dlp(e,d){if(e.locked)return'';const t=d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism',nm=esc((t||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');return`<div class="dl" role="group" aria-label="Yuklab olish"><div>${ic('dl')}<b>Yuklab olish</b></div><div class="dlb">${d.can_download===false?'':`<a class="btn" href="/stream/${e.id}?site=1&amp;dl=1" download="${nm}" title="${esc(t)}">Saytdan</a>`}<a class="btn tgb" href="${BOT}?start=ep_${e.id}" target="_blank" rel="noopener">Telegram</a></div></div>`}
+function dlp(e,d){if(e.locked)return'';const t=d.media_type==='film'?d.title:d.title+' - '+e.n+'-qism',nm=esc((t||'anime').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim()+'.mp4');return`<div class="dd"><button type="button" class="mini" id="ddb" aria-expanded="false" aria-controls="ddm" onclick="ddTog()">${ic('dl')}Yuklab olish${ic('chev')}</button><div class="ddm" id="ddm" hidden>${d.can_download===false?'':`<a href="/stream/${e.id}?site=1&amp;dl=1" download="${nm}" title="${esc(t)}"><i class="s1">${ic('globe')}</i><span><b>Saytdan</b><small>MP4 fayl</small></span></a>`}<a href="${BOT}?start=ep_${e.id}" target="_blank" rel="noopener"><i class="s2">${ic('send')}</i><span><b>Telegram</b><small>Bot orqali</small></span></a></div></div>`}
+/* yuklab olish menyusi: tugma bilan ochiladi; tashqariga bosish, Escape yoki fokus chiqib ketishi bilan yopiladi */
+const ddB=()=>document.getElementById('ddb'),ddM=()=>document.getElementById('ddm'),inDD=t=>!!(t&&t.closest&&t.closest('.dd'));
+function ddClose(f){const b=ddB(),m=ddM();if(!b||!m||m.hidden)return;m.hidden=true;b.setAttribute('aria-expanded','false');if(f)b.focus()}
+function ddTog(){const b=ddB(),m=ddM();if(!b||!m)return;const o=m.hidden;m.hidden=!o;b.setAttribute('aria-expanded',o?'true':'false');if(o)m.scrollIntoView({block:'nearest'})}
+document.addEventListener('pointerdown',ev=>{const m=ddM();if(m&&!m.hidden&&!inDD(ev.target))ddClose()});
+document.addEventListener('focusin',ev=>{const m=ddM();if(m&&!m.hidden&&!inDD(ev.target))ddClose()});
+document.addEventListener('click',ev=>{const m=ddM();if(m&&!m.hidden&&ev.target.closest&&ev.target.closest('.ddm a'))setTimeout(ddClose,0)});
 const mmss=t=>{t=isFinite(t)&&t>0?Math.floor(t):0;const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
 const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
 const ctl=()=>{
@@ -523,13 +552,16 @@ vol();wide(!!ls('af_wide',false));st();paint();wait();fz();
 const p0=v.play();if(p0&&p0.then)p0.then(()=>{init=false;wait()},()=>{init=false;wait();st();show()});
 return{tog,fs:fsTog,wide:wideTog,show}}
 /* ---------- tomosha sahifasi ---------- */
-async function watch(aid,eid){const ap=$('#app');ap.innerHTML=SKH;const d=await getJ('/api/public/animes/'+aid),eps=(d&&d.episodes)||[];
+async function watch(aid,eid){const ap=$('#app'),nv=NV;ap.innerHTML=SKH;const d=await getJ('/api/public/animes/'+aid);if(nv!==NV)return;
+if(!d){ap.innerHTML=empty('Anime yuklanmadi','Server bilan aloqa yoʻq yoki sahifa topilmadi. Internetni tekshirib, qayta urinib koʻring.<br><br><button class="btn" onclick="go()">Qayta urinish</button><a class="btn g" href="/catalog">Katalog</a>');return}
+const eps=d.episodes||[];
 if(!eps.length){ap.innerHTML=empty('Bu animening qismlari saytda hali mavjud emas',`<a class="btn" href="${BOT}?start=anime_${aid}">Botda koʻrish</a>`);return}
 const p=PROG[aid];let i=eps.findIndex(e=>e.id==eid);if(i<0){i=p?eps.findIndex(e=>e.id==p.e):-1;if(i<0)i=Math.max(0,eps.findIndex(e=>!e.locked))}
-const e=eps[i],pv=eps[i-1],nx=eps[i+1],seen=(p&&p.s)||[];
+const e=eps[i],nx=eps[i+1],seen=(p&&p.s)||[];
 const lock=`<div class="ov"><div><h2 class="disp">Premium qism</h2><p class="dm">Bu qism hozircha faqat Premium foydalanuvchilar uchun.</p><br><a class="btn" href="${BOT}?start=anime_${aid}">Botda ochish</a></div></div>`;
-ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>${ctl(e,d)}`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span>${d.views?`<span class="vwn" data-v="${d.views}">${fmt(d.views)} marta koʻrilgan</span>`:''}<a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></div><div class="tg"><label><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}>Avto keyingi qism</label><label><input type="checkbox" id="tl">Chiroqni oʻchirish</label><button class="btn g" onclick="share()" style="margin:0">Ulashish</button>${document.pictureInPictureEnabled?'<button class="btn g" onclick="pip()" style="margin:0">Kichik oyna</button>':''}</div>${dlp(e,d)}<div class="bar">${pv?`<a class="btn g" href="/watch/${aid}/${pv.id}">‹ Oldingi</a>`:''}${nx?`<a class="btn" href="/watch/${aid}/${nx.id}">Keyingi ›</a>`:''}<select id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button class="btn g" id="sk">+85 soniya</button></div></div><div class="eps">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}">${x.n}</a>`).join('')}</div></div>`;
+ap.innerHTML=`<div class="wrap wg"><div class="wm"><div class="pl" id="pl">${e.locked?lock:`<video id="v" playsinline autoplay preload="metadata" src="/stream/${e.id}?site=1"></video>${ctl(e,d)}`}</div><h1 class="disp ttl">${esc(d.title)}</h1><div class="meta"><span>${e.n}-qism</span>${d.views?`<span class="vwn" data-v="${d.views}">${fmt(d.views)} marta koʻrilgan</span>`:''}<span><a href="/anime/${aid}" style="color:var(--tq)">Anime haqida</a></span></div><div class="wtb tg">${dlp(e,d)}<button type="button" class="mini" onclick="share()" aria-label="Ulashish" title="Ulashish">${ic('share')}</button>${!e.locked&&document.pictureInPictureEnabled?`<button type="button" class="mini" onclick="pip()">${ic('pip')}Kichik oyna</button>`:''}<select class="mini" id="sp" aria-label="Tezlik">${[.75,1,1.25,1.5,2].map(x=>`<option value="${x}">${x}x</option>`).join('')}</select><button type="button" class="mini" id="sk" title="85 soniya oldinga">${ic('fwd')}+85 soniya</button><label class="tgl"><input type="checkbox" id="ta"${ls('af_auto',true)?' checked':''}><span class="mini">Avto keyingi qism</span></label><label class="tgl"><input type="checkbox" id="tl"><span class="mini">Chiroqni oʻchirish</span></label></div></div><nav class="eps" aria-label="Qismlar">${eps.map(x=>`<a class="ep${x.id==e.id?' on':''}${seen.includes(x.id)?' seen':''}${x.locked?' lk':''}" href="/watch/${aid}/${x.id}"${x.id==e.id?' aria-current="page"':''} aria-label="${x.n}-qism${x.locked?' (Premium)':''}">${x.n}</a>`).join('')}</nav></div>`;
 document.title=`${d.title} · ${e.n}-qism — AniFilm.uz`;
+{const cu=document.querySelector('.wg .eps .ep.on'),bx=cu&&cu.parentNode;if(bx&&bx.scrollHeight>bx.clientHeight+1)bx.scrollTop=cu.offsetTop-(bx.clientHeight-cu.offsetHeight)/2}
 if(TOKEN)api('/api/site/history',{method:'POST',body:JSON.stringify({anime_id:Number(aid)})}).catch(()=>{});
 const v=$('#v');if(!v){$('#sp').disabled=true;$('#sk').disabled=true;return}v.addEventListener('playing',()=>countView(aid),{once:true});
 let P=null;try{P=pctl(v,$('#pl'),$('.wg'))}catch(x){console.error(x);v.controls=true;document.querySelectorAll('#pl .pc,#pl .pc-big,#pl .pc-spin,#pl .pc-mini').forEach(n=>n.remove())}
@@ -581,8 +613,8 @@ $('#app').innerHTML=`<div class="wrap pad"><div class="box" style="margin:0 auto
 function logout(){TOKEN=null;try{localStorage.removeItem('af_token')}catch(e){}FAV=new Set();sv('af_fav_cache',[])}
 async function loadFav(){if(!TOKEN)return;try{const r=await api('/api/site/favorites');if(r.ok){FAV=new Set((await r.json()).map(a=>a.id));sv('af_fav_cache',[...FAV])}}catch(e){}}
 async function toggleFav(id,btn){if(!TOKEN){auth();return}try{const r=await api('/api/site/favorite',{method:'POST',body:JSON.stringify({anime_id:id})});if(r.ok){const d=await r.json();d.active?FAV.add(id):FAV.delete(id);sv('af_fav_cache',[...FAV]);if(btn)btn.classList.toggle('on',d.active)}}catch(e){}}
-async function favs(){const ap=$('#app');if(!TOKEN){ap.innerHTML=empty('Sevimlilarni koʻrish uchun hisobingizga kiring','<button class="btn" onclick="auth()">Kirish</button>');return}
-ap.innerHTML=SKH;const L=(await getAuth('/api/site/favorites'))||[];
+async function favs(){const ap=$('#app'),nv=NV;if(!TOKEN){ap.innerHTML=empty('Sevimlilarni koʻrish uchun hisobingizga kiring','<button class="btn" onclick="auth()">Kirish</button>');return}
+ap.innerHTML=SKH;const L=(await getAuth('/api/site/favorites'))||[];if(nv!==NV)return;
 ap.innerHTML=`<div class="wrap"><h1 class="disp ttl">Sevimlilar</h1>${L.length?`<div class="grid">${L.map(a=>card(a)).join('')}</div>`:'<p class="dm">Hali sevimlilar yoʻq. Anime sahifasidagi «Sevimli» tugmasini bosing.</p>'}</div>`}
 function watched(){const ap=$('#app'),L=Object.entries(PROG).map(([id,p])=>({a:A.find(x=>x.id==id),p})).filter(x=>x.a).sort((x,y)=>(y.p.u||0)-(x.p.u||0));
 document.title='Koʻrilganlar — AniFilm.uz';
@@ -592,8 +624,8 @@ async function getAuth(u){try{const r=await api(u);return r.ok?await r.json():nu
 /* ---------- ishga tushirish ---------- */
 document.querySelectorAll('[data-i]').forEach(e=>{e.innerHTML=ic(e.dataset.i)+(e.dataset.l?`<span>${e.dataset.l}</span>`:'')});
 addEventListener('popstate',()=>{const y=(history.state&&history.state.y)|0;go();if(y)requestAnimationFrame(()=>scrollTo(0,y))});
-addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if($('#srch').classList.contains('on'))S(0);if($('#au').classList.contains('on'))authClose()});
-document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('//'))return;e.preventDefault();nav(a.getAttribute('href'))});
+addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if($('#srch').classList.contains('on'))S(0);if($('#au').classList.contains('on'))authClose();ddClose(1)});
+document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href^="/"]');if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target||a.hasAttribute('download')||a.getAttribute('href').startsWith('//'))return;e.preventDefault();if(a.classList.contains('ep')&&a.getAttribute('href')===location.pathname){scrollTo({top:0,behavior:'smooth'});return}nav(a.getAttribute('href'))});
 /* ---------- yangi: skeleton, oxirgi qidiruvlar, kichik oyna, tepaga ---------- */
 const SKH='<div class="wrap pad" role="status" aria-label="Yuklanmoqda"><div class="sk" style="height:40vh;max-height:420px"></div><div class="sk" style="height:24px;width:55%;margin-top:18px"></div><div class="sk" style="height:14px;width:85%;margin-top:12px"></div></div>';
 function rsGet(){try{const v=JSON.parse(localStorage.getItem('af_rs')||'[]');return Array.isArray(v)?v.slice(0,6):[]}catch(e){return[]}}
