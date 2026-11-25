@@ -11301,6 +11301,80 @@ async def serve_robots(request):
     except Exception:
         return web.Response(status=404)
 
+async def serve_ads_txt(request):
+    """Google AdSense ads.txt — saytning ildizida (/ads.txt) ochiq bo'lishi shart."""
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(base_dir, "ads.txt"), "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        content = "google.com, pub-3850261232725025, DIRECT, f08c47fec0942fa0\n"
+    return web.Response(text=content, content_type="text/plain", charset="utf-8")
+
+_PRIVACY_HTML = """<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1330">
+<meta name="color-scheme" content="dark">
+<title>Maxfiylik siyosati — AniFilm.uz</title>
+<meta name="description" content="AniFilm.uz maxfiylik siyosati: qanday maʼlumotlar yigʻiladi, cookie va Google AdSense reklamalari haqida.">
+<link rel="canonical" href="https://www.anifilm.uz/privacy">
+<link rel="icon" href="/favicon.ico">
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0e1330;color:#e7e9f5;font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:calc(20px + env(safe-area-inset-top,0px)) 18px calc(40px + env(safe-area-inset-bottom,0px))}
+a{color:#5eead4}
+.home{display:inline-block;margin-bottom:10px;font-weight:700;text-decoration:none}
+h1{font-size:28px;line-height:1.25;margin:6px 0 4px}
+h2{font-size:19px;margin:28px 0 8px}
+.d{color:#9aa3c7;font-size:14px;margin:0 0 18px}
+ul{padding-left:20px}
+li{margin:8px 0}
+</style>
+</head>
+<body>
+<main>
+<a class="home" href="/">← AniFilm.uz</a>
+<h1>Maxfiylik siyosati</h1>
+<p class="d">Oxirgi yangilanish: 2026-yil 25-noyabr</p>
+<p>AniFilm.uz — oʻzbek tilidagi animelar sayti. Bu sahifada saytdan foydalanganda qanday maʼlumotlar yigʻilishi va ulardan qanday foydalanilishi tushuntirilgan. Saytdan foydalanish bilan siz ushbu siyosatga rozilik bildirasiz.</p>
+
+<h2>1. Qanday maʼlumotlar yigʻiladi</h2>
+<ul>
+<li><b>Hisob:</b> roʻyxatdan oʻtganingizda email manzil va parol. Parol shifrlangan (hash) koʻrinishda saqlanadi, biz uni koʻra olmaymiz.</li>
+<li><b>Faoliyat:</b> sevimlilar, koʻrilgan qismlar va videoni qayergacha koʻrganingiz hisobingizga bogʻlab saqlanadi.</li>
+<li><b>Brauzer xotirasi:</b> kirish tokeni, pleyer sozlamalari (ovoz, tezlik, keng ekran) va oxirgi qidiruvlar qurilmangizda saqlanadi.</li>
+<li><b>Texnik maʼlumot:</b> hosting provayderi xavfsizlik va barqarorlik uchun IP-manzil kabi oddiy server jurnallarini yuritishi mumkin. Anime sahifalarining umumiy koʻrishlar soni hisoblanadi.</li>
+</ul>
+
+<h2>2. Maʼlumotlardan foydalanish</h2>
+<p>Maʼlumotlar hisobingizga kirish, parolni tiklash (email orqali xat yuborish), sevimlilar va koʻrish tarixini saqlash hamda saytni yaxshilash uchun ishlatiladi. Maʼlumotlaringiz sotilmaydi.</p>
+
+<h2>3. Reklama va cookie (Google AdSense)</h2>
+<p>Saytda Google AdSense reklamalari koʻrsatilishi mumkin. Google va uning hamkorlari reklamani koʻrsatish va moslashtirish uchun cookie fayllaridan foydalanadi. Batafsil: <a href="https://policies.google.com/technologies/ads" target="_blank" rel="noopener">Google reklama siyosati</a>. Shaxsiylashtirilgan reklamani <a href="https://adssettings.google.com" target="_blank" rel="noopener">Google reklama sozlamalari</a> orqali yoki <a href="https://optout.aboutads.info" target="_blank" rel="noopener">aboutads.info</a> saytida oʻchirib qoʻyishingiz mumkin.</p>
+
+<h2>4. Telegram bot</h2>
+<p>@ANIFILM_BOT orqali foydalansangiz, Telegram profilingiz maʼlumotlari (ID, ism, username) botning ishlashi uchun saqlanishi mumkin.</p>
+
+<h2>5. Yosh chegarasi</h2>
+<p>Sayt 16 yoshdan oshganlar uchun moʻljallangan.</p>
+
+<h2>6. Maʼlumotlarni oʻchirish va aloqa</h2>
+<p>Hisobingiz va maʼlumotlaringizni oʻchirishni soʻrash yoki savol berish uchun Telegram orqali yozing: <a href="https://t.me/Uznevl" target="_blank" rel="noopener">@Uznevl</a>. Siyosat vaqti-vaqti bilan yangilanishi mumkin, yangi versiya shu sahifada eʼlon qilinadi.</p>
+</main>
+</body>
+</html>
+"""
+
+async def serve_privacy(request):
+    """/privacy — Maxfiylik siyosati (AdSense va foydalanuvchilar uchun)."""
+    return web.Response(text=_PRIVACY_HTML, content_type="text/html", charset="utf-8")
+
 async def serve_site_page(request):
     """/anime/{id}, /watch/{id}/..., /catalog, /favorites — bitta sahifali sayt (landing.html).
     <title>, description, canonical va Open Graph teglari ALMASHTIRILADI (qo'shilmaydi —
@@ -12895,6 +12969,8 @@ async def start_web_server():
     app.router.add_get("/logo.png", serve_logo)
     app.router.add_get("/sitemap.xml", serve_sitemap)
     app.router.add_get("/robots.txt", serve_robots)
+    app.router.add_get("/ads.txt", serve_ads_txt)
+    app.router.add_get("/privacy", serve_privacy)
     app.router.add_get("/debug", debug_path)
     app.router.add_get("/webapp", serve_webapp_index)
     app.router.add_get("/webapp/", serve_webapp_index)
